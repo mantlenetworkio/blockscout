@@ -29,9 +29,28 @@ export class L1SentMessageEvents {
   @Column({ type: 'numeric', precision: 100 })
   gas_limit: number;
 
+  @Column({ type: 'bytea' })
+  l1_token: string;
+
+  @Column({ type: 'bytea' })
+  l2_token: string;
+
+  @Column({ type: 'bytea' })
+  from: string;
+
+  @Column({ type: 'bytea' })
+  to: string;
+
+  @Column({ type: 'numeric', precision: 100 })
+  value: string;
+
+  @Column({ type: 'int8' })
+  type: number;
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   inserted_at: Date;
 
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   updated_at: Date;
 }
+
