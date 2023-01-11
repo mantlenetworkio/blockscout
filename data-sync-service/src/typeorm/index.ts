@@ -7,6 +7,7 @@ import { L2RelayedMessageEvents } from './l2_relayed_message_events.entity';
 import { L2SentMessageEvents } from './l2_sent_message_events.entity';
 import { StateBatches } from './state_batches.entity';
 import { TxnBatches } from './txn_batches.entity';
+import { Tokens } from "./tokens.entity";
 
 const entities = [
   L1ToL2,
@@ -17,7 +18,8 @@ const entities = [
   L2SentMessageEvents,
   StateBatches,
   TxnBatches,
-  Transactions
+  Transactions,
+  Tokens,
 ];
 
 export {
@@ -29,6 +31,7 @@ export {
   L2SentMessageEvents,
   StateBatches,
   TxnBatches,
-  Transactions
+  Transactions,
+  Tokens,
 };
 export default entities;

@@ -96,6 +96,8 @@ export class L2IngestionService {
         signature,
       } = item;
       const funName = message.slice(0, 10);
+      let name = '';
+      let symbol = '';
       let l1_token = '0x0000000000000000000000000000000000000000';
       let l2_token = '0x0000000000000000000000000000000000000000';
       let from = '0x0000000000000000000000000000000000000000';
@@ -106,29 +108,44 @@ export class L2IngestionService {
           'finalizeETHWithdrawal',
           message,
         );
+        name = 'ETH';
+        symbol = 'ETH';
         from = decodeMsg._from;
         to = decodeMsg._to;
         value = this.web3.utils.hexToNumberString(decodeMsg._amount._hex);
+        this.logger.log(
+          `finalizeETHWithdrawal: from: [${from}], to: [${to}], value: [${value}]`,
+        );
       }
       if (funName === '0xa9f9e675') {
         const decodeMsg = iface.decodeFunctionData(
           'finalizeERC20Withdrawal',
           message,
         );
+        name = 'ERC20';
+        symbol = 'ERC20';
         l1_token = decodeMsg._l1Token;
         l2_token = decodeMsg._l2Token;
         from = decodeMsg._from;
         to = decodeMsg._to;
         value = this.web3.utils.hexToNumberString(decodeMsg._amount._hex);
+        this.logger.log(
+          `finalizeERC20Withdrawal: l1_token: [${l1_token}], l2_token: [${l2_token}], from: [${from}], to: [${to}], value: [${value}]`,
+        );
       }
       if (funName === '0x839f0ec6') {
         const decodeMsg = iface.decodeFunctionData(
           'finalizeBitWithdrawal',
           message,
         );
+        name = 'BIT';
+        symbol = 'BIT';
         from = decodeMsg._from;
         to = decodeMsg._to;
         value = this.web3.utils.hexToNumberString(decodeMsg._amount._hex);
+        this.logger.log(
+          `finalizeBitWithdrawal: from: [${from}], to: [${to}], value: [${value}]`,
+        );
       }
       const { timestamp } = await this.web3.eth.getBlock(blockNumber);
       const dataSource = getConnection();
@@ -148,6 +165,8 @@ export class L2IngestionService {
             gas_limit: gasLimit,
             signature,
             timestamp: new Date(Number(timestamp) * 1000).toISOString(),
+            name: name,
+            symbol: symbol,
             l1_token: l1_token,
             l2_token: l2_token,
             from: from,
@@ -175,6 +194,11 @@ export class L2IngestionService {
           timestamp: new Date(Number(timestamp) * 1000).toISOString(),
           status: 'Waiting',
           gas_limit: gasLimit,
+          l1_token: l1_token,
+          l2_token: l2_token,
+          from: from,
+          to: to,
+          value: value,
           inserted_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         });

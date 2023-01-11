@@ -35,6 +35,27 @@ export class L2ToL1 {
   @Column({ type: 'varchar', length: 255 })
   status: string;
 
+  @Column({ type: 'varchar' })
+  name: string;
+
+  @Column({ type: 'varchar' })
+  symbol: string;
+
+  @Column({ type: 'bytea' })
+  l1_token: string;
+
+  @Column({ type: 'bytea' })
+  l2_token: string;
+
+  @Column({ type: 'bytea' })
+  from: string;
+
+  @Column({ type: 'bytea' })
+  to: string;
+
+  @Column({ type: 'numeric', precision: 100 })
+  value: string;
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   inserted_at: Date;
 

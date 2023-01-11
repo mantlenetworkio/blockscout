@@ -35,6 +35,30 @@ export class L1ToL2 {
   @Column({ type: 'boolean' })
   is_merge: boolean;
 
+  @Column({ type: 'varchar' })
+  name: string;
+
+  @Column({ type: 'varchar' })
+  symbol: string;
+
+  @Column({ type: 'bytea' })
+  l1_token: string;
+
+  @Column({ type: 'bytea' })
+  l2_token: string;
+
+  @Column({ type: 'bytea' })
+  from: string;
+
+  @Column({ type: 'bytea' })
+  to: string;
+
+  @Column({ type: 'numeric', precision: 100 })
+  value: string;
+
+  @Column({ type: 'int8' })
+  type: number;
+
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   inserted_at: Date;
 

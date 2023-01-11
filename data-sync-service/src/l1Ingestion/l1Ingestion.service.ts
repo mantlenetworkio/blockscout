@@ -11,6 +11,7 @@ import {
   StateBatches,
   TxnBatches,
   Transactions,
+  Tokens,
 } from 'src/typeorm';
 import {
   EntityManager,
@@ -54,6 +55,8 @@ export class L1IngestionService {
     private readonly txnL1ToL2Repository: Repository<L1ToL2>,
     @InjectRepository(Transactions)
     private readonly transactions: Repository<Transactions>,
+    @InjectRepository(Tokens)
+    private readonly tokensRepository: Repository<Tokens>,
     private readonly l2IngestionService: L2IngestionService,
   ) {
     this.entityManager = getManager();
@@ -295,6 +298,9 @@ export class L1IngestionService {
         to = decodeMsg._to;
         value = this.web3.utils.hexToNumberString(decodeMsg._amount._hex);
         type = 1;
+        this.logger.log(
+          `l1_token: [${l1_token}], l2_token: [${l2_token}], from: [${from}], to: [${to}], value: [${value}]`,
+        );
       } else if (funName === '0x0fae75d9') {
         const decodeMsg = iface.decodeFunctionData('claimReward', message);
         type = 0;
@@ -344,6 +350,11 @@ export class L1IngestionService {
           target: sender,
           gas_limit: gasLimit,
           status: 'Ready for Relay',
+          l1_token: l1_token,
+          l2_token: l2_token,
+          from: from,
+          to: to,
+          value: value,
           inserted_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         });
@@ -433,6 +444,10 @@ export class L1IngestionService {
           .set({ is_merge: true })
           .where('tx_hash = :tx_hash', { tx_hash: unMergeTxList[i].tx_hash })
           .execute();
+        await queryRunner.manager.query(
+          `UPDATE transactions SET l1_origin_tx_hash=$1 WHERE hash=decode($2, 'hex');`,
+          [unMergeTxList[i].tx_hash, l1ToL2Transaction.l2_hash],
+        );
         // commit transaction now:
         await queryRunner.commitTransaction();
       } catch (err) {
@@ -462,6 +477,11 @@ export class L1IngestionService {
         .where('block <= :block', { block: totalElements })
         .andWhere('status = :status', { status: 'Waiting' })
         .execute();
+      // update transactions to Ready for Relay
+      await queryRunner.manager.query(
+        `UPDATE transactions SET l1l2_status=$1 WHERE l1l2_status=$2;`,
+        [1, 0],
+      );
       await queryRunner.commitTransaction();
     } catch (error) {
       await queryRunner.rollbackTransaction();
@@ -498,6 +518,11 @@ export class L1IngestionService {
           .set({ is_merge: true })
           .where('tx_hash = :tx_hash', { tx_hash: unMergeTxList[i].tx_hash })
           .execute();
+        // update transactions to Ready for Relay
+        await queryRunner.manager.query(
+          `UPDATE transactions SET l1_origin_tx_hash=$1 WHERE hash=decode($2, 'hex');`,
+          [unMergeTxList[i].tx_hash, l2ToL1Transaction.l2_hash],
+        );
         await queryRunner.commitTransaction();
       } catch (error) {
         await queryRunner.rollbackTransaction();
@@ -606,6 +631,119 @@ export class L1IngestionService {
       });
     }
     return result;
+  }
+  async getL1L2Transaction(address, page, page_size, type, order) {
+    const result = [];
+    const new_page = page - 1;
+    if (type == 1) {
+      const deposit = await this.txnL1ToL2Repository.find({
+        // where: { from: address },
+        order: { queue_index: order },
+        skip: new_page,
+        take: page_size,
+      });
+      for (const item of deposit) {
+        let l1_hash = '';
+        let l2_hash = '';
+        if (item.hash != null) {
+          l1_hash = Buffer.from(item.hash).toString();
+        }
+        if (item.l2_hash != null) {
+          l2_hash = Buffer.from(item.l2_hash).toString();
+        }
+        let token_name = '';
+        let token_symbol = '';
+        if (item.l2_token != '0x0000000000000000000000000000000000000000') {
+          const queryToken = await this.tokensRepository.findOne({
+            where: {
+              contract_address_hash: Buffer.from(item.l2_token)
+                .toString()
+                .replace('0x', '\\x'),
+            },
+          });
+          if (queryToken != null) {
+            token_name = queryToken.name;
+            token_symbol = queryToken.symbol;
+          } else {
+            token_name = item.name;
+            token_symbol = item.symbol;
+          }
+        } else {
+          token_name = item.name;
+          token_symbol = item.symbol;
+        }
+        result.push({
+          l1_hash: l1_hash,
+          l2_hash: l2_hash,
+          block: item.block,
+          name: token_name,
+          status: item.status,
+          symbol: token_symbol,
+          l1_token: Buffer.from(item.l1_token).toString(),
+          l2_token: Buffer.from(item.l2_token).toString(),
+          from: Buffer.from(item.from).toString(),
+          to: Buffer.from(item.to).toString(),
+          value: item.value,
+        });
+      }
+    }
+    if (type == 2) {
+      const withdraw = await this.txnL2ToL1Repository.find({
+        // where: { from: address },
+        order: { msg_nonce: order },
+        skip: new_page,
+        take: page_size,
+      });
+      for (const item of withdraw) {
+        let l1_hash = '';
+        let l2_hash = '';
+        if (item.hash != null) {
+          l1_hash = Buffer.from(item.hash).toString();
+        }
+        if (item.l2_hash != null) {
+          l2_hash = Buffer.from(item.l2_hash).toString();
+        }
+        let token_name = '';
+        let token_symbol = '';
+        if (item.l2_token != '0x0000000000000000000000000000000000000000') {
+          const queryToken = await this.tokensRepository.findOne({
+            where: {
+              contract_address_hash: Buffer.from(item.l2_token)
+                .toString()
+                .replace('0x', '\\x'),
+            },
+          });
+          if (queryToken != null) {
+            token_name = queryToken.name;
+            token_symbol = queryToken.symbol;
+          } else {
+            token_name = item.name;
+            token_symbol = item.symbol;
+          }
+        } else {
+          token_name = item.name;
+          token_symbol = item.symbol;
+        }
+        result.push({
+          l1_hash: l1_hash,
+          l2_hash: l2_hash,
+          block: item.block,
+          name: token_name,
+          status: item.status,
+          symbol: token_symbol,
+          l1_token: Buffer.from(item.l1_token).toString(),
+          l2_token: Buffer.from(item.l2_token).toString(),
+          from: Buffer.from(item.from).toString(),
+          to: Buffer.from(item.to).toString(),
+          value: item.value,
+        });
+      }
+    }
+    return {
+      ok: true,
+      code: 2000,
+      result: result,
+    };
   }
   async updateL1OriginTxHashInTransactions() {
     const unMergeTxList = await this.txnL1ToL2Repository.find({

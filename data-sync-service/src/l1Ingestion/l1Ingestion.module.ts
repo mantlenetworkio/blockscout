@@ -11,6 +11,7 @@ import {
   L2ToL1,
   L1ToL2,
   Transactions,
+  Tokens,
 } from 'src/typeorm';
 
 @Module({
@@ -24,6 +25,7 @@ import {
       L2ToL1,
       L1ToL2,
       Transactions,
+      Tokens,
     ]),
   ],
   controllers: [L1IngestionController],
