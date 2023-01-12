@@ -172,6 +172,24 @@ defmodule Explorer.Chain do
     end
   end
 
+
+  @doc """
+  Estimated count of `t:Explorer.Chain.SmartContracts.t/0`.
+
+  Estimated count of contract addresses.
+  """
+  @spec contracts_estimated_count() :: non_neg_integer()
+  def contracts_estimated_count do
+    cached_value = ContractCounter.fetch()
+
+    if is_nil(cached_value) do
+     %Postgrex.Result{rows: [[count]]} = Repo.query!("SELECT COUNT(*) FROM smart_contracts;")
+      count
+    else
+      cached_value
+    end
+  end
+
   @doc """
   Counts the number of addresses with fetched coin balance > 0.
 
@@ -194,6 +212,20 @@ defmodule Explorer.Chain do
   def count_addresses do
     Repo.one(
       Address.count(),
+      timeout: :infinity
+    )
+  end
+
+
+  @doc """
+  Counts the number of all contract addresses.
+
+  This function should be used with caution. In larger databases, it may take a
+  while to have the return back.
+  """
+  def count_contracts do
+    Repo.one(
+      SmartContract.count(),
       timeout: :infinity
     )
   end

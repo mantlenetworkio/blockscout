@@ -77,6 +77,7 @@ defmodule Explorer.Application do
       configure(Explorer.Chain.Events.Listener),
       configure(Explorer.Counters.AddressesWithBalanceCounter),
       configure(Explorer.Counters.AddressesCounter),
+      configure(Explorer.Counters.ContractCounter),
       configure(Explorer.Counters.AddressTransactionsCounter),
       configure(Explorer.Counters.AddressTokenTransfersCounter),
       configure(Explorer.Counters.AddressTransactionsGasUsageCounter),

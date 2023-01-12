@@ -46,6 +46,11 @@ config :explorer, Explorer.Counters.AddressesCounter,
   enable_consolidation: true,
   update_interval_in_seconds: balances_update_interval || 30 * 60
 
+config :explorer, Explorer.Counters.ContractAddressesCounter,
+  enabled: true,
+  enable_consolidation: true,
+  update_interval_in_seconds: balances_update_interval || 30 * 60
+
 config :explorer, Explorer.Counters.AddressTransactionsGasUsageCounter,
   enabled: true,
   enable_consolidation: true
