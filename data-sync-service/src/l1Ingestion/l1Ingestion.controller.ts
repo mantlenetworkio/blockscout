@@ -29,15 +29,15 @@ export class L1IngestionController {
         result: 'page and page_size must more than 0',
       };
     }
-    if (Number(page_size) > 1000) {
+    if (Number(page_size) > 1000 || Number(page_size) < 5) {
       return {
         ok: false,
         code: 4000,
-        result: 'page_size must less than 1000',
+        result: 'page_size must more than 5 less than 1000',
       };
     }
     const type = param['type'];
-    if (Number(type) < 0 || Number(type) > 2) {
+    if (Number(type) < 1 || Number(type) > 2) {
       return {
         ok: false,
         code: 4000,

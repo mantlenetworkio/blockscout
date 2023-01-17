@@ -297,13 +297,13 @@ export class L1IngestionService {
         from = decodeMsg._from;
         to = decodeMsg._to;
         value = this.web3.utils.hexToNumberString(decodeMsg._amount._hex);
-        type = 1;
+        type = 1; // user deposit
         this.logger.log(
           `l1_token: [${l1_token}], l2_token: [${l2_token}], from: [${from}], to: [${to}], value: [${value}]`,
         );
       } else if (funName === '0x0fae75d9') {
         const decodeMsg = iface.decodeFunctionData('claimReward', message);
-        type = 0;
+        type = 0; // reward
         this.logger.log(`reward tssMembers is [${decodeMsg._tssMembers}]`);
       }
       const { timestamp } = await this.web3.eth.getBlock(blockNumber);
@@ -355,6 +355,7 @@ export class L1IngestionService {
           from: from,
           to: to,
           value: value,
+          type: type,
           inserted_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         });
@@ -424,6 +425,10 @@ export class L1IngestionService {
       const queryRunner = dataSource.createQueryRunner();
       await queryRunner.connect();
       await queryRunner.startTransaction();
+      let tx_type = 1;
+      if (l1ToL2Transaction.type === 0) {
+        tx_type = 3;
+      }
       try {
         // execute some operations on this transaction:
         await queryRunner.manager
@@ -445,8 +450,8 @@ export class L1IngestionService {
           .where('tx_hash = :tx_hash', { tx_hash: unMergeTxList[i].tx_hash })
           .execute();
         await queryRunner.manager.query(
-          `UPDATE transactions SET l1_origin_tx_hash=$1 WHERE hash=decode($2, 'hex');`,
-          [unMergeTxList[i].tx_hash, l1ToL2Transaction.l2_hash],
+          `UPDATE transactions SET l1_origin_tx_hash=$1, l1l2_type=$2 WHERE hash=decode($3, 'hex');`,
+          [unMergeTxList[i].tx_hash, tx_type, l1ToL2Transaction.l2_hash],
         );
         // commit transaction now:
         await queryRunner.commitTransaction();
@@ -520,8 +525,8 @@ export class L1IngestionService {
           .execute();
         // update transactions to Ready for Relay
         await queryRunner.manager.query(
-          `UPDATE transactions SET l1_origin_tx_hash=$1 WHERE hash=decode($2, 'hex');`,
-          [unMergeTxList[i].tx_hash, l2ToL1Transaction.l2_hash],
+          `UPDATE transactions SET l1_origin_tx_hash=$1, l1l2_type=$2 WHERE hash=decode($3, 'hex');`,
+          [unMergeTxList[i].tx_hash, 2, l2ToL1Transaction.l2_hash],
         );
         await queryRunner.commitTransaction();
       } catch (error) {
@@ -653,7 +658,10 @@ export class L1IngestionService {
         }
         let token_name = '';
         let token_symbol = '';
-        if (item.l2_token != '0x0000000000000000000000000000000000000000') {
+        if (
+          item.l2_token != '0x0000000000000000000000000000000000000000' ||
+          item.l2_token != null
+        ) {
           const queryToken = await this.tokensRepository.findOne({
             where: {
               contract_address_hash: Buffer.from(item.l2_token)
@@ -705,7 +713,10 @@ export class L1IngestionService {
         }
         let token_name = '';
         let token_symbol = '';
-        if (item.l2_token != '0x0000000000000000000000000000000000000000') {
+        if (
+          item.l2_token != '0x0000000000000000000000000000000000000000' ||
+          item.l2_token != null
+        ) {
           const queryToken = await this.tokensRepository.findOne({
             where: {
               contract_address_hash: Buffer.from(item.l2_token)
