@@ -29,6 +29,7 @@ import SCCABI from '../abi/StateCommitmentChain.json';
 import { L2IngestionService } from '../l2Ingestion/l2Ingestion.service';
 import { decode } from 'punycode';
 import { utils } from 'ethers';
+import { from } from 'rxjs';
 const FraudProofWindow = 0;
 
 @Injectable()
@@ -172,6 +173,9 @@ export class L1IngestionService {
       startBlock,
       endBlock,
     );
+    const dataSource = getConnection();
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
     for (const item of list) {
       const {
         blockNumber,
@@ -186,12 +190,8 @@ export class L1IngestionService {
         },
       } = item;
       const { timestamp } = await this.web3.eth.getBlock(blockNumber);
-
-      const dataSource = getConnection();
-      const queryRunner = dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
       try {
+        await queryRunner.startTransaction();
         const savedResult = await queryRunner.manager.save(TxnBatches, {
           batch_index: _batchIndex,
           block_number: blockNumber.toString(),
@@ -212,10 +212,9 @@ export class L1IngestionService {
           `l1 createTxnBatchesEvents blocknumber:${blockNumber} ${error}`,
         );
         await queryRunner.rollbackTransaction();
-      } finally {
-        await queryRunner.release();
       }
     }
+    await queryRunner.release();
     return result;
   }
   async createStateBatchesEvents(startBlock, endBlock) {
@@ -224,6 +223,9 @@ export class L1IngestionService {
       startBlock,
       endBlock,
     );
+    const dataSource = getConnection();
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
     for (const item of list) {
       const {
         blockNumber,
@@ -237,12 +239,8 @@ export class L1IngestionService {
         },
       } = item;
       const { timestamp } = await this.web3.eth.getBlock(blockNumber);
-
-      const dataSource = getConnection();
-      const queryRunner = dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
       try {
+        await queryRunner.startTransaction();
         const savedResult = await queryRunner.manager.save(StateBatches, {
           batch_index: _batchIndex,
           block_number: blockNumber.toString(),
@@ -263,10 +261,9 @@ export class L1IngestionService {
           `l1 createStateBatchesEvents blocknumber:${blockNumber} ${error}`,
         );
         await queryRunner.rollbackTransaction();
-      } finally {
-        await queryRunner.release();
       }
     }
+    await queryRunner.release();
     return result;
   }
   async createSentEvents(startBlock, endBlock) {
@@ -282,6 +279,9 @@ export class L1IngestionService {
     let to = '0x0000000000000000000000000000000000000000';
     let value = '0';
     let type = 0;
+    const dataSource = getConnection();
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
     for (const item of list) {
       const {
         blockNumber,
@@ -307,9 +307,6 @@ export class L1IngestionService {
         this.logger.log(`reward tssMembers is [${decodeMsg._tssMembers}]`);
       }
       const { timestamp } = await this.web3.eth.getBlock(blockNumber);
-      const dataSource = getConnection();
-      const queryRunner = dataSource.createQueryRunner();
-      await queryRunner.connect();
       await queryRunner.startTransaction();
       try {
         const savedResult = await queryRunner.manager.save(
@@ -366,10 +363,9 @@ export class L1IngestionService {
           `l1 createSentEvents blocknumber:${blockNumber} ${error}`,
         );
         await queryRunner.rollbackTransaction();
-      } finally {
-        await queryRunner.release();
       }
     }
+    await queryRunner.release();
     return result;
   }
   async createRelayedEvents(startBlock, endBlock) {
@@ -377,6 +373,9 @@ export class L1IngestionService {
       startBlock,
       endBlock,
     );
+    const dataSource = getConnection();
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
     const result: any = [];
     for (const item of list) {
       const {
@@ -385,9 +384,6 @@ export class L1IngestionService {
         returnValues: { msgHash },
         signature,
       } = item;
-      const dataSource = getConnection();
-      const queryRunner = dataSource.createQueryRunner();
-      await queryRunner.connect();
       await queryRunner.startTransaction();
       try {
         const savedResult = await queryRunner.manager.save(
@@ -408,27 +404,29 @@ export class L1IngestionService {
           `l1 createRelayedEvents blocknumber:${blockNumber} ${error}`,
         );
         await queryRunner.rollbackTransaction();
-      } finally {
-        await queryRunner.release();
       }
     }
+    await queryRunner.release();
     return result;
   }
   async createL1L2Relation() {
     const unMergeTxList =
       await this.l2IngestionService.getRelayedEventByIsMerge(false);
+    const dataSource = getConnection();
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
     for (let i = 0; i < unMergeTxList.length; i++) {
       const l1ToL2Transaction = await this.getL1ToL2TxByMsgHash(
         unMergeTxList[i].msg_hash,
       );
-      const dataSource = getConnection();
-      const queryRunner = dataSource.createQueryRunner();
-      await queryRunner.connect();
-      await queryRunner.startTransaction();
+      if (typeof l1ToL2Transaction === 'undefined') {
+        continue;
+      }
       let tx_type = 1;
       if (l1ToL2Transaction.type === 0) {
         tx_type = 3;
       }
+      await queryRunner.startTransaction();
       try {
         // execute some operations on this transaction:
         await queryRunner.manager
@@ -453,16 +451,12 @@ export class L1IngestionService {
           `UPDATE transactions SET l1_origin_tx_hash=$1, l1l2_type=$2 WHERE hash=decode($3, 'hex');`,
           [unMergeTxList[i].tx_hash, tx_type, l1ToL2Transaction.l2_hash],
         );
-        // commit transaction now:
         await queryRunner.commitTransaction();
       } catch (err) {
-        // since we have errors let's rollback changes we made
         await queryRunner.rollbackTransaction();
-      } finally {
-        // you need to release query runner which is manually created:
-        await queryRunner.release();
       }
     }
+    await queryRunner.release();
   }
   async handleWaitTransaction() {
     // const latestBlock = await this.getCurrentBlockNumber();
@@ -490,19 +484,18 @@ export class L1IngestionService {
       await queryRunner.commitTransaction();
     } catch (error) {
       await queryRunner.rollbackTransaction();
-    } finally {
-      await queryRunner.release();
     }
+    await queryRunner.release();
   }
   async createL2L1Relation() {
     const unMergeTxList = await this.getRelayedEventByIsMerge(false);
+    const dataSource = getConnection();
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
     for (let i = 0; i < unMergeTxList.length; i++) {
       const l2ToL1Transaction = await this.getL2ToL1TxByMsgHash(
         unMergeTxList[i].msg_hash,
       );
-      const dataSource = getConnection();
-      const queryRunner = dataSource.createQueryRunner();
-      await queryRunner.connect();
       await queryRunner.startTransaction();
       try {
         await queryRunner.manager
@@ -531,10 +524,9 @@ export class L1IngestionService {
         await queryRunner.commitTransaction();
       } catch (error) {
         await queryRunner.rollbackTransaction();
-      } finally {
-        await queryRunner.release();
       }
     }
+    await queryRunner.release();
   }
   async syncSentEvents() {
     const startBlockNumber = await this.getSentEventsBlockNumber();
@@ -641,13 +633,13 @@ export class L1IngestionService {
     const result = [];
     const new_page = page - 1;
     if (type == 1) {
-      const deposit = await this.txnL1ToL2Repository.find({
-        // where: { from: address },
+      const deposits = await this.txnL1ToL2Repository.find({
+        where: { from: address },
         order: { queue_index: order },
         skip: new_page,
         take: page_size,
       });
-      for (const item of deposit) {
+      for (const item of deposits) {
         let l1_hash = '';
         let l2_hash = '';
         if (item.hash != null) {
@@ -697,7 +689,7 @@ export class L1IngestionService {
     }
     if (type == 2) {
       const withdraw = await this.txnL2ToL1Repository.find({
-        // where: { from: address },
+        where: { from: address },
         order: { msg_nonce: order },
         skip: new_page,
         take: page_size,
@@ -763,12 +755,12 @@ export class L1IngestionService {
         l2_hash: Not(IsNull()),
       },
     });
+    const dataSource = getConnection();
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
     for (let i = 0; i < unMergeTxList.length; i++) {
       const l2Hash = unMergeTxList[i].l2_hash;
       if (l2Hash) {
-        const dataSource = getConnection();
-        const queryRunner = dataSource.createQueryRunner();
-        await queryRunner.connect();
         await queryRunner.startTransaction();
         try {
           const handleL2Hash = l2Hash.startsWith('0x')
@@ -790,11 +782,9 @@ export class L1IngestionService {
         } catch (err) {
           // since we have errors let's rollback changes we made
           await queryRunner.rollbackTransaction();
-        } finally {
-          // you need to release query runner which is manually created:
-          await queryRunner.release();
         }
       }
     }
+    await queryRunner.release();
   }
 }

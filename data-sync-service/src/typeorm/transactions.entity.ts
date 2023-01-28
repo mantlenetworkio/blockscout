@@ -34,4 +34,7 @@ export class Transactions {
 
   @Column({ type: 'numeric', precision: 10, scale: 2 })
   l1_fee_scalar: number;
+
+  @Column({ type: 'int4' })
+  l1l2_type: number;
 }

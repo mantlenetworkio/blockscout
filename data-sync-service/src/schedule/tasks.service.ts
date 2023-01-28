@@ -293,7 +293,7 @@ export class TasksService {
       );
     }
   }
-  @Interval(2000)
+  @Interval(15000)
   async l1l2_merge() {
     try {
       this.logger.log(`l1l2_merge to l1_to_l2 table`);
@@ -302,7 +302,7 @@ export class TasksService {
       this.logger.error(`error l1l2 [handle_L1_l2_merge]: ${error}`);
     }
   }
-  @Interval(2000)
+  @Interval(15000)
   async l2l1_merge() {
     try {
       this.logger.log(`l2l1_merge to l2_to_l1 table`);
@@ -311,7 +311,7 @@ export class TasksService {
       this.logger.error(`error l1l2 [handle_l1_l2__merge]: ${error}`);
     }
   }
-  @Interval(2000)
+  @Interval(10000)
   async l2l1_merge_waiting() {
     try {
       this.logger.log(`l2l1_merge_waiting to l2_to_l1 table`);
