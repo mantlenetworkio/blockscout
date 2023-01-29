@@ -293,7 +293,7 @@ export class TasksService {
       );
     }
   }
-  @Interval(1000)
+  @Interval(10000)
   async l1l2_merge() {
     try {
       await this.l1IngestionService.createL1L2Relation();
@@ -301,7 +301,7 @@ export class TasksService {
       this.logger.error(`error l1->l2 [handle_L1_l2_merge]: ${error}`);
     }
   }
-  @Interval(2000)
+  @Interval(10000)
   async l2l1_merge() {
     try {
       await this.l1IngestionService.createL2L1Relation();
@@ -309,7 +309,7 @@ export class TasksService {
       this.logger.error(`error l1->l2 [handle_l1_l2__merge]: ${error}`);
     }
   }
-  @Interval(2000)
+  @Interval(10000)
   async l2l1_merge_waiting() {
     try {
       await this.l1IngestionService.handleWaitTransaction();

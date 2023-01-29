@@ -279,7 +279,7 @@ export class L1IngestionService {
     let from = '0x0000000000000000000000000000000000000000';
     let to = '0x0000000000000000000000000000000000000000';
     let value = '0';
-    let type = 10;
+    let type = 0;
     const dataSource = getConnection();
     const queryRunner = dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -536,6 +536,9 @@ export class L1IngestionService {
           `UPDATE transactions SET l1_origin_tx_hash=$1, l1l2_type=$2 WHERE hash=decode($3, 'hex');`,
           [unMergeTxList[i].tx_hash, 2, l2ToL1Transaction.l2_hash],
         );
+        await queryRunner.commitTransaction();
+      } catch (error) {
+        await queryRunner.rollbackTransaction();
       }
       await queryRunner.commitTransaction();
     } catch (error) {
