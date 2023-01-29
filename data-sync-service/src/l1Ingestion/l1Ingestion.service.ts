@@ -464,7 +464,9 @@ export class L1IngestionService {
       await queryRunner.release();
       l1l2MergerIsProcessing = false;
     } else {
-      this.logger.log(`this task is in processing`);
+      this.logger.log(
+        `this task is in processing and l1l2MergerIsProcessing is ${l1l2MergerIsProcessing}`,
+      );
     }
   }
   async handleWaitTransaction() {
@@ -537,8 +539,6 @@ export class L1IngestionService {
           [unMergeTxList[i].tx_hash, 2, l2ToL1Transaction.l2_hash],
         );
         await queryRunner.commitTransaction();
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
       }
       await queryRunner.commitTransaction();
     } catch (error) {
