@@ -539,9 +539,15 @@ export class L1IngestionService {
           [unMergeTxList[i].tx_hash, 2, l2ToL1Transaction.l2_hash],
         );
         await queryRunner.commitTransaction();
+        this.logger.log(
+          `create l2->l1 relation to l2_to_l1 table commit transaction finish`,
+        );
       }
       await queryRunner.commitTransaction();
     } catch (error) {
+      this.logger.log(
+        `create l2->l1 relation to l2_to_l1 table error ${error}`,
+      );
       await queryRunner.rollbackTransaction();
     } finally {
       this.logger.log(`create l2->l1 relation to l2_to_l1 table finish`);
