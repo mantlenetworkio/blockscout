@@ -6,7 +6,7 @@ export class L2RelayedMessageEvents {
   tx_hash: string;
 
   @Column({ type: 'bigint' })
-  block_number: string;
+  block_number: number;
 
   @PrimaryColumn({ type: 'bytea' })
   msg_hash: string;

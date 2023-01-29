@@ -2,6 +2,8 @@ import { ConfigService } from '@nestjs/config';
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import {
+  L1SentMessageEvents,
+  L1ToL2,
   L2RelayedMessageEvents,
   L2SentMessageEvents,
   L2ToL1,

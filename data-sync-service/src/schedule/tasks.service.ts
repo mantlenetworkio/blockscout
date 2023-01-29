@@ -293,41 +293,28 @@ export class TasksService {
       );
     }
   }
-  @Interval(15000)
+  @Interval(1000)
   async l1l2_merge() {
     try {
-      this.logger.log(`l1l2_merge to l1_to_l2 table`);
       await this.l1IngestionService.createL1L2Relation();
     } catch (error) {
-      this.logger.error(`error l1l2 [handle_L1_l2_merge]: ${error}`);
+      this.logger.error(`error l1->l2 [handle_L1_l2_merge]: ${error}`);
     }
   }
-  @Interval(15000)
+  @Interval(2000)
   async l2l1_merge() {
     try {
-      this.logger.log(`l2l1_merge to l2_to_l1 table`);
       await this.l1IngestionService.createL2L1Relation();
     } catch (error) {
-      this.logger.error(`error l1l2 [handle_l1_l2__merge]: ${error}`);
+      this.logger.error(`error l1->l2 [handle_l1_l2__merge]: ${error}`);
     }
   }
-  @Interval(10000)
+  @Interval(2000)
   async l2l1_merge_waiting() {
     try {
-      this.logger.log(`l2l1_merge_waiting to l2_to_l1 table`);
       await this.l1IngestionService.handleWaitTransaction();
     } catch (error) {
       this.logger.error(`error l1l2 [handle_l2l1_merge_waiting]: ${error}`);
     }
   }
-
-  // @Interval(2000)
-  // async update_transactions() {
-  //   try {
-  //     this.logger.log(`update l1_origin_tx_hash to transactions table`);
-  //     await this.l1IngestionService.updateL1OriginTxHashInTransactions();
-  //   } catch (error) {
-  //     this.logger.error(`error [update_transactions]: ${error}`);
-  //   }
-  // }
 }

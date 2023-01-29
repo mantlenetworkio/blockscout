@@ -31,6 +31,7 @@ import { decode } from 'punycode';
 import { utils } from 'ethers';
 import { from } from 'rxjs';
 const FraudProofWindow = 0;
+let l1l2MergerIsProcessing = false;
 
 @Injectable()
 export class L1IngestionService {
@@ -278,7 +279,7 @@ export class L1IngestionService {
     let from = '0x0000000000000000000000000000000000000000';
     let to = '0x0000000000000000000000000000000000000000';
     let value = '0';
-    let type = 0;
+    let type = 10;
     const dataSource = getConnection();
     const queryRunner = dataSource.createQueryRunner();
     await queryRunner.connect();
@@ -410,53 +411,61 @@ export class L1IngestionService {
     return result;
   }
   async createL1L2Relation() {
-    const unMergeTxList =
-      await this.l2IngestionService.getRelayedEventByIsMerge(false);
-    const dataSource = getConnection();
-    const queryRunner = dataSource.createQueryRunner();
-    await queryRunner.connect();
-    for (let i = 0; i < unMergeTxList.length; i++) {
-      const l1ToL2Transaction = await this.getL1ToL2TxByMsgHash(
-        unMergeTxList[i].msg_hash,
-      );
-      if (typeof l1ToL2Transaction === 'undefined') {
-        continue;
-      }
-      let tx_type = 1;
-      if (l1ToL2Transaction.type === 0) {
-        tx_type = 3;
-      }
+    if (!l1l2MergerIsProcessing) {
+      const unMergeTxList =
+        await this.l2IngestionService.getRelayedEventByIsMerge(false);
+      this.logger.log(`start create l1->l2 relation`);
+      const dataSource = getConnection();
+      const queryRunner = dataSource.createQueryRunner();
+      await queryRunner.connect();
       await queryRunner.startTransaction();
       try {
-        // execute some operations on this transaction:
-        await queryRunner.manager
-          .createQueryBuilder()
-          .update(L1ToL2)
-          .set({ l2_hash: unMergeTxList[i].tx_hash, status: 'Relayed' })
-          .where('hash = :hash', { hash: l1ToL2Transaction.hash })
-          .execute();
-        await queryRunner.manager
-          .createQueryBuilder()
-          .update(L1SentMessageEvents)
-          .set({ is_merge: true })
-          .where('tx_hash = :tx_hash', { tx_hash: l1ToL2Transaction.hash })
-          .execute();
-        await queryRunner.manager
-          .createQueryBuilder()
-          .update(L2RelayedMessageEvents)
-          .set({ is_merge: true })
-          .where('tx_hash = :tx_hash', { tx_hash: unMergeTxList[i].tx_hash })
-          .execute();
-        await queryRunner.manager.query(
-          `UPDATE transactions SET l1_origin_tx_hash=$1, l1l2_type=$2 WHERE hash=decode($3, 'hex');`,
-          [unMergeTxList[i].tx_hash, tx_type, l1ToL2Transaction.l2_hash],
-        );
+        for (let i = 0; i < unMergeTxList.length; i++) {
+          const l1ToL2Transaction = await this.getL1ToL2TxByMsgHash(
+            unMergeTxList[i].msg_hash,
+          );
+          let tx_type = 1;
+          if (l1ToL2Transaction.type === 0) {
+            tx_type = 3;
+          }
+          // execute some operations on this transaction:
+          await queryRunner.manager
+            .createQueryBuilder()
+            .setLock('pessimistic_write')
+            .update(L1ToL2)
+            .set({ l2_hash: unMergeTxList[i].tx_hash, status: 'Relayed' })
+            .where('hash = :hash', { hash: l1ToL2Transaction.hash })
+            .execute();
+          await queryRunner.manager
+            .createQueryBuilder()
+            .setLock('pessimistic_write')
+            .update(L1SentMessageEvents)
+            .set({ is_merge: true })
+            .where('tx_hash = :tx_hash', { tx_hash: l1ToL2Transaction.hash })
+            .execute();
+          await queryRunner.manager
+            .createQueryBuilder()
+            .setLock('pessimistic_write')
+            .update(L2RelayedMessageEvents)
+            .set({ is_merge: true })
+            .where('tx_hash = :tx_hash', { tx_hash: unMergeTxList[i].tx_hash })
+            .execute();
+          await queryRunner.manager.query(
+            `UPDATE transactions SET l1_origin_tx_hash=$1, l1l2_type=$2 WHERE hash=decode($3, 'hex');`,
+            [unMergeTxList[i].tx_hash, tx_type, l1ToL2Transaction.l2_hash],
+          );
+        }
         await queryRunner.commitTransaction();
       } catch (err) {
         await queryRunner.rollbackTransaction();
+      } finally {
+        this.logger.log(`create l1->L2 relation to l1_to_l2 table finish`);
       }
+      await queryRunner.release();
+      l1l2MergerIsProcessing = false;
+    } else {
+      this.logger.log(`this task is in processing`);
     }
-    await queryRunner.release();
   }
   async handleWaitTransaction() {
     // const latestBlock = await this.getCurrentBlockNumber();
@@ -471,6 +480,7 @@ export class L1IngestionService {
       // todo: lTimestamp + FraudProofWindow >= timestamp
       await queryRunner.manager
         .createQueryBuilder()
+        .setLock('pessimistic_write')
         .update(L2ToL1)
         .set({ status: 'Ready for Relay' })
         .where('block <= :block', { block: totalElements })
@@ -484,6 +494,8 @@ export class L1IngestionService {
       await queryRunner.commitTransaction();
     } catch (error) {
       await queryRunner.rollbackTransaction();
+    } finally {
+      this.logger.log(`l2l1 change status to Waiting finish`);
     }
     await queryRunner.release();
   }
@@ -492,26 +504,29 @@ export class L1IngestionService {
     const dataSource = getConnection();
     const queryRunner = dataSource.createQueryRunner();
     await queryRunner.connect();
-    for (let i = 0; i < unMergeTxList.length; i++) {
-      const l2ToL1Transaction = await this.getL2ToL1TxByMsgHash(
-        unMergeTxList[i].msg_hash,
-      );
-      await queryRunner.startTransaction();
-      try {
+    await queryRunner.startTransaction();
+    try {
+      for (let i = 0; i < unMergeTxList.length; i++) {
+        const l2ToL1Transaction = await this.getL2ToL1TxByMsgHash(
+          unMergeTxList[i].msg_hash,
+        );
         await queryRunner.manager
           .createQueryBuilder()
+          .setLock('pessimistic_write')
           .update(L2ToL1)
           .set({ hash: unMergeTxList[i].tx_hash, status: 'Relayed' })
           .where('l2_hash = :l2_hash', { l2_hash: l2ToL1Transaction.l2_hash })
           .execute();
         await queryRunner.manager
           .createQueryBuilder()
+          .setLock('pessimistic_write')
           .update(L2SentMessageEvents)
           .set({ is_merge: true })
           .where('tx_hash = :tx_hash', { tx_hash: l2ToL1Transaction.l2_hash })
           .execute();
         await queryRunner.manager
           .createQueryBuilder()
+          .setLock('pessimistic_write')
           .update(L1RelayedMessageEvents)
           .set({ is_merge: true })
           .where('tx_hash = :tx_hash', { tx_hash: unMergeTxList[i].tx_hash })
@@ -521,10 +536,12 @@ export class L1IngestionService {
           `UPDATE transactions SET l1_origin_tx_hash=$1, l1l2_type=$2 WHERE hash=decode($3, 'hex');`,
           [unMergeTxList[i].tx_hash, 2, l2ToL1Transaction.l2_hash],
         );
-        await queryRunner.commitTransaction();
-      } catch (error) {
-        await queryRunner.rollbackTransaction();
       }
+      await queryRunner.commitTransaction();
+    } catch (error) {
+      await queryRunner.rollbackTransaction();
+    } finally {
+      this.logger.log(`create l2->l1 relation to l2_to_l1 table finish`);
     }
     await queryRunner.release();
   }
@@ -747,44 +764,5 @@ export class L1IngestionService {
       code: 2000,
       result: result,
     };
-  }
-  async updateL1OriginTxHashInTransactions() {
-    const unMergeTxList = await this.txnL1ToL2Repository.find({
-      where: {
-        is_merge: false,
-        l2_hash: Not(IsNull()),
-      },
-    });
-    const dataSource = getConnection();
-    const queryRunner = dataSource.createQueryRunner();
-    await queryRunner.connect();
-    for (let i = 0; i < unMergeTxList.length; i++) {
-      const l2Hash = unMergeTxList[i].l2_hash;
-      if (l2Hash) {
-        await queryRunner.startTransaction();
-        try {
-          const handleL2Hash = l2Hash.startsWith('0x')
-            ? l2Hash.slice(2)
-            : l2Hash;
-          await queryRunner.manager.query(
-            `
-            UPDATE transactions SET l1_origin_tx_hash=$1 WHERE hash=decode($2, 'hex');
-          `,
-            [unMergeTxList[i].hash, handleL2Hash],
-          );
-          await queryRunner.manager
-            .createQueryBuilder()
-            .update(L1ToL2)
-            .set({ is_merge: true })
-            .where('hash = :hash', { hash: unMergeTxList[i].hash })
-            .execute();
-          await queryRunner.commitTransaction();
-        } catch (err) {
-          // since we have errors let's rollback changes we made
-          await queryRunner.rollbackTransaction();
-        }
-      }
-    }
-    await queryRunner.release();
   }
 }
