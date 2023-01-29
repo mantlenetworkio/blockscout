@@ -453,7 +453,7 @@ export class L1IngestionService {
               })
               .execute();
             await queryRunner.manager.query(
-              `UPDATE transactions SET l1_origin_tx_hash=$1, l1l2_type=$2 WHERE hash=decode($3, 'hex');`,
+              `UPDATE transactions SET l1_origin_tx_hash=$1, l1l2_type=$2 WHERE hash=$3;`,
               [unMergeTxList[i].tx_hash, tx_type, l1ToL2Transaction.l2_hash],
             );
             await queryRunner.commitTransaction();
@@ -543,7 +543,7 @@ export class L1IngestionService {
             .execute();
           // update transactions to Ready for Relay
           await queryRunner.manager.query(
-            `UPDATE transactions SET l1_origin_tx_hash=$1, l1l2_type=$2 WHERE hash=decode($3, 'hex');`,
+            `UPDATE transactions SET l1_origin_tx_hash=$1, l1l2_type=$2 WHERE hash=$3;`,
             [unMergeTxList[i].tx_hash, 2, l2ToL1Transaction.l2_hash],
           );
           await queryRunner.commitTransaction();
