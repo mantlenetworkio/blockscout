@@ -424,6 +424,9 @@ export class L1IngestionService {
           const l1ToL2Transaction = await this.getL1ToL2TxByMsgHash(
             unMergeTxList[i].msg_hash,
           );
+          if (typeof l1ToL2Transaction === 'undefined') {
+            continue;
+          }
           let tx_type = 1;
           if (l1ToL2Transaction.type === 0) {
             tx_type = 3;
