@@ -155,7 +155,21 @@
                   <button type="button" class="btn-line" style="float: left;" id="button" data-clipboard-text="<%= creation_code(@address) %>" aria-label="copy contract creation code">
                     <%= gettext "Copy Contract Creation Code" %>
                   </button>
-                  
+                  <%= if match?({:selfdestructed, _}, contract_creation_code) do %>
+                    <div class="button button-disabled button-sm float-right ml-3">
+                      <%= gettext("Verify & Publish") %>
+                    </div>
+                  <% else %>
+                    <%= if !fully_verified do %>
+                      <% path = address_verify_contract_path(@conn, :new, @address.hash) %>
+                      <%= link(
+                            gettext("Verify & Publish"),
+                            to: path,
+                            class: "button button-primary button-sm float-right ml-3",
+                            "data-test": "verify_and_publish"
+                          ) %>
+                    <% end %>
+                  <% end %>
                 </div>
               </div>
               <div class="tile tile-muted mb-4">
