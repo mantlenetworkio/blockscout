@@ -97,7 +97,8 @@ defmodule BlockScoutWeb.StateBatchController do
               StateBatchView,
               "_tile.html",
               state_batch: state_batch,
-              conn: conn
+              conn: conn,
+              l1_explorer: Application.get_env(:block_scout_web, :l1_explorer_url)
             )
           end),
         next_page_params: next_page_params
@@ -121,7 +122,8 @@ defmodule BlockScoutWeb.StateBatchController do
     render(
           conn,
           "overview.html",
-          state_batch: state_batch
+          state_batch: state_batch,
+          l1_explorer: Application.get_env(:block_scout_web, :l1_explorer_url)
         )
   end
 

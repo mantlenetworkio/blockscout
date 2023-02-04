@@ -47,9 +47,9 @@ export const callMethod = (isWalletEnabled, $functionInputs, explorerChainId, $f
     .then((walletChainId) => {
       compareChainIDs(explorerChainId, walletChainId)
         .then(() => getCurrentAccountPromise(window.web3.currentProvider))
-        .catch(error => {
+        /* .catch(error => {
           openWarningModal('Unauthorized', formatError(error))
-        })
+        }) */
         .then((currentAccount) => {
           if (functionName) {
             const TargetContract = new window.web3.eth.Contract(contractAbi, contractAddress)

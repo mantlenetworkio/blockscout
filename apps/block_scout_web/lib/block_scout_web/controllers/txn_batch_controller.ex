@@ -104,7 +104,8 @@ defmodule BlockScoutWeb.TxnBatchController do
               TxnBatchView,
               "_tile.html",
               txn_batch: txn_batch,
-              conn: conn
+              conn: conn,
+              l1_explorer: Application.get_env(:block_scout_web, :l1_explorer_url)
             )
           end),
         next_page_params: next_page_params
@@ -128,7 +129,8 @@ defmodule BlockScoutWeb.TxnBatchController do
     render(
           conn,
           "overview.html",
-          txn_batch: txn_batch
+          txn_batch: txn_batch,
+          l1_explorer: Application.get_env(:block_scout_web, :l1_explorer_url)
         )
   end
 

@@ -1,4 +1,4 @@
-<div class="smart-contract-form-group constructor-arguments" style="display: <%= @display_constructor_arguments_text_area %>">
+<div id='smart-contract-form-group-constructor-arguments' class="smart-contract-form-group constructor-arguments" style="display: <%= @display_constructor_arguments_text_area %>">
     <div class="smart-contract-form-group-inner-wrapper">
         <%= label @f, :constructor_arguments, gettext("ABI-encoded Constructor Arguments (if required by the contract)") %>
         <div class="center-column">

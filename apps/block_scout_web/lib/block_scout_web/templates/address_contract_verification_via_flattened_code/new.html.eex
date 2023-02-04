@@ -53,7 +53,7 @@
           </div>
         </div>
 
-        <div class="smart-contract-form-group optimization-runs" style="<%= if !changeset.changes.optimization, do: "display: none;"%>">
+        <div id="smart-contract-form-group" class="smart-contract-form-group optimization-runs" style="<%= if !changeset.changes.optimization, do: "display: none;"%>">
           <div class="smart-contract-form-group-inner-wrapper">
             <%= label f, :name, gettext("Optimization runs") %>
             <div class="center-column">

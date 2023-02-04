@@ -104,7 +104,8 @@ defmodule BlockScoutWeb.L2ToL1TxnController do
               L2ToL1TxnView,
               "_tile.html",
               l2_to_l1: l2_to_l1,
-              conn: conn
+              conn: conn,
+              l1_explorer: Application.get_env(:block_scout_web, :l1_explorer_url)
             )
           end),
         next_page_params: next_page_params
