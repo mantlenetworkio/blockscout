@@ -1,0 +1,102 @@
+<section class="fs-14 container">
+  <div class="row">
+    <div class="col-md-12">
+      <!-- Transaction Details -->
+      <div class="card js-ad-dependant-mb-3">
+        <div class="card-body">
+          <h1 class="card-title">
+            <div style="display: inline-block; vertical-align: bottom; line-height: 25px;">
+              Txn Batch Details
+            </div>
+          </h1>
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Batch Index:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address" data-test="transaction_detail_hash">
+                <%= @txn_batch.batch_index %>
+              </span>
+            </dd>
+          </dl>
+          
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              L1 Timestamp:
+            </dt>
+            <dd class="col-sm-9 col-lg-10">
+              <span data-from-now="<%= block_timestamp(@txn_batch) %>"></span>
+            </dd>
+          </dl>
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Batch Size:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address" data-test="transaction_detail_hash">
+                <%= @txn_batch.size %> transactions
+              </span>
+            </dd>
+          </dl>
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              L1 Transaction Hash:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <a 
+                href="https://goerli.etherscan.io/tx/<%= @txn_batch.hash %>" 
+                target="_blank"
+                class="transaction-details-address"
+            >
+                <%= @txn_batch.hash %>
+            </a>
+            </dd>
+          </dl>
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              L1 Blocknumber:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address" data-test="transaction_detail_hash">
+                <%= @txn_batch.l1_block_number %>
+              </span>
+            </dd>
+          </dl>
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Batch Root:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address" data-test="transaction_detail_hash">
+                <%= @txn_batch.batch_root %>
+              </span>
+            </dd>
+          </dl>
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Previous Total Elements:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address" data-test="transaction_detail_hash">
+                <%= @txn_batch.pre_total_elements %>
+              </span>
+            </dd>
+          </dl>
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Extra Data:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address" data-test="transaction_detail_hash">
+                 <%= @txn_batch.extra_data %>
+              </span>
+            </dd>
+          </dl>
+
+          
+        </div>
+      </div>
+    </div>
+  </div>
+<script defer data-cfasync="false" src="<%= static_path(@conn, "/js/app.js") %>"></script>
+</section>

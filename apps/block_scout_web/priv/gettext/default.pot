@@ -2341,6 +2341,11 @@ msgstr ""
 
 #, elixir-format
 #: lib/block_scout_web/templates/layout/_topnav.html.eex:49
+msgid "Eigenlayer Txn"
+msgstr ""
+
+#, elixir-format
+#: lib/block_scout_web/templates/layout/_topnav.html.eex:49
 msgid "L1 Txn Batches"
 msgstr ""
 
