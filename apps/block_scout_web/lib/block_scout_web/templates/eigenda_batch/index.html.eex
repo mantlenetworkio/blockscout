@@ -9,7 +9,7 @@
   <%= render BlockScoutWeb.Advertisement.TextAdView, "index.html", conn: @conn %>
   <div class="card">
     <div class="card-body txn-list-container" data-async-listing="<%= @current_path %>">
-      <h1 class="card-title list-title-description"><%= gettext "Txn Batches" %></h1>
+      <h1 class="card-title list-title-description"><%= gettext "Eigenlayer Txn" %></h1>
       <div class="list-top-pagination-container-wrapper">
         <%= render BlockScoutWeb.CommonComponentsView, "_rap_pagination_container.html", position: "top", showing_limit: if Chain.transactions_available_count() == Chain.limit_showing_transactions(), do: Chain.limit_showing_transactions(), else: nil %>
       </div>
@@ -33,20 +33,32 @@
         </div>
       </div>
       <div class="txn-list-table-head-container">
-        <span style="width: 18%;">
-          Txn Batch
+        <span style="width: 10%;">
+          Batch Index
         </span>
-        <span style="width: 18%;">
-          Age
-        </span>
-        <span style="width: 18%;">
+        <span style="width: 10%;">
           Batch Size
         </span>
-        <span style="width: 30%;">
-          L1 Txn Hash
+        <span style="width: 10%;">
+          Status
         </span>
-        <span style="width: 16%;">
-          Pre Total Elements
+        <span style="width: 10%;">
+          Start Block
+        </span>
+        <span style="width: 10%;">
+          End Block
+        </span>
+        <span style="width: 20%;">
+          Da Hash
+        </span>
+        <span style="width: 10%;">
+          Store Id
+        </span>
+        <span style="width: 10%;">
+          Store Number
+        </span>
+        <span style="width: 10%;">
+          Da Fee
         </span>
       </div>
       <div data-selector="txn-batch-list" data-items class="recent-tx-list-page">

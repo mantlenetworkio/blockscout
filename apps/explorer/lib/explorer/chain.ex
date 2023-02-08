@@ -3333,6 +3333,8 @@ defmodule Explorer.Chain do
     paging_options = Keyword.get(options, :paging_options, @default_paging_options)
     total_eigenda_batches_count = eigenda_batch_available_count()
     fetched_eigenda_batches =fetch_recent_collated_eigenda_batch_for_rap(paging_options)
+    Logger.info("--------------")
+Logger.info(fetched_eigenda_batches)
     %{total_eigenda_batches_count: total_eigenda_batches_count, eigenda_batches: fetched_eigenda_batches}
   end
 

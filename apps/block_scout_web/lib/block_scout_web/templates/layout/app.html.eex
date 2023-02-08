@@ -244,6 +244,7 @@
       @view_module != Elixir.BlockScoutWeb.TokensView &&
       @view_module != Elixir.BlockScoutWeb.TransactionView &&
       @view_module != Elixir.BlockScoutWeb.TxnBatchView &&
+      @view_module != Elixir.BlockScoutWeb.EigendaBatchView &&
       @view_module != Elixir.BlockScoutWeb.StateBatchView &&
       @view_module != Elixir.BlockScoutWeb.StateBatchView &&
       @view_module != Elixir.BlockScoutWeb.L2ToL1TxnView &&

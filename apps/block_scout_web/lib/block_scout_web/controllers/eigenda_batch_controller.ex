@@ -63,22 +63,22 @@ require Logger
         |> update_page_parameters(Chain.default_page_size(), Keyword.get(options, :paging_options))
       )
 
-    %{total_transactions_count: transactions_count, eigenda_batches: txn_batch_plus_one} =
+    %{total_eigenda_batches_count: eigenda_batch_count, eigenda_batches: eigenda_batch_plus_one} =
       Chain.recent_collated_eigenda_batches_for_rap(full_options)
-Logger.info("--------------")
-Logger.info(txn_batch_plus_one)
+Logger.info("---------------=====")
+Logger.info(eigenda_batch_plus_one)
     {eigenda_batches, next_page} =
       if fetch_page_number(params) == 1 do
-        split_list_by_page(txn_batch_plus_one)
+        split_list_by_page(eigenda_batch_plus_one)
       else
-        {txn_batch_plus_one, nil}
+        {eigenda_batch_plus_one, nil}
       end
 
     next_page_params =
       if fetch_page_number(params) == 1 do
         page_size = Chain.default_page_size()
 
-        pages_limit = transactions_count |> Kernel./(page_size) |> Float.ceil() |> trunc()
+        pages_limit = eigenda_batch_count |> Kernel./(page_size) |> Float.ceil() |> trunc()
 
         case next_page_params(next_page, eigenda_batches, params) do
           nil ->

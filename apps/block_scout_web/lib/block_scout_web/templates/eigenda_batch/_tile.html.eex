@@ -2,20 +2,31 @@
     class="fade-in txn-list-table-item"
     data-identifier-hash="<%= @eigenda_batch.batch_index %>"
 >
-  
-    <span style="width: 18%;">
-      
+    <span style="width: 10%;">
       <%= render "_link.html", batch_index: @eigenda_batch.batch_index, data_test: "address_hash_link" %>
     </span>
-    <span style="width: 18%;">
+    <span style="width: 10%;">
       <%= @eigenda_batch .batch_size %>
     </span>
-    <a style="width: 30%;" href="https://goerli.etherscan.io/tx/<%= @eigenda_batch .hash %>" target="_blank">
+    <span style="width: 10%;">
+      <%= @eigenda_batch .status %>
+    </span>
+    <span style="width: 10%;">
+      <%= @eigenda_batch .start_block %>
+    </span>
+    <span style="width: 10%;">
+      <%= @eigenda_batch .end_block %>
+    </span>
+    <a style="width: 20%;" href="https://goerli.etherscan.io/tx/<%= @eigenda_batch .da_hash %>" target="_blank">
       <%= sub_hash_string(@eigenda_batch .da_hash) %>...
     </a>
-    <span style="width: 16%;">
+    <span style="width: 10%;">
+      <%= @eigenda_batch .store_id %>
+    </span>
+    <span style="width: 10%;">
       <%= @eigenda_batch .store_number %>
     </span>
-    
-
+    <span style="width: 10%;">
+      <%= @eigenda_batch .store_number %>
+    </span>
 </div>
