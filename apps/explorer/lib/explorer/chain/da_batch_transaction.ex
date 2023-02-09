@@ -1,4 +1,4 @@
-defmodule Explorer.Chain.DaBatchTransactions do
+defmodule Explorer.Chain.DaBatchTransaction do
   @moduledoc """
   A package of data that contains zero or more transactions, the hash of the previous block ("parent"), and optionally
   other data. Because each block (except for the initial "genesis block") points to the previous block, the data
@@ -8,7 +8,7 @@ defmodule Explorer.Chain.DaBatchTransactions do
   use Explorer.Schema
 
   alias Explorer.Chain.{
-    #Hash,
+    Hash,
     Wei,
   }
 
@@ -56,13 +56,13 @@ defmodule Explorer.Chain.DaBatchTransactions do
   """
   @type t :: %__MODULE__{
           batch_index: integer(),
-          tx_hash: String.t(),
+          tx_hash: Hash.t(),
         }
 
   @primary_key {:batch_index, :integer, autogenerate: false}
-  schema "da_batches" do
-    field(:tx_hash, :string)
-    timestamps()
+  schema "da_batch_transactions" do
+    field(:tx_hash, Hash.Full)
+    #timestamps()
 
   end
 

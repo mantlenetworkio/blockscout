@@ -8,7 +8,7 @@ defmodule Explorer.Chain.DaBatch do
   use Explorer.Schema
 
   alias Explorer.Chain.{
-    #Hash,
+    Hash,
     Wei,
   }
 
@@ -60,7 +60,7 @@ defmodule Explorer.Chain.DaBatch do
           status: String.t(),
           start_block: integer(),
           end_block: integer(),
-          da_hash: String.t(),
+          da_hash: Hash.t(),
           store_id: integer(),
           store_number: integer(),
           da_fee: wei_per_gas,
@@ -74,7 +74,7 @@ defmodule Explorer.Chain.DaBatch do
     field(:status, :string)
     field(:start_block, :integer)
     field(:end_block, :integer)
-    field(:da_hash, :string)
+    field(:da_hash, Hash.Full)
     field(:store_id, :integer)
     field(:store_number, :integer)
     field(:da_fee, Wei)

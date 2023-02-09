@@ -1,0 +1,8 @@
+<div 
+    class="fade-in txn-list-table-item"
+    data-identifier-hash="<%= @da_batch_transaction.tx_hash %>"
+>
+    <a style="width: 100%;" href="https://goerli.etherscan.io/tx/<%= @da_batch_transaction .tx_hash %>" target="_blank">
+      <%= sub_hash_string(@da_batch_transaction .tx_hash) %>...
+    </a>
+</div>

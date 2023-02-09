@@ -1,0 +1,3 @@
+<%= link(
+    @batch_index,
+    to: eigenda_batch_path(BlockScoutWeb.Endpoint, :show, @batch_index)) %>

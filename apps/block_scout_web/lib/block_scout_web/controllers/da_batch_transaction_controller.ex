@@ -1,4 +1,4 @@
-defmodule BlockScoutWeb.EigendaBatchController do
+defmodule BlockScoutWeb.DaBatchTransactionController do
   use BlockScoutWeb, :controller
   require(Logger)
 
@@ -16,7 +16,7 @@ defmodule BlockScoutWeb.EigendaBatchController do
     Controller,
     TransactionInternalTransactionController,
     TransactionTokenTransferController,
-    EigendaBatchView
+    DaBatchTransactionView
   }
 require Logger
   alias Explorer.{Chain, Market}
@@ -48,8 +48,7 @@ require Logger
     }
   ]
 
-  def index(conn, %{"type" => "JSON"} = params) do
-
+  def index(conn, %{"type" => "JSON", "batch_index" => batch_index} = params) do
     options =
       @default_options
       |> Keyword.merge(paging_options(params))
@@ -63,15 +62,15 @@ require Logger
         |> update_page_parameters(Chain.default_page_size(), Keyword.get(options, :paging_options))
       )
 
-    %{total_eigenda_batches_count: eigenda_batch_count, eigenda_batches: eigenda_batch_plus_one} =
-      Chain.recent_collated_eigenda_batches_for_rap(full_options)
-      #Logger.info("---------------=====")
-      #Logger.info(eigenda_batch_plus_one)
-    {eigenda_batches, next_page} =
+    %{total_da_batch_transactions_count: eigenda_batch_count, da_batch_transactions: da_batch_transaction_plus_one} =
+      Chain.recent_collated_da_batch_transactions_for_rap(full_options, batch_index)
+      Logger.info("---------------=====")
+      Logger.info(da_batch_transaction_plus_one)
+    {da_batch_transactions, next_page} =
       if fetch_page_number(params) == 1 do
-        split_list_by_page(eigenda_batch_plus_one)
+        split_list_by_page(da_batch_transaction_plus_one)
       else
-        {eigenda_batch_plus_one, nil}
+        {da_batch_transaction_plus_one, nil}
       end
 
     next_page_params =
@@ -80,7 +79,7 @@ require Logger
 
         pages_limit = eigenda_batch_count |> Kernel./(page_size) |> Float.ceil() |> trunc()
 
-        case next_page_params(next_page, eigenda_batches, params) do
+        case next_page_params(next_page, da_batch_transactions, params) do
           nil ->
             nil
 
@@ -100,11 +99,11 @@ require Logger
       conn,
       %{
         items:
-          Enum.map(eigenda_batches, fn eigenda_batch ->
+          Enum.map(da_batch_transactions, fn da_batch_transaction ->
             View.render_to_string(
-              EigendaBatchView,
+              DaBatchTransactionView,
               "_tile.html",
-              eigenda_batch: eigenda_batch,
+              da_batch_transaction: da_batch_transaction,
               conn: conn
             )
           end),
@@ -113,7 +112,7 @@ require Logger
     )
   end
 
-  def index(conn, _params) do
+  def index(conn, %{"batch_index" => batch_index} = params) do
     transaction_estimated_count = TransactionCache.estimated_count()
 
     render(
@@ -123,7 +122,5 @@ require Logger
       transaction_estimated_count: transaction_estimated_count
     )
   end
-
-
 
 end

@@ -8,11 +8,11 @@ defmodule Explorer.Repo.Migrations.DaBatches do
       add(:status, :string, null: false)  # init, confirmed, fraud
       add(:start_block, :bigint, null: false)
       add(:end_block, :bigint, null: false)
-      add(:da_hash, :string, null: false, primary_key: true)
+      add(:da_hash, :bytea, null: false, primary_key: true)
       add(:store_id, :bigint, null: false)
       add(:store_number, :bigint, null: false)
       add(:da_fee, :numeric, precision: 100, null: false)
-      #timestamps(null: false, type: :utc_datetime_usec)
+      timestamps(null: false, type: :utc_datetime_usec)
     end
     create(unique_index(:da_batches, [:batch_index]))
   end
