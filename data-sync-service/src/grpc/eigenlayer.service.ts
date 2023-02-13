@@ -1,48 +1,40 @@
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const proto_loader = require('@grpc/proto-loader');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const grpc = require('@grpc/grpc-js');
-import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { Injectable, Logger } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
+import { firstValueFrom } from 'rxjs';
 // source /Users/bj89182ml/.gvm/scripts/gvm
 
+@Injectable()
 export class EigenlayerService {
   private readonly logger = new Logger(EigenlayerService.name);
-  private configService = new ConfigService();
-  client: any;
-  constructor() {
-    const proto_path = this.configService.get('PROTO_PATH');
-    const pkg_def = proto_loader.loadSync(proto_path, {
-      keepCase: true,
-      defaults: true,
-      enums: String,
-      oneofs: true,
-    });
-    console.log(this.configService.get('RETRIEVER_SOCKET'));
-    const rpc_pkg =
-      grpc.loadPackageDefinition(pkg_def).interfaceRetrieverServer;
-    this.client = new rpc_pkg.DataRetrieval(
-      this.configService.get('RETRIEVER_SOCKET'),
-      grpc.credentials.createInsecure(),
-    );
-  }
+  constructor(
+    private readonly httpService: HttpService,
+    private configService: ConfigService
+  ) {}
 
-  async retrieveFramesAndData(dataStoreId: number) {
-    return new Promise((resolve, reject) => {
-      const framesAndDataRequest = {
-        DataStoreId: dataStoreId,
-      };
-      this.client.RetrieveFramesAndData(
-        framesAndDataRequest,
-        function (err, response) {
-          if (err) {
-            // todo: handle error
-            console.log(err);
-            reject(err);
-          }
-          resolve(response);
-        },
-      );
-    });
+  async getTxn(storeNumber: number) {
+    const { data } = await firstValueFrom(
+      this.httpService.post(`${this.configService.get('EIGEN_DA_URL')}/browser/GetTransactionListByStoreNumber`, {
+        store_number: Number(storeNumber)
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+    );
+    return data;
+  }
+  async getDataStore(fromStoreNumber: number) {
+    const { data } = await firstValueFrom(
+      this.httpService.post(`${this.configService.get('EIGEN_DA_URL')}/browser/getDataStoreById`, {
+        store_id: fromStoreNumber.toString()
+        // eigen_contract_addr: this.configService.get('DA_ADDRESS')
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+    );
+    return data;
   }
 }

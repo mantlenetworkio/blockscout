@@ -11,7 +11,7 @@
     <span style="width: 18%;">
       <%= @txn_batch .size %>
     </span>
-    <a style="width: 30%;" href="https://goerli.etherscan.io/tx/<%= @txn_batch .hash %>" target="_blank">
+    <a style="width: 30%;" href="<%= @l1_explorer %>/tx/<%= @txn_batch .hash %>" target="_blank">
       <%= sub_hash_string(@txn_batch .hash) %>...
     </a>
     <span style="width: 16%;">

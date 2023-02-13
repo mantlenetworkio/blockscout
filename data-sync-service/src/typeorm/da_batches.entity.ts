@@ -2,19 +2,22 @@ import { Column, Entity, PrimaryColumn } from 'typeorm';
 
 @Entity()
 export class DaBatches {
-  @PrimaryColumn({ type: 'int8' })
+  @Column({ type: 'int8' })
   batch_index: number;
+  
+  @Column({ type: 'int8'})
+  batch_size: number;
 
   @Column({ type: 'varchar', length: 255 })
   status: string;
 
-  @Column({ type: 'int8' })
-  start_block: number;
+  // @Column({ type: 'int8' })
+  // start_block: number;
 
-  @Column({ type: 'int8' })
-  end_block: number;
+  // @Column({ type: 'int8' })
+  // end_block: number;
 
-  @Column({ type: 'bytea' })
+  @PrimaryColumn({ type: 'bytea' })
   da_hash: string;
 
   @Column({ type: 'int8' })
@@ -24,10 +27,16 @@ export class DaBatches {
   store_number: number;
 
   @Column({ type: 'numeric', precision: 100 })
-  de_fee: number;
+  da_fee: number;
 
-  @Column({ type: 'timestamp' })
-  timestamp: Date;
+  @Column({ type: 'bytea' })
+  da_init_hash: string;
+
+  @Column({ type: 'bytea' })
+  da_store_hash: string;
+
+  @Column({ type: 'int8' })
+  from_store_number: number;
 
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   inserted_at: Date;

@@ -44,7 +44,7 @@
             </dt>
             <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
               <a 
-                href="https://goerli.etherscan.io/tx/<%= @state_batch.hash %>" 
+                href="<%= @l1_explorer %>/tx/<%= @state_batch.hash %>" 
                 target="_blank"
                 class="transaction-details-address"
             >

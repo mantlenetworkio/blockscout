@@ -9,7 +9,7 @@ import { StateBatches } from './state_batches.entity';
 import { TxnBatches } from './txn_batches.entity';
 import { Tokens } from './tokens.entity';
 import { DaBatches } from './da_batches.entity';
-import { DaBatchTransaction } from './da_batch_transactions.entity';
+import { DaBatchTransactions } from './da_batch_transactions.entity';
 
 const entities = [
   L1ToL2,
@@ -23,7 +23,7 @@ const entities = [
   Transactions,
   Tokens,
   DaBatches,
-  DaBatchTransaction,
+  DaBatchTransactions,
 ];
 
 export {
@@ -38,6 +38,6 @@ export {
   Transactions,
   Tokens,
   DaBatches,
-  DaBatchTransaction,
+  DaBatchTransactions,
 };
 export default entities;

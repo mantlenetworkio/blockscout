@@ -3,7 +3,6 @@ defmodule BlockScoutWeb.RecentTxnBatchesController do
   require Logger
 
   alias Explorer.{Chain, PagingOptions}
-  alias Explorer.Chain.Hash
   alias Phoenix.View
 
 
@@ -19,7 +18,8 @@ defmodule BlockScoutWeb.RecentTxnBatchesController do
             txn_batches_html:
               View.render_to_string(BlockScoutWeb.TxnBatchView, "_recent_tile.html",
                 txn_batch: txn_batch,
-                conn: conn
+                conn: conn,
+                l1_explorer: Application.get_env(:block_scout_web, :l1_explorer_url)
               )
           }
         end)

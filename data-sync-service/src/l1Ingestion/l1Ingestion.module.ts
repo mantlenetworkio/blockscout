@@ -13,7 +13,7 @@ import {
   Transactions,
   Tokens,
   DaBatches,
-  DaBatchTransaction,
+  DaBatchTransactions,
 } from 'src/typeorm';
 import { EigenlayerModule } from '../grpc/eigenlayer.module';
 
@@ -31,7 +31,7 @@ import { EigenlayerModule } from '../grpc/eigenlayer.module';
       Transactions,
       Tokens,
       DaBatches,
-      DaBatchTransaction,
+      DaBatchTransactions,
     ]),
     EigenlayerModule,
   ],

@@ -13,7 +13,7 @@ import {
   Transactions,
   Tokens,
   DaBatches,
-  DaBatchTransaction,
+  DaBatchTransactions,
 } from 'src/typeorm';
 import {
   EntityManager,
@@ -67,8 +67,8 @@ export class L1IngestionService {
     private readonly tokensRepository: Repository<Tokens>,
     @InjectRepository(DaBatches)
     private readonly daBatchesRepository: Repository<DaBatches>,
-    @InjectRepository(DaBatchTransaction)
-    private readonly daBatchTransactionRepository: Repository<DaBatchTransaction>,
+    @InjectRepository(DaBatchTransactions)
+    private readonly DaBatchTransactionsRepository: Repository<DaBatchTransactions>,
     private readonly l2IngestionService: L2IngestionService,
     private readonly eigenlayerService: EigenlayerService,
   ) {
@@ -500,38 +500,22 @@ export class L1IngestionService {
       );
     }
   }
-  async createEigenBatchTransaction() {
+  async createEigenBatchTransaction(insertBatchData, insertHashData) {
     const dataSource = getConnection();
     const queryRunner = dataSource.createQueryRunner();
     await queryRunner.connect();
     await queryRunner.startTransaction();
     try {
-      await queryRunner.manager.save(DaBatches, {
-        batch_index: 1,
-        status: 'confirmed', // todo: if eigen layer proof of cousty launch we will support it
-        start_block: 1,
-        end_block: 2,
-        da_hash: '',
-        store_id: 1,
-        store_number: 1000,
-        de_fee: 10.1,
-        timestamp: new Date().toISOString(),
-        inserted_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
-      await queryRunner.manager.save(DaBatchTransaction, {
-        batch_index: 1,
-        tx_hash: '',
-        timestamp: new Date().toISOString(),
-        inserted_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      });
+      await queryRunner.manager.save(DaBatches, insertBatchData);
+      await queryRunner.manager.insert(DaBatchTransactions, insertHashData);
       await queryRunner.commitTransaction();
     } catch (error) {
       this.logger.error(`create eigenlayer batch transaction error: ${error}`);
       await queryRunner.rollbackTransaction();
+      return false;
     }
     await queryRunner.release();
+    return true;
   }
   async handleWaitTransaction() {
     // const latestBlock = await this.getCurrentBlockNumber();
@@ -839,30 +823,83 @@ export class L1IngestionService {
       result: result,
     };
   }
-  async syncEigenDaBatchTxn() {
-    // const batch_index = await this.getLatestBatchIndex();
-    // console.log('batch_index==', batch_index);
-    // const rollup_info = await this.getRollupInfoByBatchIndex(batch_index);
-    // console.log('rollup_info==', rollup_info);
+  async syncEigenDaBatch(fromStoreNumber) {
     try {
-      const data = await this.eigenlayerService.retrieveFramesAndData(19605);
-      const dataList = utils.RLP.decode(data['Data']);
-      console.log(dataList);
-      // if (data) {
-      //   const dataList = utils.RLP.decode(data['Data']);
-      //   for (let i = 0; i < dataList.length; i++) {
-      //     console.log('dataList[i][1]=', dataList[i][1]);
-      //     const dataFor = utils.RLP.decode(dataList[i][1]);
-      //     // console.log(dataFor);
-      //     // console.log(dataFor[3].toLocaleString('hex'));
-      //     // console.log(dataFor[7].toLocaleString('hex'));
-      //     // console.log(dataFor[8].toLocaleString('hex'));
-      //   }
-      // } else {
-      //   console.log('no data');
-      // }
-    } catch (err) {
-      console.log(err);
+      const {
+        Index,
+        StorePeriodLength,
+        Confirmed,
+        MsgHash,
+        DurationDataStoreId,
+        StoreNumber,
+        Fee,
+        InitTxHash,
+        ConfirmTxHash
+      } = await this.eigenlayerService.getDataStore(fromStoreNumber);
+      if (Index === undefined || Index === '') return false;
+      const CURRENT_TIMESTAMP = new Date().toISOString()
+      const batchIndex = StoreNumber - 1;
+      const insertBatchData = {
+        batch_index: batchIndex,
+        batch_size: StorePeriodLength,
+        status: Confirmed ? 'confirmed' : 'init',
+        da_hash: utils.hexlify(MsgHash),
+        store_id: DurationDataStoreId,
+        store_number: StoreNumber,
+        da_fee: Fee,
+        da_init_hash: utils.hexlify(InitTxHash),
+        da_store_hash: utils.hexlify(ConfirmTxHash),
+        from_store_number: fromStoreNumber,
+        inserted_at: CURRENT_TIMESTAMP,
+        updated_at: CURRENT_TIMESTAMP
+      }
+      console.log(insertBatchData)
+      const txHashList = await this.eigenlayerService.getTxn(StoreNumber) || [];
+      const insertHashData = [];
+      txHashList.forEach((item) => {
+        insertHashData.push({
+          batch_index: batchIndex,
+          block_number: item.BlockNumber,
+          tx_hash: item.TxHash,
+          inserted_at: CURRENT_TIMESTAMP,
+          updated_at: CURRENT_TIMESTAMP
+        })
+      })
+      const result = await this.createEigenBatchTransaction(insertBatchData, insertHashData);
+      return result;
+    } catch (error) {
+      this.logger.error(`[syncEigenDaBatch] error: ${error}`);
+      return false;
     }
   }
+  async getLastFromStoreNumber() {
+    const result = await this.daBatchesRepository
+      .createQueryBuilder()
+      .select('Max(from_store_number)', 'fromStoreNumber')
+      .getRawOne();
+    return Number(result.fromStoreNumber) || 0;
+  }
+  // async syncEigenDaBatchTxn() {
+  //   const data1 = await this.eigenlayerService.getDataStore(2);
+  //   const data2 = await this.eigenlayerService.getDataStore(3);
+  //   console.log(data1, data2);
+  //   return {
+  //     data1: {
+  //       ...data1,
+  //       MsgHash: utils.hexlify(data1.MsgHash),
+  //       InitTxHash: utils.hexlify(data1.InitTxHash),
+  //       ConfirmTxHash: utils.hexlify(data1.ConfirmTxHash),
+  //       DataCommitment: utils.hexlify(data1.DataCommitment),
+  //       SignatoryRecord: utils.hexlify(data1.SignatoryRecord),
+  //     },
+  //     data2: {
+  //       ...data2,
+  //       MsgHash: utils.hexlify(data2.MsgHash),
+  //       InitTxHash: utils.hexlify(data2.InitTxHash),
+  //       ConfirmTxHash: utils.hexlify(data2.ConfirmTxHash),
+  //       DataCommitment: utils.hexlify(data2.DataCommitment),
+  //       SignatoryRecord: utils.hexlify(data2.SignatoryRecord),
+  //     },
+  //   }
+  // }
 }

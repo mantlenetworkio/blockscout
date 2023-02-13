@@ -20,10 +20,10 @@
     <% end %>
     <span style="width: 10%;" in-tile data-from-now="<%= block_timestamp(@l1_to_l2) %>">
     </span>
-     <a style="width: 20%;" href="https://goerli.etherscan.io/tx/<%= @l1_to_l2.hash %>" target="_blank">
+     <a style="width: 20%;" href="<%= @l1_explorer %>/tx/<%= @l1_to_l2.hash %>" target="_blank">
          <%= sub_hash_string(@l1_to_l2.hash) %>...
        </a>
-    <a style="width: 20%;" href="https://goerli.etherscan.io/address/<%= @l1_to_l2.tx_origin %>" target="_blank">
+    <a style="width: 20%;" href="<%= @l1_explorer %>/address/<%= @l1_to_l2.tx_origin %>" target="_blank">
          <%= sub_hash_string(@l1_to_l2.tx_origin) %>...
        </a>
      <span style="width: 10%;">

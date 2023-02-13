@@ -9,14 +9,14 @@
     </span>
     <div style="flex:1;display:flex;flex-direction:column;">
         <div style="margin-bottom:5px;display:flex;">
-            <a href="https://goerli.etherscan.io/block/<%= @l1_to_l2.block %>" target="_blank">
+            <a href="<%= @l1_explorer %>/block/<%= @l1_to_l2.block %>" target="_blank">
                <%=  @l1_to_l2 .block %>
             </a>
         </div>
         <div class="recent-preview-item-content-l1-2-l2" style="display:flex;align-items:center">
             <span>L1 Tx#</span>
             <a 
-                href="https://goerli.etherscan.io/tx/<%= @l1_to_l2.hash %>" 
+                href="<%= @l1_explorer %>/tx/<%= @l1_to_l2.hash %>" 
                 target="_blank"
                 class="recent-preview-item-content-l1-2-l2-link"
             >

@@ -60,4 +60,8 @@ export class L1IngestionController {
       order_by,
     );
   }
+  // @Get('da')
+  // getDa() {
+  //   return this.l1IngestionService.syncEigenDaBatchTxn();
+  // }
 }
