@@ -17,7 +17,7 @@ defmodule Explorer.Chain.DaBatchTransaction do
 
   # @optional_attrs ~w(batch_index hash size pre_total_elements timestamp)a
 
-  @required_attrs ~w(batch_index tx_hash)a
+  @required_attrs ~w(batch_index tx_hash block_number)a
 
   @typedoc """
   How much work is required to find a hash with some number of leading 0s.  It is measured in hashes for PoW
@@ -57,11 +57,13 @@ defmodule Explorer.Chain.DaBatchTransaction do
   @type t :: %__MODULE__{
           batch_index: integer(),
           tx_hash: Hash.t(),
+          block_number: integer()
         }
 
   @primary_key {:batch_index, :integer, autogenerate: false}
   schema "da_batch_transactions" do
-    field(:tx_hash, Hash.Full)
+    field(:tx_hash, :string)
+    field(:block_number, :integer)
     #timestamps()
 
   end
