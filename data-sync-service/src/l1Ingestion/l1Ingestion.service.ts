@@ -507,7 +507,9 @@ export class L1IngestionService {
     await queryRunner.startTransaction();
     try {
       await queryRunner.manager.save(DaBatches, insertBatchData);
-      await queryRunner.manager.insert(DaBatchTransactions, insertHashData);
+      if (insertHashData) {
+        await queryRunner.manager.insert(DaBatchTransactions, insertHashData);
+      }
       await queryRunner.commitTransaction();
     } catch (error) {
       this.logger.error(`create eigenlayer batch transaction error: ${error}`);
@@ -853,18 +855,22 @@ export class L1IngestionService {
         inserted_at: CURRENT_TIMESTAMP,
         updated_at: CURRENT_TIMESTAMP
       }
-      console.log(insertBatchData)
-      const txHashList = await this.eigenlayerService.getTxn(StoreNumber) || [];
-      const insertHashData = [];
-      txHashList.forEach((item) => {
-        insertHashData.push({
-          batch_index: batchIndex,
-          block_number: item.BlockNumber,
-          tx_hash: item.TxHash,
-          inserted_at: CURRENT_TIMESTAMP,
-          updated_at: CURRENT_TIMESTAMP
+      let insertHashData = null;
+      // if Confirmed = true then get EigenDa tx list, else skip
+      if (Confirmed) {
+        const txHashList = await this.eigenlayerService.getTxn(StoreNumber) || [];
+        const insertHashList = [];
+        txHashList.forEach((item) => {
+          insertHashList.push({
+            batch_index: batchIndex,
+            block_number: item.BlockNumber,
+            tx_hash: item.TxHash,
+            inserted_at: CURRENT_TIMESTAMP,
+            updated_at: CURRENT_TIMESTAMP
+          })
         })
-      })
+        insertHashData = insertHashList
+      }
       const result = await this.createEigenBatchTransaction(insertBatchData, insertHashData);
       return result;
     } catch (error) {
