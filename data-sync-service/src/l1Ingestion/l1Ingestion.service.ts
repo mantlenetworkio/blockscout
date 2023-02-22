@@ -825,8 +825,15 @@ export class L1IngestionService {
       result: result,
     };
   }
-  async syncEigenDaBatch(fromStoreNumber) {
+  async syncEigenDaBatch(batchIndex) {
     try {
+      const latestBatchIndex = await this.eigenlayerService.getLatestTransactionBatchIndex();
+      if (batchIndex > Number(latestBatchIndex)) {
+        return false;
+      }
+      const {
+        data_store_id: fromStoreNumber
+      } = await this.eigenlayerService.getRollupStoreByRollupBatchIndex(batchIndex);
       const {
         Index,
         StorePeriodLength,
@@ -839,8 +846,7 @@ export class L1IngestionService {
         ConfirmTxHash
       } = await this.eigenlayerService.getDataStore(fromStoreNumber);
       if (Index === undefined || Index === '') return false;
-      const CURRENT_TIMESTAMP = new Date().toISOString()
-      const batchIndex = StoreNumber - 1;
+      const CURRENT_TIMESTAMP = new Date().toISOString();
       const insertBatchData = {
         batch_index: batchIndex,
         batch_size: StorePeriodLength,
@@ -884,6 +890,13 @@ export class L1IngestionService {
       .select('Max(from_store_number)', 'fromStoreNumber')
       .getRawOne();
     return Number(result.fromStoreNumber) || 0;
+  }
+  async getLastBatchIndex() {
+    const result = await this.daBatchesRepository
+      .createQueryBuilder()
+      .select('Max(batch_index)', 'batchIndex')
+      .getRawOne();
+    return Number(result.batchIndex) || 0;
   }
   // async syncEigenDaBatchTxn() {
   //   const data1 = await this.eigenlayerService.getDataStore(2);

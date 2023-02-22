@@ -11,7 +11,7 @@ const L2_SENT = 'l2_sent_block_number';
 const L2_RELAYED = 'l2_relayed_block_number';
 const TXN_BATCH = 'txn_batch_block_number';
 const STATE_BATCH = 'state_batch_block_number';
-const DA_BATCH = 'DA_BATCH';
+const DA_BATCH_INDEX = 'DA_BATCH_INDEX';
 const SYNC_STEP = 10;
 
 @Injectable()
@@ -32,7 +32,7 @@ export class TasksService {
     let l2_relayed_block_number = await this.cacheManager.get(L2_RELAYED);
     let txn_batch_block_number = await this.cacheManager.get(TXN_BATCH);
     let state_batch_block_number = await this.cacheManager.get(STATE_BATCH);
-    let da_batch_store_number = await this.cacheManager.get(DA_BATCH);
+    let da_batch_index = await this.cacheManager.get(DA_BATCH_INDEX);
     if (!l1_sent_block_number) {
       l1_sent_block_number =
         (await this.l1IngestionService.getSentEventsBlockNumber()) ||
@@ -63,9 +63,9 @@ export class TasksService {
         (await this.l1IngestionService.getStateBatchBlockNumber()) ||
         this.configService.get('L1_START_BLOCK_NUMBER');
     }
-    if (!da_batch_store_number) {
-      da_batch_store_number =
-        (await this.l1IngestionService.getLastFromStoreNumber() + 1) ||
+    if (!da_batch_index) {
+      da_batch_index =
+        (await this.l1IngestionService.getLastBatchIndex() + 1) ||
         1;
     }
     await this.cacheManager.set(L1_SENT, Number(l1_sent_block_number), {
@@ -86,7 +86,7 @@ export class TasksService {
     await this.cacheManager.set(STATE_BATCH, Number(state_batch_block_number), {
       ttl: 0,
     });
-    await this.cacheManager.set(DA_BATCH, Number(da_batch_store_number), {
+    await this.cacheManager.set(DA_BATCH_INDEX, Number(da_batch_index), {
       ttl: 0,
     });
     console.log('================end init cache================');
@@ -327,14 +327,14 @@ export class TasksService {
       this.logger.error(`error l1l2 [handle_l2l1_merge_waiting]: ${error}`);
     }
   }
-  @Interval(4000)
+  @Interval(5000)
   async eigen_da_batch_txns() {
     try {
-      const fromStoreNumber = Number(await this.cacheManager.get(DA_BATCH));
+      const fromStoreNumber = Number(await this.cacheManager.get(DA_BATCH_INDEX));
       console.log('start eigenda service fromStoreNumber: ', fromStoreNumber);
       const result = await this.l1IngestionService.syncEigenDaBatch(fromStoreNumber);
       if (result) {
-        await this.cacheManager.set(DA_BATCH, fromStoreNumber + 1, { ttl: 0 });
+        await this.cacheManager.set(DA_BATCH_INDEX, fromStoreNumber + 1, { ttl: 0 });
       }
     } catch (error) {
       this.logger.error(`error eigen da batches err: ${error}`);

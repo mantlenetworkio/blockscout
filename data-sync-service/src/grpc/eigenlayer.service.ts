@@ -37,4 +37,23 @@ export class EigenlayerService {
     );
     return data;
   }
+  
+  async getLatestTransactionBatchIndex() {
+    const { data } = await firstValueFrom(
+      this.httpService.get(`${this.configService.get('EIGEN_DA_URL')}/eigen/getLatestTransactionBatchIndex`)
+    );
+    return data;
+  }
+  async getRollupStoreByRollupBatchIndex(batchIndex: number) {
+    const { data } = await firstValueFrom(
+      this.httpService.post(`${this.configService.get('EIGEN_DA_URL')}/eigen/getRollupStoreByRollupBatchIndex`, {
+        batch_index: batchIndex
+      }, {
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      })
+    );
+    return data;
+  }
 }
