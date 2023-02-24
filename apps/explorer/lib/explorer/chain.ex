@@ -3362,7 +3362,7 @@ defmodule Explorer.Chain do
   }
 
   def recent_collated_da_batch_transactions_for_rap(options \\ [], batch_index) when is_list(options) do
-    total_da_batch_transactions_count = da_batch_transactions_available_count()
+    total_da_batch_transactions_count = da_batch_transactions_available_count(batch_index)
     fetched_da_batch_transactions =fetch_recent_collated_da_batch_transactions_for_rap(options, batch_index)
     %{total_da_batch_transactions_count: total_da_batch_transactions_count, da_batch_transactions: fetched_da_batch_transactions}
   end
@@ -3452,9 +3452,9 @@ defmodule Explorer.Chain do
     |> Repo.aggregate(:count, :da_hash)
   end
 
-  def da_batch_transactions_available_count do
+  def da_batch_transactions_available_count(batch_index) do
     DaBatchTransaction
-    |> where([da_batch_transaction], not is_nil(da_batch_transaction.batch_index))
+    |> where([da_batch_transaction], da_batch_transaction.batch_index == ^batch_index)
     |> limit(^@limit_showing_transactions)
     |> Repo.aggregate(:count, :batch_index)
   end

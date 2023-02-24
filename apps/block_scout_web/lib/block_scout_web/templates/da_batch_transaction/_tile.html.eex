@@ -2,10 +2,10 @@
     class="fade-in txn-list-table-item"
     data-identifier-hash="<%= @da_batch_transaction.tx_hash %>"
 >
-    <a style="width: 60%;" href="https://goerli.etherscan.io/tx/<%= @da_batch_transaction.tx_hash %>" target="_blank">
+    <a style="width: 60%;" href="/tx/<%= @da_batch_transaction.tx_hash %>" target="_blank">
       <%= @da_batch_transaction.tx_hash %>
     </a>
-    <a style="width: 40%;" href="https://goerli.etherscan.io/block/<%= @da_batch_transaction.block_number %>" target="_blank">
+    <a style="width: 40%;" href="/block/<%= @da_batch_transaction.block_number %>" target="_blank">
       <%= @da_batch_transaction.block_number %>
     </a>
 </div>

@@ -32,6 +32,8 @@ defmodule BlockScoutWeb.Chain do
     TxnBatch,
     L1ToL2,
     L2ToL1,
+    DaBatch,
+    DaBatchTransaction
   }
 
   alias Explorer.PagingOptions
@@ -367,6 +369,14 @@ defmodule BlockScoutWeb.Chain do
 
   defp paging_params(%CoinBalance{block_number: block_number}) do
     %{"block_number" => block_number}
+  end
+
+  defp paging_params(%DaBatch{batch_index: batch_index}) do
+    %{"batch_index" => batch_index}
+  end
+
+  defp paging_params(%DaBatchTransaction{block_number: block_number, batch_index: batch_index}) do
+    %{"block_number" => block_number, "batch_index" => batch_index}
   end
 
   defp paging_params(%{

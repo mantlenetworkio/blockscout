@@ -62,10 +62,8 @@ require Logger
         |> update_page_parameters(Chain.default_page_size(), Keyword.get(options, :paging_options))
       )
 
-    %{total_da_batch_transactions_count: eigenda_batch_count, da_batch_transactions: da_batch_transaction_plus_one} =
+    %{total_da_batch_transactions_count: da_batch_transactions_count, da_batch_transactions: da_batch_transaction_plus_one} =
       Chain.recent_collated_da_batch_transactions_for_rap(full_options, batch_index)
-      Logger.info("---------------=====")
-      Logger.info(da_batch_transaction_plus_one)
     {da_batch_transactions, next_page} =
       if fetch_page_number(params) == 1 do
         split_list_by_page(da_batch_transaction_plus_one)
@@ -77,7 +75,7 @@ require Logger
       if fetch_page_number(params) == 1 do
         page_size = Chain.default_page_size()
 
-        pages_limit = eigenda_batch_count |> Kernel./(page_size) |> Float.ceil() |> trunc()
+        pages_limit = da_batch_transactions_count |> Kernel./(page_size) |> Float.ceil() |> trunc()
 
         case next_page_params(next_page, da_batch_transactions, params) do
           nil ->

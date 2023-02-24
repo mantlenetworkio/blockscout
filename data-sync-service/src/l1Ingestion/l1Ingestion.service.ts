@@ -864,6 +864,7 @@ export class L1IngestionService {
   async syncEigenDaBatch(batchIndex) {
     try {
       const latestBatchIndex = await this.eigenlayerService.getLatestTransactionBatchIndex();
+      this.logger.log(`[syncEigenDaBatch] latestBatchIndex: ${latestBatchIndex}`);
       if (batchIndex > Number(latestBatchIndex)) {
         return false;
       }
@@ -881,7 +882,7 @@ export class L1IngestionService {
         InitTxHash,
         ConfirmTxHash
       } = await this.eigenlayerService.getDataStore(fromStoreNumber);
-      if (Index === undefined || Index === '') return false;
+      if (Index === undefined || Index === '') return true;
       const CURRENT_TIMESTAMP = new Date().toISOString();
       const insertBatchData = {
         batch_index: batchIndex,
