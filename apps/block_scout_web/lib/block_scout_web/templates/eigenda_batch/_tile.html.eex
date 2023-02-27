@@ -11,16 +11,10 @@
     <span style="width: 14%;">
       <%= @eigenda_batch .status %>
     </span>
-    <a style="width: 20%;" href="https://goerli.etherscan.io/tx/<%= @eigenda_batch .da_hash %>" target="_blank">
-      <%= sub_hash_string(@eigenda_batch .da_hash) %>...
-    </a>
+    <span style="width: 50%;" title="<%=@eigenda_batch.da_hash%>">
+      <%= @eigenda_batch .da_hash %>
+    </span>
     <span style="width: 10%;">
-      <%= @eigenda_batch .store_id %>
-    </span>
-    <span style="width: 15%;">
       <%= @eigenda_batch .store_number %>
-    </span>
-    <span style="width: 15%;">
-      <%= @eigenda_batch .da_fee %>
     </span>
 </div>
