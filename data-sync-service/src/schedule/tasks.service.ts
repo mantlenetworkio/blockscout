@@ -327,17 +327,17 @@ export class TasksService {
       this.logger.error(`error l1l2 [handle_l2l1_merge_waiting]: ${error}`);
     }
   }
-  @Interval(5000)
-  async eigen_da_batch_txns() {
-    try {
-      const fromStoreNumber = Number(await this.cacheManager.get(DA_BATCH_INDEX));
-      console.log('start eigenda service fromStoreNumber: ', fromStoreNumber);
-      const result = await this.l1IngestionService.syncEigenDaBatch(fromStoreNumber);
-      if (result) {
-        await this.cacheManager.set(DA_BATCH_INDEX, fromStoreNumber + 1, { ttl: 0 });
-      }
-    } catch (error) {
-      this.logger.error(`error eigen da batches err: ${error}`);
-    }
-  }
+  // @Interval(5000)
+  // async eigen_da_batch_txns() {
+  //   try {
+  //     const fromStoreNumber = Number(await this.cacheManager.get(DA_BATCH_INDEX));
+  //     console.log('start eigenda service fromStoreNumber: ', fromStoreNumber);
+  //     const result = await this.l1IngestionService.syncEigenDaBatch(fromStoreNumber);
+  //     if (result) {
+  //       await this.cacheManager.set(DA_BATCH_INDEX, fromStoreNumber + 1, { ttl: 0 });
+  //     }
+  //   } catch (error) {
+  //     this.logger.error(`error eigen da batches err: ${error}`);
+  //   }
+  // }
 }
