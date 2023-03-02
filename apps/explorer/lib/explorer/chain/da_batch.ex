@@ -17,7 +17,7 @@ defmodule Explorer.Chain.DaBatch do
 
   # @optional_attrs ~w(batch_index hash size pre_total_elements timestamp)a
 
-  @required_attrs ~w(batch_index batch_size status da_hash store_id store_number da_fee)a
+  @required_attrs ~w(batch_index batch_size status da_hash store_id store_number da_fee data_commitment init_time expire_time duration confirmer header da_init_hash init_block_number signatory_record da_store_hash)a
 
   @typedoc """
   How much work is required to find a hash with some number of leading 0s.  It is measured in hashes for PoW
@@ -62,6 +62,16 @@ defmodule Explorer.Chain.DaBatch do
           store_id: integer(),
           store_number: integer(),
           da_fee: Gas.t(),
+          data_commitment: Hash.t(),
+          init_time: DateTime.t(),
+          expire_time: DateTime.t(),
+          duration: integer(),
+          confirmer: Hash.t(),
+          header: String.t(),
+          da_init_hash: Hash.t(),
+          init_block_number: integer(),
+          signatory_record: String.t(),
+          da_store_hash: Hash.t(),
           #timestamp: DateTime.t(),
         }
 
@@ -74,6 +84,16 @@ defmodule Explorer.Chain.DaBatch do
     field(:store_id, :integer)
     field(:store_number, :integer)
     field(:da_fee, :decimal)
+    field(:data_commitment, :string)
+    field(:init_time, :utc_datetime_usec)
+    field(:expire_time, :utc_datetime_usec)
+    field(:duration, :integer)
+    field(:confirmer, :string)
+    field(:header, :string)
+    field(:da_init_hash, :string)
+    field(:init_block_number, :integer)
+    field(:signatory_record, :string)
+    field(:da_store_hash, :string)
     #timestamps()
 
   end

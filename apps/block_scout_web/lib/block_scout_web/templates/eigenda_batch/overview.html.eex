@@ -6,94 +6,173 @@
         <div class="card-body">
           <h1 class="card-title">
             <div style="display: inline-block; vertical-align: bottom; line-height: 25px;">
-              Txn Batch Details
+              EigenDA Batch Details
             </div>
           </h1>
           <dl class="row">
             <dt class="col-sm-3 col-lg-2 text-muted">
-              Batch Index:
+              Store Number:
             </dt>
             <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
-              <span class="transaction-details-address" data-test="transaction_detail_hash">
-                <%= @txn_batch.batch_index %>
-              </span>
-            </dd>
-          </dl>
-          
-          <dl class="row">
-            <dt class="col-sm-3 col-lg-2 text-muted">
-              L1 Timestamp:
-            </dt>
-            <dd class="col-sm-9 col-lg-10">
-              <span data-from-now="<%= block_timestamp(@txn_batch) %>"></span>
-            </dd>
-          </dl>
-          <dl class="row">
-            <dt class="col-sm-3 col-lg-2 text-muted">
-              Batch Size:
-            </dt>
-            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
-              <span class="transaction-details-address" data-test="transaction_detail_hash">
-                <%= @txn_batch.size %> transactions
-              </span>
-            </dd>
-          </dl>
-          <dl class="row">
-            <dt class="col-sm-3 col-lg-2 text-muted">
-              L1 Transaction Hash:
-            </dt>
-            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
-              <a 
-                href="https://goerli.etherscan.io/tx/<%= @txn_batch.hash %>" 
-                target="_blank"
-                class="transaction-details-address"
-            >
-                <%= @txn_batch.hash %>
-            </a>
-            </dd>
-          </dl>
-          <dl class="row">
-            <dt class="col-sm-3 col-lg-2 text-muted">
-              L1 Blocknumber:
-            </dt>
-            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
-              <span class="transaction-details-address" data-test="transaction_detail_hash">
-                <%= @txn_batch.l1_block_number %>
-              </span>
-            </dd>
-          </dl>
-          <dl class="row">
-            <dt class="col-sm-3 col-lg-2 text-muted">
-              Batch Root:
-            </dt>
-            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
-              <span class="transaction-details-address" data-test="transaction_detail_hash">
-                <%= @txn_batch.batch_root %>
-              </span>
-            </dd>
-          </dl>
-          <dl class="row">
-            <dt class="col-sm-3 col-lg-2 text-muted">
-              Previous Total Elements:
-            </dt>
-            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
-              <span class="transaction-details-address" data-test="transaction_detail_hash">
-                <%= @txn_batch.pre_total_elements %>
-              </span>
-            </dd>
-          </dl>
-          <dl class="row">
-            <dt class="col-sm-3 col-lg-2 text-muted">
-              Extra Data:
-            </dt>
-            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
-              <span class="transaction-details-address" data-test="transaction_detail_hash">
-                 <%= @txn_batch.extra_data %>
+              <span class="transaction-details-address">
+                <%= @da_batch.store_number %>
               </span>
             </dd>
           </dl>
 
-          
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Duration Data Store Id:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.store_id %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Data Commitment:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.data_commitment %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Msg Hash:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.da_hash %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Init Time:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.init_time %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Expire Time:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.expire_time %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Duration:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.duration %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Store Period Length:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.batch_size %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Confirmer:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.confirmer %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Header:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.header %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Init Tx Hash:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.da_init_hash %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Init Block Number:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.init_block_number %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Confirmed:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.status %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Signatory Record:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.signatory_record %>
+              </span>
+            </dd>
+          </dl>
+
+          <dl class="row">
+            <dt class="col-sm-3 col-lg-2 text-muted">
+              Confirm Tx Hash:
+            </dt>
+            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
+              <span class="transaction-details-address">
+                <%= @da_batch.da_store_hash %>
+              </span>
+            </dd>
+          </dl>
         </div>
       </div>
     </div>

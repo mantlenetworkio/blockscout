@@ -880,7 +880,23 @@ export class L1IngestionService {
         StoreNumber,
         Fee,
         InitTxHash,
-        ConfirmTxHash
+        ConfirmTxHash,
+        DataCommitment,
+        StakesFromBlockNumber,
+        InitTime,
+        ExpireTime,
+        Duration,
+        NumSys,
+        NumPar,
+        Degree,
+        Confirmer,
+        Header,
+        InitGasUsed,
+        InitBlockNumber,
+        EthSigned,
+        EigenSigned,
+        SignatoryRecord,
+        ConfirmGasUsed
       } = await this.eigenlayerService.getDataStore(fromStoreNumber);
       if (Index === undefined || Index === '') return true;
       const CURRENT_TIMESTAMP = new Date().toISOString();
@@ -896,7 +912,23 @@ export class L1IngestionService {
         da_store_hash: utils.hexlify(ConfirmTxHash),
         from_store_number: fromStoreNumber,
         inserted_at: CURRENT_TIMESTAMP,
-        updated_at: CURRENT_TIMESTAMP
+        updated_at: CURRENT_TIMESTAMP,
+        data_commitment: DataCommitment,
+        stakes_from_block_number: StakesFromBlockNumber,
+        init_time: new Date(Number(InitTime) * 1000).toISOString(),
+        expire_time: new Date(Number(ExpireTime) * 1000).toISOString(),
+        duration: Duration,
+        num_sys: NumSys,
+        num_par: NumPar,
+        degree: Degree,
+        confirmer: Confirmer,
+        header: Header,
+        init_gas_used: InitGasUsed,
+        init_block_number: InitBlockNumber,
+        eth_signed: EthSigned,
+        eigen_signed: EigenSigned,
+        signatory_record: SignatoryRecord,
+        confirm_gas_used: ConfirmGasUsed
       }
       let insertHashData = null;
       // if Confirmed = true then get EigenDa tx list, else skip

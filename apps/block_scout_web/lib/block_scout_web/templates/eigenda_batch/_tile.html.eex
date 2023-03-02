@@ -11,8 +11,8 @@
     <span style="width: 14%;">
       <%= @eigenda_batch .status %>
     </span>
-    <span style="width: 50%;" title="<%=@eigenda_batch.da_hash%>">
-      <%= @eigenda_batch .da_hash %>
+    <span style="width: 50%;">
+      <%= render "_link_to_detail.html", da_hash: @eigenda_batch.da_hash, data_test: "address_hash_link" %>
     </span>
     <span style="width: 10%;">
       <%= @eigenda_batch .store_number %>

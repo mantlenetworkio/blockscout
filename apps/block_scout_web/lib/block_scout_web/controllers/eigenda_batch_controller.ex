@@ -124,6 +124,14 @@ require Logger
     )
   end
 
-
+  def show(conn, %{"da_hash" => da_hash}) do
+    %{da_batch: da_batch} = Chain.da_batch_detail(da_hash);
+    render(
+          conn,
+          "overview.html",
+          da_batch: da_batch,
+          l1_explorer: Application.get_env(:block_scout_web, :l1_explorer_url)
+        )
+  end
 
 end

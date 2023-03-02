@@ -43,4 +43,37 @@ export class DaBatches {
 
   @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
   updated_at: Date;
+
+  @PrimaryColumn({ type: 'bytea' })
+  data_commitment: string;
+  @PrimaryColumn({ type: 'int8' })
+  stakes_from_block_number: number;
+  @PrimaryColumn({ type: 'timestamp' })
+  init_time: Date;
+  @PrimaryColumn({ type: 'timestamp' })
+  expire_time: Date;
+  @PrimaryColumn({ type: 'int8' })
+  duration: number;
+  @PrimaryColumn({ type: 'int8' })
+  num_sys: number;
+  @PrimaryColumn({ type: 'int8' })
+  num_par: number;
+  @PrimaryColumn({ type: 'int8' })
+  degree: number;
+  @PrimaryColumn({ type: 'bytea' })
+  confirmer: string;
+  @PrimaryColumn({ type: 'bytea' })
+  header: string;
+  @Column({ type: 'numeric', precision: 100 })
+  init_gas_used: number;
+  @PrimaryColumn({ type: 'int8' })
+  init_block_number: number;
+  @PrimaryColumn({ type: 'varchar' })
+  eth_signed: string;
+  @PrimaryColumn({ type: 'varchar' })
+  eigen_signed: string;
+  @PrimaryColumn({ type: 'bytea' })
+  signatory_record: string;
+  @Column({ type: 'numeric', precision: 100 })
+  confirm_gas_used: number;
 }

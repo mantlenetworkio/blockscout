@@ -3385,6 +3385,16 @@ defmodule Explorer.Chain do
     %{state_batch: state_batch}
   end
 
+
+  @spec da_batch_detail(String.t()) :: %{
+    :da_batch => DaBatch.t()
+  }
+
+  def da_batch_detail(da_hash) do
+    da_batch = fetch_da_batch(da_hash)
+    %{da_batch: da_batch}
+  end
+
   defp fetch_transactions_for_rap do
     Transaction
     |> order_by([transaction], desc: transaction.block_number, desc: transaction.index)
@@ -3424,6 +3434,13 @@ defmodule Explorer.Chain do
   defp fetch_state_batch(batch_index) do
     StateBatch
     |> where([state_batch], state_batch.batch_index == ^batch_index)
+    |> limit(1)
+    |> Repo.one()
+  end
+
+  defp fetch_da_batch(da_hash) do
+    DaBatch
+    |> where([da_batch], da_batch.da_hash == ^da_hash)
     |> limit(1)
     |> Repo.one()
   end
