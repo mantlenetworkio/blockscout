@@ -24,7 +24,7 @@ defmodule Indexer.Block.Catchup.Supervisor do
   def start_link(arguments, gen_server_options \\ []) do
     Supervisor.start_link(__MODULE__, arguments, gen_server_options)
   end
-
+#
   @impl Supervisor
   def init(bound_interval_supervisor_arguments) do
     Supervisor.init(
