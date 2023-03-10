@@ -343,7 +343,7 @@ export class L2IngestionService {
       where: {
         l2_token: '0x0000000000000000000000000000000000000000'
       },
-      take: 1
+      take: 1000
     })
     if (list.length <= 0) {
       this.logger.log('fixedL2ToL1TokenAddress0x000Bug finished');
