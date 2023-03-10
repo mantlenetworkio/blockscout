@@ -990,4 +990,84 @@ export class L1IngestionService {
   //     },
   //   }
   // }
+  async getDepositList(address, offset, limit) {
+    const result = []
+    const deposits = await this.txnL1ToL2Repository.findAndCount({
+      where: { from: address },
+      order: { queue_index: 'DESC' },
+      skip: offset,
+      take: limit,
+    });
+    const list = deposits[0];
+    const total = deposits[1];
+    for (const item of list) {
+      const l1_hash = item.hash ? Buffer.from(item.hash).toString() : null;
+      const l2_hash = item.l2_hash ? Buffer.from(item.l2_hash).toString() : null;
+      result.push({
+        l1_hash,
+        l2_hash,
+        transactionHash: Buffer.from(item.hash).toString(),
+        block: Number(item.block),
+        status: item.status,
+        l1_token: Buffer.from(item.l1_token).toString(),
+        l2_token: Buffer.from(item.l2_token).toString(),
+        from: Buffer.from(item.from).toString(),
+        to: Buffer.from(item.to).toString(),
+        amount: item.value,
+        blockTimestamp: new Date(item.timestamp).getTime(),
+        queue_index: item.queue_index,
+        name: null,
+        symbol: null,
+      });
+    }
+    return {
+      isSuccess: true,
+      items: result,
+      pagination: {
+        total,
+        offset,
+        limit
+      }
+    };
+  }
+  async getWithdrawList(address, offset, limit) {
+    const result = []
+    const withdrawals = await this.txnL2ToL1Repository.findAndCount({
+      where: { from: address },
+      order: { msg_nonce: 'DESC' },
+      skip: offset,
+      take: limit,
+    });
+    const list = withdrawals[0];
+    const total = withdrawals[1];
+    for (const item of list) {
+      const l1_hash = item.hash ? Buffer.from(item.hash).toString() : null;
+      const l2_hash = item.l2_hash ? Buffer.from(item.l2_hash).toString() : null;
+      result.push({
+        l1_hash,
+        l2_hash,
+        transactionHash: Buffer.from(item.l2_hash).toString(),
+        block: Number(item.block),
+        status: item.status,
+        l1_token: Buffer.from(item.l1_token).toString(),
+        l2_token: Buffer.from(item.l2_token).toString(),
+        from: Buffer.from(item.from).toString(),
+        to: Buffer.from(item.to).toString(),
+        amount: item.value,
+        blockTimestamp: new Date(item.timestamp).getTime(),
+        msg_nonce: item.msg_nonce,
+        name: null,
+        symbol: null,
+      });
+    }
+    return {
+      isSuccess: true,
+      items: result,
+      pagination: {
+        total,
+        offset,
+        limit
+      }
+    };
+  }
 }

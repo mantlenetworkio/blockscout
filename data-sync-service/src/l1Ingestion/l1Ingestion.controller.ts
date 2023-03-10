@@ -1,10 +1,13 @@
 import { L1IngestionService } from './l1Ingestion.service';
-import { Controller, Get, Post, Body } from '@nestjs/common';
+import { L2IngestionService } from '../l2Ingestion/l2Ingestion.service';
+import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
 import { isValidAddress, publicToAddress } from 'ethereumjs-util';
 
 @Controller('/')
 export class L1IngestionController {
-  constructor(private readonly l1IngestionService: L1IngestionService) {}
+  constructor(private readonly l1IngestionService: L1IngestionService,
+              private readonly L2IngestionService: L2IngestionService,
+    ) {}
 
   @Get('l1tol2')
   getL1ToL2Relation() {
@@ -60,8 +63,18 @@ export class L1IngestionController {
       order_by,
     );
   }
-  // @Get('da')
-  // getDa() {
-  //   return this.l1IngestionService.syncEigenDaBatchTxn();
-  // }
+  @Get('deposits/:address')
+  getDepositList(@Param('address') address, @Query('offset') offset = 0, @Query('limit') limit = 0) {
+    if (!isValidAddress(address)) {
+      return { ok: false, code: 4000, result: 'invalid address' };
+    }
+    return this.l1IngestionService.getDepositList(address, Number(offset), Number(limit));
+  }
+  @Get('withdrawals/:address')
+  getWithdrawList(@Param('address') address, @Query('offset') offset = 0, @Query('limit') limit = 0) {
+    if (!isValidAddress(address)) {
+      return { ok: false, code: 4000, result: 'invalid address' };
+    }
+    return this.l1IngestionService.getWithdrawList(address, Number(offset), Number(limit));
+  }
 }

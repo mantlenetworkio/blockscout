@@ -25,6 +25,8 @@ export class L2IngestionService {
     private readonly relayedEventsRepository: Repository<L2RelayedMessageEvents>,
     @InjectRepository(L2SentMessageEvents)
     private readonly sentEventsRepository: Repository<L2SentMessageEvents>,
+    @InjectRepository(L2ToL1)
+    private readonly l2ToL1Repository: Repository<L2ToL1>,
   ) {
     this.entityManager = getManager();
     const web3 = new Web3(
@@ -107,6 +109,7 @@ export class L2IngestionService {
       let from = '0x0000000000000000000000000000000000000000';
       let to = '0x0000000000000000000000000000000000000000';
       let value = '0';
+      // finalizeETHWithdrawal
       if (funName === '0x1532ec34') {
         const decodeMsg = iface.decodeFunctionData(
           'finalizeETHWithdrawal',
@@ -117,10 +120,13 @@ export class L2IngestionService {
         from = decodeMsg._from;
         to = decodeMsg._to;
         value = this.web3.utils.hexToNumberString(decodeMsg._amount._hex);
+        l1_token = '0x0000000000000000000000000000000000000000'
+        l2_token = '0xdeaddeaddeaddeaddeaddeaddeaddeaddead1111'
         this.logger.log(
           `finalizeETHWithdrawal: from: [${from}], to: [${to}], value: [${value}]`,
         );
       }
+      // finalizeERC20Withdrawal
       if (funName === '0xa9f9e675') {
         const decodeMsg = iface.decodeFunctionData(
           'finalizeERC20Withdrawal',
@@ -137,6 +143,7 @@ export class L2IngestionService {
           `finalizeERC20Withdrawal: l1_token: [${l1_token}], l2_token: [${l2_token}], from: [${from}], to: [${to}], value: [${value}]`,
         );
       }
+      // finalizeBitWithdrawal
       if (funName === '0x839f0ec6') {
         const decodeMsg = iface.decodeFunctionData(
           'finalizeBitWithdrawal',
@@ -147,6 +154,8 @@ export class L2IngestionService {
         from = decodeMsg._from;
         to = decodeMsg._to;
         value = this.web3.utils.hexToNumberString(decodeMsg._amount._hex);
+        l1_token = '0x1a4b46696b2bb4794eb3d4c26f1c55f9170fa4c5'
+        l2_token = '0xdeaddeaddeaddeaddeaddeaddeaddeaddead0000'
         this.logger.log(
           `finalizeBitWithdrawal: from: [${from}], to: [${to}], value: [${value}]`,
         );
@@ -327,5 +336,86 @@ export class L2IngestionService {
     return this.sentEventsRepository.findOne({
       where: { tx_hash: txHash },
     });
+  }
+  async fixedL2ToL1TokenAddress0x000Bug() {
+    const list = await this.sentEventsRepository.find({
+      select: ['tx_hash', 'message', 'message_nonce'],
+      where: {
+        l2_token: '0x0000000000000000000000000000000000000000'
+      },
+      take: 1
+    })
+    if (list.length <= 0) {
+      this.logger.log('fixedL2ToL1TokenAddress0x000Bug finished');
+      return [];
+    }
+    const updateL2ToL1Data = []
+    const updateSentEventsData = []
+    for (const item of list) {
+      const message = item.message.toString();
+      const tx_hash = item.tx_hash.toString();
+      const message_nonce = item.message_nonce.toString();
+      const funName = message.slice(0, 10);
+      let l1_token = '0x0000000000000000000000000000000000000000';
+      let l2_token = '0x0000000000000000000000000000000000000000';
+      // finalizeETHWithdrawal
+      if (funName === '0x1532ec34') {
+        l1_token = '0x0000000000000000000000000000000000000000'
+        l2_token = '0xdeaddeaddeaddeaddeaddeaddeaddeaddead1111'
+      }
+      // finalizeBitWithdrawal
+      if (funName === '0x839f0ec6') {
+        // mainnet BitDAO
+        l1_token = '0x1a4b46696b2bb4794eb3d4c26f1c55f9170fa4c5'
+        l2_token = '0xdeaddeaddeaddeaddeaddeaddeaddeaddead0000'
+      }
+      updateL2ToL1Data.push({
+        l2_hash: tx_hash,
+        l1_token,
+        l2_token
+      })
+      updateSentEventsData.push({
+        message_nonce,
+        l1_token,
+        l2_token
+      })
+    }
+    const dataSource = getConnection();
+    const queryRunner = dataSource.createQueryRunner();
+    await queryRunner.connect();
+    await queryRunner.startTransaction();
+    try {
+      await queryRunner.manager
+        .createQueryBuilder()
+        .setLock('pessimistic_write')
+        .insert()
+        .into(L2ToL1)
+        .values(updateL2ToL1Data)
+        .orUpdate(['l1_token', 'l2_token'], ['l2_hash'], {
+          skipUpdateIfNoValuesChanged: true
+        })
+        .execute();
+      await queryRunner.manager
+      .createQueryBuilder()
+      .setLock('pessimistic_write')
+      .insert()
+      .into(L2SentMessageEvents)
+      .values(updateSentEventsData)
+      .orUpdate(['l1_token', 'l2_token'], ['message_nonce'], {
+        skipUpdateIfNoValuesChanged: true
+      })
+      .execute();
+      await queryRunner.commitTransaction();
+      this.logger.log(`commit l1->l2 data successes`);
+    } catch (error) {
+      this.logger.error(
+        `create l1->l2 relation to l1_to_l2 table error ${error}`,
+      );
+      await queryRunner.rollbackTransaction();
+    } finally {
+      await queryRunner.release();
+      this.logger.log(`create l1->l2 relation to l1_to_l2 table finish`);
+    }
+    return updateL2ToL1Data;
   }
 }
