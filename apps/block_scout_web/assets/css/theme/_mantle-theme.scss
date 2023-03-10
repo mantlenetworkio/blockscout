@@ -77,12 +77,10 @@ $dark-primary-alternate: #65B3AE !default;
 		.token-transfer-item {
 			display: flex;
 			margin-bottom: 10px;
+			flex-direction: column;
 			&:last-child{
 				margin-bottom:0;
 			}
-			@media (max-width: 992px) {
-				flex-direction: column;
-			  }
 			.token-transfer-item-item {
 				display: flex;
 				margin-right: 40px;
