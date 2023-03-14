@@ -58,8 +58,7 @@
               Init Time:
             </dt>
             <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
-              <span class="transaction-details-address">
-                <%= @da_batch.init_time %>
+              <span class="transaction-details-address" in-tile data-from-now="<%= @da_batch.init_time %>">
               </span>
             </dd>
           </dl>
@@ -69,8 +68,7 @@
               Expire Time:
             </dt>
             <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
-              <span class="transaction-details-address">
-                <%= @da_batch.expire_time %>
+              <span class="transaction-details-address" in-tile data-from-now="<%= @da_batch.expire_time %>">
               </span>
             </dd>
           </dl>
@@ -81,18 +79,7 @@
             </dt>
             <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
               <span class="transaction-details-address">
-                <%= @da_batch.duration %>
-              </span>
-            </dd>
-          </dl>
-
-          <dl class="row">
-            <dt class="col-sm-3 col-lg-2 text-muted">
-              Store Period Length:
-            </dt>
-            <dd class="col-sm-9 col-lg-10" style="word-break: break-all;">
-              <span class="transaction-details-address">
-                <%= @da_batch.batch_size %>
+                <%= @da_batch.duration %> Hour(s)
               </span>
             </dd>
           </dl>

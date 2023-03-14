@@ -1,6 +1,6 @@
 import { Injectable, Logger, Inject, CACHE_MANAGER } from '@nestjs/common';
 import { Cache } from 'cache-manager';
-import { Interval } from '@nestjs/schedule';
+import { Interval, SchedulerRegistry } from '@nestjs/schedule';
 import { L1IngestionService } from '../l1Ingestion/l1Ingestion.service';
 import { L2IngestionService } from '../l2Ingestion/l2Ingestion.service';
 import { ConfigService } from '@nestjs/config';
@@ -21,8 +21,21 @@ export class TasksService {
     private readonly l1IngestionService: L1IngestionService,
     private readonly l2IngestionService: L2IngestionService,
     @Inject(CACHE_MANAGER) private cacheManager: Cache,
+    private schedulerRegistry: SchedulerRegistry
   ) {
     this.initCache();
+    const fixedL2ToL1TokenAddress0x000Bug = setInterval(async () => {
+      try {
+        const result = await this.l2IngestionService.fixedL2ToL1TokenAddress0x000Bug();
+        if (result.length <= 0) {
+          console.log('deleteInterval fixedL2ToL1TokenAddress0x000Bug');
+          this.schedulerRegistry.deleteInterval('fixedL2ToL1TokenAddress0x000Bug');
+        }
+      } catch (error) {
+        this.logger.error(`error fixedL2ToL1TokenAddress0x000Bug: ${error}`);
+      }
+    }, 1000);
+    this.schedulerRegistry.addInterval('fixedL2ToL1TokenAddress0x000Bug', fixedL2ToL1TokenAddress0x000Bug);
   }
   private readonly logger = new Logger(TasksService.name);
   async initCache() {
@@ -327,17 +340,17 @@ export class TasksService {
       this.logger.error(`error l1l2 [handle_l2l1_merge_waiting]: ${error}`);
     }
   }
-  // @Interval(5000)
-  // async eigen_da_batch_txns() {
-  //   try {
-  //     const fromStoreNumber = Number(await this.cacheManager.get(DA_BATCH_INDEX));
-  //     console.log('start eigenda service fromStoreNumber: ', fromStoreNumber);
-  //     const result = await this.l1IngestionService.syncEigenDaBatch(fromStoreNumber);
-  //     if (result) {
-  //       await this.cacheManager.set(DA_BATCH_INDEX, fromStoreNumber + 1, { ttl: 0 });
-  //     }
-  //   } catch (error) {
-  //     this.logger.error(`error eigen da batches err: ${error}`);
-  //   }
-  // }
+  @Interval(5000)
+  async eigen_da_batch_txns() {
+    try {
+      const fromStoreNumber = Number(await this.cacheManager.get(DA_BATCH_INDEX));
+      console.log('start eigenda service fromStoreNumber: ', fromStoreNumber);
+      const result = await this.l1IngestionService.syncEigenDaBatch(fromStoreNumber);
+      if (result) {
+        await this.cacheManager.set(DA_BATCH_INDEX, fromStoreNumber + 1, { ttl: 0 });
+      }
+    } catch (error) {
+      this.logger.error(`error eigen da batches err: ${error}`);
+    }
+  }
 }

@@ -59,6 +59,12 @@
                   to: state_batch_path(@conn, :index)
                 ) %>
 
+                <%= link(
+                  gettext("Eigenlayer Txn"),
+                  class: "dropdown-item #{tab_status("eigenda-batches", @conn.request_path)}",
+                  to: eigenda_batch_path(@conn, :index)
+                ) %>
+
                 <% json_rpc_named_arguments = Application.fetch_env!(:indexer, :json_rpc_named_arguments)%>
                 <% variant = Keyword.fetch!(json_rpc_named_arguments, :variant) %>
                 <%= if variant !== EthereumJSONRPC.Besu do %>
