@@ -876,6 +876,7 @@ export class L1IngestionService {
       const {
         data_store_id: fromStoreNumber
       } = await this.eigenlayerService.getRollupStoreByRollupBatchIndex(batchIndex);
+      if (+fromStoreNumber === 0) return false;
       const {
         Index,
         StorePeriodLength,
@@ -903,7 +904,7 @@ export class L1IngestionService {
         SignatoryRecord,
         ConfirmGasUsed
       } = await this.eigenlayerService.getDataStore(fromStoreNumber);
-      if (Index === undefined || Index === '') return true;
+      if (Index === undefined || Index === '') return false;
       const CURRENT_TIMESTAMP = new Date().toISOString();
       const insertBatchData = {
         batch_index: batchIndex,
