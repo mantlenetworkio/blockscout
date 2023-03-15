@@ -904,7 +904,7 @@ export class L1IngestionService {
         SignatoryRecord,
         ConfirmGasUsed
       } = await this.eigenlayerService.getDataStore(fromStoreNumber);
-      if (Index === undefined || Index === '') return false;
+      if (Index === undefined || Index === '') return true;
       const CURRENT_TIMESTAMP = new Date().toISOString();
       const insertBatchData = {
         batch_index: batchIndex,
