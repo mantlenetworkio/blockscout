@@ -142,7 +142,7 @@ defmodule Explorer.Repo do
 
       merged =
         %{url: db_url}
-        |> ConfigHelper.get_db_config()
+        |> ConfigHelper.get_api_db_url()
         |> Keyword.merge(repo_conf, fn
           _key, v1, nil -> v1
           _key, nil, v2 -> v2
@@ -166,7 +166,7 @@ defmodule Explorer.Repo do
 
       merged =
         %{url: db_url}
-        |> ConfigHelper.get_db_config()
+        |> ConfigHelper.get_account_db_url()
         |> Keyword.merge(repo_conf, fn
           _key, v1, nil -> v1
           _key, nil, v2 -> v2
