@@ -95,6 +95,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
 
     filtered_unique_numbers_count = Enum.count(filtered_unique_numbers)
     Logger.metadata(count: filtered_unique_numbers_count)
+    Logger.info("fetching internal #{inspect(block_numbers)}transactions for blocks123")
 
     Logger.debug("fetching internal transactions for blocks")
 
@@ -124,12 +125,12 @@ defmodule Indexer.Fetcher.InternalTransaction do
 
       {:error, reason} ->
         :ok
-        # Logger.error(fn -> ["failed to fetch internal transactions for blocks: ", inspect(reason)] end,
-        #   error_count: filtered_unique_numbers_count
-        # )
+        Logger.error(fn -> ["failed to fetch internal transactions for blocks: ", inspect(reason)] end,
+          error_count: filtered_unique_numbers_count
+        )
 
         # re-queue the de-duped entries
-        # {:retry, filtered_unique_numbers}
+        {:retry, filtered_unique_numbers}
 
       :ignore ->
         :ok
@@ -231,20 +232,20 @@ defmodule Indexer.Fetcher.InternalTransaction do
           address_hash_to_fetched_balance_block_number: address_hash_to_block_number
         })
 
-      # {:error, step, reason, _changes_so_far} ->
-      #   Logger.error(
-      #     fn ->
-      #       [
-      #         "failed to import internal transactions for blocks: ",
-      #         inspect(reason)
-      #       ]
-      #     end,
-      #     step: step,
-      #     error_count: Enum.count(unique_numbers)
-      #   )
+      {:error, step, reason, _changes_so_far} ->
+        Logger.error(
+          fn ->
+            [
+              "failed to import internal transactions for blocks: ",
+              inspect(reason)
+            ]
+          end,
+          step: step,
+          error_count: Enum.count(unique_numbers)
+        )
 
         # re-queue the de-duped entries
-        # {:retry, unique_numbers}
+        {:retry, unique_numbers}
     end
   end
 
