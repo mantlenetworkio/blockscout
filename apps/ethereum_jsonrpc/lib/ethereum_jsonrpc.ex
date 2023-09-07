@@ -39,6 +39,8 @@ defmodule EthereumJSONRPC do
     Variant
   }
 
+  require Logger
+
   @default_throttle_timeout :timer.minutes(2)
 
   @typedoc """
@@ -305,6 +307,9 @@ defmodule EthereumJSONRPC do
   Fetches internal transactions from variant API.
   """
   def fetch_internal_transactions(params_list, json_rpc_named_arguments) when is_list(params_list) do
+
+    Logger.info("fetch_internal_transactions #{inspect(params_list)} 4")
+    Logger.info("fetch_internal_transactions #{inspect(json_rpc_named_arguments)} 5")
     Keyword.fetch!(json_rpc_named_arguments, :variant).fetch_internal_transactions(
       params_list,
       json_rpc_named_arguments
