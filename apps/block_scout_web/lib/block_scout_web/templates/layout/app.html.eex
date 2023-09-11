@@ -152,9 +152,6 @@
       @view_module != Elixir.BlockScoutWeb.AddressWriteProxyView &&
       @view_module != Elixir.BlockScoutWeb.AddressDepositView &&
       @view_module != Elixir.BlockScoutWeb.AddressWithdrawView &&
-      @view_module != Elixir.BlockScoutWeb.AddressContractVerificationViaJsonView &&
-      @view_module != Elixir.BlockScoutWeb.AddressContractVerificationViaStandardJsonInputView &&
-      @view_module != Elixir.BlockScoutWeb.AddressContractVerificationViaMultiPartFilesView &&
       @view_module != Elixir.BlockScoutWeb.Tokens.TransferView &&
       @view_module != Elixir.BlockScoutWeb.Tokens.ContractView &&
       @view_module != Elixir.BlockScoutWeb.Tokens.HolderView &&
