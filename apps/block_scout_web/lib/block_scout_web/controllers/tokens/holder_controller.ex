@@ -11,6 +11,8 @@ defmodule BlockScoutWeb.Tokens.HolderController do
   alias Indexer.Fetcher.TokenTotalSupplyOnDemand
   alias Phoenix.View
 
+  require Logger
+
   import BlockScoutWeb.Chain,
     only: [
       split_list_by_page: 1,
@@ -44,6 +46,10 @@ defmodule BlockScoutWeb.Tokens.HolderController do
             )
         end
 
+      if not is_nil(next_page_path) do
+        next_page_path =
+          String.replace(next_page_path, "/accounts", "/token/0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000/token-holders")
+      end
 
       items =
         addresses_page
