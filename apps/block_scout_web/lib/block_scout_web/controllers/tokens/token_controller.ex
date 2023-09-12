@@ -14,7 +14,12 @@ defmodule BlockScoutWeb.Tokens.TokenController do
     case Chain.string_to_address_hash(address_hash_string) do
       {:ok, address_hash} ->
         {transfer_count, token_holder_count} = Chain.fetch_token_counters(address_hash, 30_000)
-        json(conn, %{transfer_count: transfer_count, token_holder_count: token_holder_count})
+        if(address_hash_string == "0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000") do
+          native_token_holder_count = Chain.native_token_holders()
+          json(conn, %{transfer_count: transfer_count, token_holder_count: native_token_holder_count})
+        else
+          json(conn, %{transfer_count: transfer_count, token_holder_count: token_holder_count})
+        end
       _ ->
         not_found(conn)
     end

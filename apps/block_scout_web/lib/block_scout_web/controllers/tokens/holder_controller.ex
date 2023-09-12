@@ -11,6 +11,8 @@ defmodule BlockScoutWeb.Tokens.HolderController do
   alias Indexer.Fetcher.TokenTotalSupplyOnDemand
   alias Phoenix.View
 
+  require Logger
+
   import BlockScoutWeb.Chain,
     only: [
       split_list_by_page: 1,
@@ -19,42 +21,99 @@ defmodule BlockScoutWeb.Tokens.HolderController do
     ]
 
   def index(conn, %{"token_id" => address_hash_string, "type" => "JSON"} = params) do
-    with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
-    {:ok, token} <- Chain.token_from_address_hash(address_hash),
-    token_balances <- Chain.fetch_token_holders_from_token_hash(address_hash, paging_options(params)),
-    {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params) do
- {token_balances_paginated, next_page} = split_list_by_page(token_balances)
+    if(address_hash_string == "0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000") do
+      {:ok, address_hash} = Chain.string_to_address_hash(address_hash_string)
+      {:ok, token} = Chain.token_from_address_hash(address_hash)
 
- next_page_path =
-   case next_page_params(next_page, token_balances_paginated, params) do
-     nil ->
-       nil
+      token_balances = Chain.native_token_holders()
 
-     next_page_params ->
-       token_holder_path(conn, :index, address_hash, Map.delete(next_page_params, "type"))
-   end
+      Logger.info("------ start ------")
+      Logger.info("#{inspect(address_hash)}")
+      Logger.info("#{inspect(token)}")
+      Logger.info("#{inspect(token_balances)}")
+      Logger.info("------ end ------")
 
- token_balances_json =
-   Enum.map(token_balances_paginated, fn token_balance ->
-     View.render_to_string(HolderView, "_token_balances.html",
-       address_hash: address_hash,
-       token_balance: token_balance,
-       token: token,
-       conn: conn
-     )
-   end)
 
- json(conn, %{items: token_balances_json, next_page_path: next_page_path})
-else
- {:restricted_access, _} ->
-   not_found(conn)
+      addresses =
+        params
+        |> paging_options()
+        |> Chain.list_top_addresses()
 
- :error ->
-   not_found(conn)
+      Logger.info("------ start ------")
+      Logger.info("#{inspect(addresses)}")
+      Logger.info("------ end ------")
 
- {:error, :not_found} ->
-   not_found(conn)
-end
+      {addresses_page, next_page} = split_list_by_page(addresses)
+
+        next_page_path =
+          case next_page_params(next_page, addresses_page, params) do
+            nil ->
+              nil
+
+            next_page_params ->
+              token_holder_path(conn, :index, address_hash, Map.delete(next_page_params, "type"))
+          end
+
+
+          items =
+            Enum.map(addresses_page, fn address ->
+              View.render_to_string(HolderView, "_token_balances.html",
+                address: address,
+                token: token,
+                conn: conn
+              )
+            end)
+
+
+      json(
+        conn,
+        %{
+          items: items,
+          next_page_path: next_page_path
+        }
+      )
+    else
+      with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
+           {:ok, token} <- Chain.token_from_address_hash(address_hash),
+           token_balances <- Chain.fetch_token_holders_from_token_hash(address_hash, paging_options(params)),
+           {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params) do
+        {token_balances_paginated, next_page} = split_list_by_page(token_balances)
+
+        Logger.info("------ start ------")
+        Logger.info("#{inspect(token_balances)}")
+        Logger.info("------ end ------")
+
+        next_page_path =
+          case next_page_params(next_page, token_balances_paginated, params) do
+            nil ->
+              nil
+
+            next_page_params ->
+              token_holder_path(conn, :index, address_hash, Map.delete(next_page_params, "type"))
+          end
+
+        token_balances_json =
+          Enum.map(token_balances_paginated, fn token_balance ->
+            View.render_to_string(HolderView, "_token_balances.html",
+              address_hash: address_hash,
+              token_balance: token_balance,
+              token: token,
+              conn: conn
+            )
+          end)
+
+        json(conn, %{items: token_balances_json, next_page_path: next_page_path})
+      else
+        {:restricted_access, _} ->
+          not_found(conn)
+
+        :error ->
+          not_found(conn)
+
+        {:error, :not_found} ->
+          not_found(conn)
+      end
+    end
   end
 
   def index(conn, %{"token_id" => address_hash_string} = params) do
