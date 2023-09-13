@@ -13,10 +13,11 @@ defmodule BlockScoutWeb.AddressTokenBalanceController do
         address_hash
         |> Chain.fetch_last_token_balances()
 
-        token_contract_address_hash_to_remove = Chain.string_to_address_hash("0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000")
+        {:ok, token_contract_address_hash_to_remove} = Chain.string_to_address_hash("0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000")
         filtered_token_balances = Enum.filter(token_balances, fn balance ->
           balance.token_contract_address_hash != token_contract_address_hash_to_remove
         end)
+
 
       Task.start_link(fn ->
         TokenBalanceOnDemand.trigger_fetch(address_hash, token_balances)
