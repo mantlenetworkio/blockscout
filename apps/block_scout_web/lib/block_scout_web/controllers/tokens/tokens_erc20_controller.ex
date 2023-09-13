@@ -54,14 +54,25 @@ defmodule BlockScoutWeb.TokensERC20Controller do
       |> Enum.map(fn {token, index} ->
         str = get_hash_str(token.contract_address.hash)
 
-        t = Map.put(token, :new_token_holder, token.holder_count)
-        View.render_to_string(
-          TokensView,
-          "_tile.html",
-          token: t,
-          index: items_count + index,
-          conn: conn
-        )
+        if(str == "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0000") do
+          t = Map.put(token, :new_token_holder, native_token_holder_count)
+          View.render_to_string(
+            TokensView,
+            "_tile.html",
+            token: t,
+            index: items_count + index,
+            conn: conn
+          )
+        else
+          t = Map.put(token, :new_token_holder, token.holder_count)
+          View.render_to_string(
+            TokensView,
+            "_tile.html",
+            token: t,
+            index: items_count + index,
+            conn: conn
+          )
+        end
 
 
       end)
