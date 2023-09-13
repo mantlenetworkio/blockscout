@@ -46,10 +46,12 @@ defmodule BlockScoutWeb.Tokens.HolderController do
             )
         end
 
-      if not is_nil(next_page_path) do
         next_page_path =
-          String.replace(next_page_path, "/accounts", "/token/0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000/token-holders")
-      end
+          if next_page_path != nil do
+            String.replace(next_page_path, "/accounts", "/token/0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000/token-holders")
+          else
+            nil
+          end
 
       items =
         addresses_page
