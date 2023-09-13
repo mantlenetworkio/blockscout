@@ -11,6 +11,8 @@ defmodule BlockScoutWeb.AddressTokenController do
   alias Indexer.Fetcher.CoinBalanceOnDemand
   alias Phoenix.View
 
+  require Logger
+
   def index(conn, %{"address_id" => address_hash_string, "type" => "JSON"} = params) do
     with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
          {:ok, address} <- Chain.hash_to_address(address_hash, [], false),
@@ -21,8 +23,15 @@ defmodule BlockScoutWeb.AddressTokenController do
 
       {tokens, next_page} = split_list_by_page(token_balances_plus_one)
 
+      # filtered out native token
+      {:ok, token_contract_address_hash_to_remove} = Chain.string_to_address_hash("0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000")
+      filtered_token_balances = Enum.filter(tokens, fn balance ->
+        balance.token_contract_address_hash != token_contract_address_hash_to_remove
+      end)
+
+
       next_page_path =
-        case next_page_params(next_page, tokens, params, true) do
+        case next_page_params(next_page, filtered_token_balances, params, true) do
           nil ->
             nil
 
@@ -30,8 +39,11 @@ defmodule BlockScoutWeb.AddressTokenController do
             address_token_path(conn, :index, address, Map.delete(next_page_params, "type"))
         end
 
+
+
+
       items =
-        tokens
+        filtered_token_balances
         |> Enum.map(fn token_balance ->
           View.render_to_string(
             AddressTokenView,
