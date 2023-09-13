@@ -8,6 +8,7 @@ defmodule BlockScoutWeb.TransactionLogController do
 
   alias BlockScoutWeb.{AccessHelper, Controller, TransactionController, TransactionLogView}
   alias Explorer.{Chain, Market}
+  alias Explorer.ExchangeRates.Token
   alias Phoenix.View
   import EthereumJSONRPC
 
@@ -137,7 +138,6 @@ defmodule BlockScoutWeb.TransactionLogController do
         current_user: current_user(conn),
         transaction: updated_token_price_history_transaction,
         exchange_rate: Market.get_exchange_rate(Explorer.coin()) || Token.null(),
-        # exchange_rate: Market.get_coin_exchange_rate(),
         from_tags: get_address_tags(transaction.from_address_hash, current_user(conn)),
         to_tags: get_address_tags(transaction.to_address_hash, current_user(conn)),
         tx_tags:
