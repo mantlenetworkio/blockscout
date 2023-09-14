@@ -59,7 +59,9 @@ require Logger
   def ether_balance(%Address{fetched_coin_balance: nil}), do: ""
 
   def ether_balance(%Address{fetched_coin_balance: balance}) do
-    format_wei_value(balance, :wei, include_unit_label: false)
+    balance
+      |> Wei.to(:wei)
+    # format_wei_value(balance, :wei, include_unit_label: false)
   end
 
   def balance_with_no_unit(%Address{fetched_coin_balance: nil}), do: ""
