@@ -20,6 +20,8 @@ defmodule BlockScoutWeb.AddressChannel do
   alias Explorer.Chain.Hash.Address, as: AddressHash
   alias Phoenix.View
 
+  require Logger
+
   intercept([
     "balance_update",
     "coin_balance",
@@ -100,6 +102,7 @@ defmodule BlockScoutWeb.AddressChannel do
         %{result: result},
         %Phoenix.Socket{handler: BlockScoutWeb.UserSocketV2} = socket
       ) do
+
     case result do
       {:ok, _contract} ->
         push(socket, "verification_result", %{status: "success"})
@@ -116,6 +119,11 @@ defmodule BlockScoutWeb.AddressChannel do
   end
 
   def handle_out("verification_result", result, socket) do
+
+    Logger.info("--- see me for result --- ")
+    Logger.info("#{inspect(socket)}")
+
+
     case result[:result] do
       {:ok, _contract} ->
         push(socket, "verification", %{verification_result: :ok})

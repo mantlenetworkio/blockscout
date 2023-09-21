@@ -10,7 +10,10 @@ defmodule Explorer.SmartContract.Solidity.PublisherWorker do
   alias Explorer.SmartContract.Solidity.{Publisher, PublishHelper}
   alias Explorer.ThirdPartyIntegrations.Sourcify
 
+  require Logger
+
   def perform({"flattened", %{"address_hash" => address_hash} = params, external_libraries, conn}) do
+    Logger.info("perform flattened")
     broadcast(:publish, address_hash, [address_hash, params, external_libraries], conn)
   end
 
@@ -59,6 +62,12 @@ defmodule Explorer.SmartContract.Solidity.PublisherWorker do
   end
 
   defp broadcast(method, address_hash, args, conn \\ nil) do
+    Logger.info("--- publisher broadcast--- ")
+    Logger.info("#{inspect(Publisher)}")
+    Logger.info("#{inspect(method)}")
+    Logger.info("#{inspect(args)}")
+    Logger.info("#{inspect(conn)}")
+
     result =
       case apply(Publisher, method, args) do
         {:ok, _contract} = result ->
@@ -67,6 +76,8 @@ defmodule Explorer.SmartContract.Solidity.PublisherWorker do
         {:error, changeset} ->
           {:error, changeset}
       end
+      Logger.info("--- result ---")
+      Logger.info("#{inspect(result)}")
 
     if conn do
       EventsPublisher.broadcast([{:contract_verification_result, {address_hash, result, conn}}], :on_demand)

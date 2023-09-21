@@ -65,11 +65,15 @@ defmodule BlockScoutWeb.Notifier do
         {:chain_event, :contract_verification_result, :on_demand, {address_hash, contract_verification_result, conn}}
       ) do
     %{view: view, compiler: compiler} = select_contract_type_and_form_view(conn.params)
+    Logger.info("--- contract_verification_result start ---")
+    Logger.info("#{inspect(conn)}")
 
     contract_verification_result =
       case contract_verification_result do
         {:ok, _} = result ->
           result
+
+          Logger.info("#{inspect(result)}")
 
         {:error, changeset} ->
           compiler_versions = fetch_compiler_version(compiler)
@@ -84,6 +88,8 @@ defmodule BlockScoutWeb.Notifier do
               conn: conn,
               retrying: true
             )
+          Logger.info("#{inspect(result)}")
+
 
           {:error, result}
       end
