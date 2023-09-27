@@ -124,6 +124,9 @@ if ($contractVerificationPage.length) {
 
   $('body').on('click', 'button[data-button-loading="animation"]', function () {
     $('#loading').removeClass('d-none')
+    if ($('#loading').siblings("[type='submit']")) {
+      $('#loading').parent().addClass('on-loading')
+    }
   })
 
   $(function () {
@@ -188,6 +191,9 @@ if ($contractVerificationPage.length) {
         dropzone.processQueue()
       } else {
         $('#loading').addClass('d-none')
+        if ($('#loading').siblings("[type='submit']")) {
+          $('#loading').parent().removeClass('on-loading')
+        }
       }
     })
 
@@ -205,6 +211,9 @@ if ($contractVerificationPage.length) {
         dropzone.processQueue()
       } else {
         $('#loading').addClass('d-none')
+        if ($('#loading').siblings("[type='submit']")) {
+          $('#loading').parent().removeClass('on-loading')
+        }
       }
     })
   })
