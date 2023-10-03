@@ -5264,3 +5264,39 @@ msgstr "도전 기간이 지났습니다"
 
 msgid "Txn Hash"
 msgstr "거래 해시"
+
+msgid "There was an error validating your contract, please try again."
+msgstr "계약을 유효성 검사하는 중에 오류가 발생했습니다，다시 시도해주세요."
+
+msgid "Error while sending request to verification microservice"
+msgstr "검증 마이크로서비스에 요청을 보내는 동안 오류가 발생했습니다."
+
+msgid "Unable to verify: unknown error."
+msgstr "확인할 수 없음: 알 수 없는 오류."
+
+msgid "The contract creation transaction has not been indexed yet. Please wait a few minutes and try again."
+msgstr "계약 생성 트랜잭션이 아직 인덱싱되지 않았습니다. 잠시 기다리시고 다시 시도해주세요."
+
+msgid "Autodetection of constructor arguments failed. Please try to input constructor arguments manually."
+msgstr "생성자 인수의 자동 감지에 실패했습니다. 수동으로 생성자 인수를 입력해보십시오."
+
+msgid "Deployed bytecode does not correspond to contract creation code."
+msgstr "배포된 바이트코드는 계약 생성 코드와 일치하지 않습니다."
+
+msgid "Invalid JSON file."
+msgstr "유효하지 않은 JSON 파일입니다."
+
+msgid "Wrong contract name, please try again."
+msgstr "잘못된 계약 이름입니다. 다시 시도해주세요."
+
+msgid "Constructor arguments do not match, please try again."
+msgstr "생성자 인수가 일치하지 않습니다. 다시 시도해주세요."
+
+msgid "Bytecode does not match, please try again."
+msgstr "바이트코드가 일치하지 않습니다. 다시 시도해주세요."
+
+msgid "Compiler version does not match, please try again."
+msgstr "컴파일러 버전이 일치하지 않습니다. 다시 시도해주세요."
+
+msgid "There was an error compiling your contract."
+msgstr "계약을 컴파일하는 중 오류가 발생했습니다."

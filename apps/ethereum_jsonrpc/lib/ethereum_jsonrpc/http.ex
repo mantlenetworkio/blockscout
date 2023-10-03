@@ -72,6 +72,7 @@ defmodule EthereumJSONRPC.HTTP do
 
     case http.json_rpc(url, json, headers(), http_options) do
       {:ok, %{status_code: status_code} = response} when status_code in [413, 504] ->
+        Logger.error("request: \n#{inspect(json)} \nreturned status #{status_code}")
         rechunk_json_rpc(chunks, options, response, decoded_response_bodies)
 
       {:ok, %{body: body, status_code: status_code}} ->
@@ -81,6 +82,7 @@ defmodule EthereumJSONRPC.HTTP do
         end
 
       {:error, :timeout} ->
+        Logger.error("request: \n#{inspect(json)} \ntimed out")
         rechunk_json_rpc(chunks, options, :timeout, decoded_response_bodies)
 
       {:error, _} = error ->

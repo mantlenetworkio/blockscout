@@ -5274,3 +5274,40 @@ msgstr "Период испытаний прошел"
 
 msgid "Txn Hash"
 msgstr "Хэш транзакции"
+
+
+msgid "There was an error validating your contract, please try again."
+msgstr "В процессе проверки вашего контракта произошла ошибка. Пожалуйста, попробуйте еще раз."
+
+msgid "Error while sending request to verification microservice"
+msgstr "Ошибка при отправке запроса к микросервису верификации"
+
+msgid "Unable to verify: unknown error."
+msgstr "Ошибка при проверке: неизвестная ошибка."
+
+msgid "The contract creation transaction has not been indexed yet. Please wait a few minutes and try again."
+msgstr "Транзакция создания контракта еще не была проиндексирована. Пожалуйста, подождите несколько минут и попробуйте снова."
+
+msgid "Autodetection of constructor arguments failed. Please try to input constructor arguments manually."
+msgstr "Автоматическое определение аргументов конструктора не удалось. Попробуйте ввести аргументы конструктора вручную."
+
+msgid "Deployed bytecode does not correspond to contract creation code."
+msgstr "Развернутый байт-код не соответствует коду создания контракта."
+
+msgid "Invalid JSON file."
+msgstr "Неверный JSON файл."
+
+msgid "Wrong contract name, please try again."
+msgstr "Неправильное название контракта, пожалуйста, попробуйте еще раз."
+
+msgid "Constructor arguments do not match, please try again."
+msgstr "Аргументы конструктора не совпадают, пожалуйста, попробуйте еще раз."
+
+msgid "Bytecode does not match, please try again."
+msgstr "Ошибка в байткоде, пожалуйста, попробуйте снова."
+
+msgid "Compiler version does not match, please try again."
+msgstr "Версия компилятора не совпадает, пожалуйста, попробуйте снова."
+
+msgid "There was an error compiling your contract."
+msgstr "Возникла ошибка при компиляции вашего контракта."

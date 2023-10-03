@@ -5131,3 +5131,38 @@ msgstr ""
 msgid "Disconnect"
 msgstr ""
 
+msgid "There was an error validating your contract, please try again."
+msgstr ""
+
+msgid "Error while sending request to verification microservice"
+msgstr ""
+
+msgid "Unable to verify: unknown error."
+msgstr ""
+
+msgid "The contract creation transaction has not been indexed yet. Please wait a few minutes and try again."
+msgstr ""
+
+msgid "Autodetection of constructor arguments failed. Please try to input constructor arguments manually."
+msgstr ""
+
+msgid "Deployed bytecode does not correspond to contract creation code."
+msgstr ""
+
+msgid "Invalid JSON file."
+msgstr ""
+
+msgid "Wrong contract name, please try again."
+msgstr ""
+
+msgid "Constructor arguments do not match, please try again."
+msgstr ""
+
+msgid "Bytecode does not match, please try again."
+msgstr ""
+
+msgid "Compiler version does not match, please try again."
+msgstr ""
+
+msgid "There was an error compiling your contract."
+msgstr ""
