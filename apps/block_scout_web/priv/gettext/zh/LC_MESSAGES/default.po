@@ -5266,3 +5266,39 @@ msgstr "挑战期已过"
 
 msgid "Txn Hash"
 msgstr "交易哈希"
+
+msgid "There was an error validating your contract, please try again."
+msgstr "验证您的合约时发生错误，请重试。"
+
+msgid "Error while sending request to verification microservice"
+msgstr "发送请求到验证微服务时出错"
+
+msgid "Unable to verify: unknown error."
+msgstr "无法验证：未知错误。"
+
+msgid "The contract creation transaction has not been indexed yet. Please wait a few minutes and try again."
+msgstr "合约创建交易尚未索引。请等待几分钟并重试。"
+
+msgid "Autodetection of constructor arguments failed. Please try to input constructor arguments manually."
+msgstr "构造函数参数的自动检测失败。请尝试手动输入构造函数参数。"
+
+msgid "Deployed bytecode does not correspond to contract creation code."
+msgstr "部署的字节码与合约创建的代码不相符。"
+
+msgid "Invalid JSON file."
+msgstr "无效的JSON文件。"
+
+msgid "Wrong contract name, please try again."
+msgstr "错误的合约名称，请重试。"
+
+msgid "Constructor arguments do not match, please try again."
+msgstr "构造函数参数不匹配，请重试。"
+
+msgid "Bytecode does not match, please try again."
+msgstr "字节码不匹配，请重试。"
+
+msgid "Compiler version does not match, please try again."
+msgstr "编译器版本不匹配，请重试。"
+
+msgid "There was an error compiling your contract."
+msgstr "编译您的合约时出现错误。"

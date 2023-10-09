@@ -5266,3 +5266,39 @@ msgstr "チャレンジ期間が終了しました"
 
 msgid "Txn Hash"
 msgstr "トランザクションハッシュ"
+
+msgid "There was an error validating your contract, please try again."
+msgstr "コントラクトの検証中にエラーが発生しました，もう一度お試しください。"
+
+msgid "Error while sending request to verification microservice"
+msgstr "検証マイクロサービスへのリクエスト送信中にエラーが発生しました。"
+
+msgid "Unable to verify: unknown error."
+msgstr "検証できません：不明なエラー。"
+
+msgid "The contract creation transaction has not been indexed yet. Please wait a few minutes and try again."
+msgstr "契約作成トランザクションはまだインデックスされていません。数分お待ちいただき、もう一度お試しください。"
+
+msgid "Autodetection of constructor arguments failed. Please try to input constructor arguments manually."
+msgstr "コンストラクタ引数の自動検出に失敗しました。手動でコンストラクタ引数を入力してみてください。"
+
+msgid "Deployed bytecode does not correspond to contract creation code."
+msgstr "デプロイされたバイトコードは、契約作成コードに対応していません。"
+
+msgid "Invalid JSON file."
+msgstr "無効なJSONファイルです。"
+
+msgid "Wrong contract name, please try again."
+msgstr "間違った契約名です。もう一度お試しください。"
+
+msgid "Constructor arguments do not match, please try again."
+msgstr "コンストラクタの引数が一致しません。もう一度お試しください。"
+
+msgid "Bytecode does not match, please try again."
+msgstr "バイトコードが一致しません。もう一度試してください。"
+
+msgid "Compiler version does not match, please try again."
+msgstr "コンパイラのバージョンが一致しません。もう一度お試しください。"
+
+msgid "There was an error compiling your contract."
+msgstr "コントラクトのコンパイル中にエラーが発生しました。"

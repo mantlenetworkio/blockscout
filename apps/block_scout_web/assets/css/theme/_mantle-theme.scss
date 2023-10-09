@@ -24,6 +24,17 @@ body {
   overscroll-behavior: none;
 }
 
+.smart-contract-form-buttons {
+  &.on-loading{
+    #loading{
+      position: relative !important;
+    }
+    [type='submit']{
+      display: none;
+    }
+  }
+}
+
 .scroll-top-btn {
   padding: 0;
   border: none;

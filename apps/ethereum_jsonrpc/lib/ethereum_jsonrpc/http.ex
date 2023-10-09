@@ -81,6 +81,7 @@ defmodule EthereumJSONRPC.HTTP do
         end
 
       {:error, :timeout} ->
+        Logger.error("request: \n#{inspect(json)} \ntimed out")
         rechunk_json_rpc(chunks, options, :timeout, decoded_response_bodies)
 
       {:error, _} = error ->
