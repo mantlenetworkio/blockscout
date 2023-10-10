@@ -66,38 +66,37 @@ defmodule BlockScoutWeb.Notifier do
     %{view: view, compiler: compiler} = select_contract_type_and_form_view(conn.params)
 
       cookie_header = Plug.Conn.get_req_header(conn, "cookie")
-      Logger.info("--- cookie header ---")
-      Logger.info("#{inspect(cookie_header)}")
 
+      case cookie_header do
+        [cookies] when is_binary(cookies) ->
+          # Split the cookies string into a list of individual cookies
+          cookies_list = String.split(cookies, ";")
 
-      # case cookie_header do
-      #   [cookies] when is_binary(cookies) ->
-      #     # Split the cookies string into a list of individual cookies
-      #     cookies_list = String.split(cookies, ";")
-      #     # Iterate through the cookies to find the value you're interested in
-      #     desired_cookie_value =
-      #       Enum.find_value(cookies_list, fn cookie ->
-      #         [name, value] = String.split(cookie, "=")
-      #         if String.trim(name) == "locale" do
-      #           String.trim(value)
-      #         else
-      #           nil
-      #         end
-      #       end)
+          # Iterate through the cookies to find the value you're interested in
+          desired_cookie_value =
+            Enum.find_value(cookies_list, fn cookie ->
+              trim_string = String.trim(cookie)
+              if String.contains?(trim_string,  "locale") do
+                [_, value] = String.split(trim_string, "=")
+                String.trim(value)
+              else
+                nil
+              end
+            end)
 
-      #     # If the desired cookie was found, `desired_cookie_value` will contain its value
-      #     case desired_cookie_value do
-      #       nil ->
-      #         # Logger.info("The desired cookie was not found")
-      #         Gettext.put_locale(BlockScoutWeb.Gettext, "en")
-      #       _ ->
-      #         Gettext.put_locale(BlockScoutWeb.Gettext, desired_cookie_value)
-      #         # Logger.info("The value of the desired cookie is: #{desired_cookie_value}")
-      #     end
+          # If the desired cookie was found, `desired_cookie_value` will contain its value
+          case desired_cookie_value do
+            nil ->
+              # Logger.info("The desired cookie was not found")
+              Gettext.put_locale(BlockScoutWeb.Gettext, "en")
+            _ ->
+              Gettext.put_locale(BlockScoutWeb.Gettext, desired_cookie_value)
+              # Logger.info("The value of the desired cookie is: #{desired_cookie_value}")
+          end
 
-      #   _ ->
-      #     Logger.info("No cookie header found in the request")
-      # end
+        _ ->
+          Logger.info("No cookie header found in the request")
+      end
 
     contract_verification_result =
       case contract_verification_result do
