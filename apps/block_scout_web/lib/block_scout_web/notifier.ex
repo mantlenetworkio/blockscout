@@ -71,11 +71,13 @@ defmodule BlockScoutWeb.Notifier do
         [cookies] when is_binary(cookies) ->
           # Split the cookies string into a list of individual cookies
           cookies_list = String.split(cookies, ";")
+
           # Iterate through the cookies to find the value you're interested in
           desired_cookie_value =
             Enum.find_value(cookies_list, fn cookie ->
-              [name, value] = String.split(cookie, "=")
-              if String.trim(name) == "locale" do
+              trim_string = String.trim(cookie)
+              if String.contains?(trim_string,  "locale") do
+                [_, value] = String.split(trim_string, "=")
                 String.trim(value)
               else
                 nil
