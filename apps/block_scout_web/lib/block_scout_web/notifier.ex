@@ -65,7 +65,10 @@ defmodule BlockScoutWeb.Notifier do
       ) do
     %{view: view, compiler: compiler} = select_contract_type_and_form_view(conn.params)
 
-      # cookie_header = Plug.Conn.get_req_header(conn, "cookie")
+      cookie_header = Plug.Conn.get_req_header(conn, "cookie")
+      Logger.info("--- cookie header ---")
+      Logger.info("#{inspect(cookie_header)}")
+
 
       # case cookie_header do
       #   [cookies] when is_binary(cookies) ->
