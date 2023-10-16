@@ -11,6 +11,8 @@ defmodule BlockScoutWeb.UserSocketV2 do
   channel("transactions:*", BlockScoutWeb.TransactionChannel)
   channel("tokens:*", BlockScoutWeb.TokenChannel)
 
+  channel("mantle_deposits:*", BlockScoutWeb.MantleDepositChannel)
+
   def connect(_params, socket) do
     {:ok, socket}
   end

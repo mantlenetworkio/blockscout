@@ -274,6 +274,10 @@ defmodule BlockScoutWeb.Notifier do
     Endpoint.broadcast("tokens:#{to_string(contract_address_hash)}", "token_total_supply", %{token: token})
   end
 
+  def handle_event({:chain_event, :mantle_deposits, :realtime, deposits}) do
+    broadcast_mantle_deposits(deposits, "mantle_deposits:new_deposits", "deposits")
+  end
+
   def handle_event({:chain_event, :changed_bytecode, :on_demand, [address_hash]}) do
     Endpoint.broadcast("addresses:#{to_string(address_hash)}", "changed_bytecode", %{})
   end
@@ -447,6 +451,10 @@ defmodule BlockScoutWeb.Notifier do
         internal_transaction: internal_transaction
       })
     end
+  end
+
+  defp broadcast_mantle_deposits(deposits, deposit_channel, event) do
+    Endpoint.broadcast(deposit_channel, event, %{deposits: deposits})
   end
 
   defp broadcast_transactions_websocket_v2(transactions) do

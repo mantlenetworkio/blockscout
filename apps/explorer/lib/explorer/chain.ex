@@ -2721,6 +2721,73 @@ defmodule Explorer.Chain do
     accounts_with_n
   end
 
+
+  def get_table_rows_total_count(module, options) do
+    table_name = module.__schema__(:source)
+
+    count = CacheHelper.estimated_count_from(table_name, options)
+
+    if is_nil(count) do
+      select_repo(options).aggregate(module, :count, timeout: :infinity)
+    else
+      count
+    end
+  end
+
+  @doc """
+  Lists `t:Explorer.Chain.MantleDeposit.t/0`'s' in descending order based on l1_block_number and l2_transaction_hash.
+
+  """
+  @spec list_mantle_deposits :: [L1ToL2.t()]
+  def list_mantle_deposits(options \\ []) do
+    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+
+    base_query =
+      from(d in L1ToL2,
+        # where: not is_nil(d.l2_hash),
+        order_by: [desc: d.block, desc: d.l2_hash]
+      )
+
+    base_query
+    |> page_deposits(paging_options)
+    |> limit(^paging_options.page_size)
+    |> select_repo(options).all()
+  end
+
+    @doc """
+  Lists `t:Explorer.Chain.OptimismWithdrawal.t/0`'s' in descending order based on message nonce.
+
+  """
+  @spec list_mantle_withdrawals :: [L2ToL1.t()]
+  def list_mantle_withdrawals(options \\ []) do
+    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+
+    base_query =
+      from(w in L2ToL1,
+        order_by: [desc: w.msg_nonce],
+        # left_join: l2_tx in Transaction,
+        # on: w.l2_hash == l2_tx.hash,
+        # left_join: l2_block in Block,
+        # on: w.block == l2_block.number,
+        select: %{
+          msg_nonce: w.msg_nonce,
+          hash: w.hash,
+          l2_block_number: w.block,
+          l2_timestamp: w.timestamp,
+          l2_transaction_hash: w.l2_hash,
+          l1_transaction_hash: w.hash,
+          from: w.from,
+          challenge_period_end: w.updated_at,
+          status: w.status
+        }
+      )
+
+    base_query
+    |> page_mantle_withdrawals(paging_options)
+    |> limit(^paging_options.page_size)
+    |> select_repo(options).all()
+  end
+
   defp fetch_top_addresses(options) do
     paging_options = Keyword.get(options, :paging_options, @default_paging_options)
 
@@ -5325,6 +5392,21 @@ defmodule Explorer.Chain do
         (address.fetched_coin_balance == ^coin_balance and address.hash > ^hash) or
           address.fetched_coin_balance < ^coin_balance
     )
+  end
+
+  defp page_deposits(query, %PagingOptions{key: nil}), do: query
+
+  defp page_deposits(query, %PagingOptions{key: {block_number, l2_tx_hash}}) do
+    from(d in query,
+      where: d.block < ^block_number,
+      or_where: d.block == ^block_number and d.l2_hash < ^l2_tx_hash
+    )
+  end
+
+  defp page_mantle_withdrawals(query, %PagingOptions{key: nil}), do: query
+
+  defp page_mantle_withdrawals(query, %PagingOptions{key: {nonce}}) do
+    from(w in query, where: w.msg_nonce < ^nonce)
   end
 
   defp page_blocks(query, %PagingOptions{key: nil}), do: query
