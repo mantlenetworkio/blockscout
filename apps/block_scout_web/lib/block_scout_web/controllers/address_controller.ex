@@ -143,6 +143,29 @@ defmodule BlockScoutWeb.AddressController do
     end
   end
 
+  def address_counters(conn, %{"id" => address_hash_string, "last-sync-block" => "true" }) do
+    with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
+         {:ok, address} <- Chain.hash_to_address(address_hash) do
+      {validation_count} = Chain.address_counters(address)
+
+      transactions_from_db = address.transactions_count || 0
+      token_transfers_from_db = address.token_transfers_count || 0
+      address_gas_usage_from_db = address.gas_used || 0
+
+      last_sync_block = Chain.address_last_sync_block(address_hash)
+
+      json(conn, %{
+        transaction_count: transactions_from_db,
+        token_transfer_count: token_transfers_from_db,
+        gas_usage_count: address_gas_usage_from_db,
+        validation_count: validation_count,
+        last_sync_block: last_sync_block
+      })
+    else
+      _ -> not_found(conn)
+    end
+  end
+
   def address_counters(conn, %{"id" => address_hash_string}) do
     with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
          {:ok, address} <- Chain.hash_to_address(address_hash) do
