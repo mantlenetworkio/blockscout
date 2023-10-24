@@ -1505,6 +1505,24 @@ defmodule Explorer.Chain do
     end
   end
 
+  def address_last_sync_block(address_hash) do
+    query =
+      from(
+        t in Transaction,
+        where: t.from_address_hash == ^address_hash,
+        order_by: [desc: t.block_number],
+        limit: 1,
+        select: t.block_number
+      )
+
+    block_number = Repo.one(query)
+    if block_number do
+      block_number
+    else
+      nil
+    end
+  end
+
   defp compose_smart_contract(address_result, hash, options) do
     address_verified_twin_contract =
       get_minimal_proxy_template(hash, options) ||
