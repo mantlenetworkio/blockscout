@@ -16,6 +16,10 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
   import BlockScoutWeb.Account.AuthController, only: [current_user: 1]
 
+  import HTTPoison
+  import EthereumJSONRPC
+
+
   @api_true [api?: true]
 
   def render("message.json", assigns) do
@@ -349,7 +353,20 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
     decoded_input_data = decoded_input(decoded_input)
 
+    # for l2 status
+    tx_status =
+      EthereumJSONRPC.request(%{id: 0, method: "eth_getTxStatusDetailByHash", params: [transaction.hash]})
+      |> json_rpc(Application.get_env(:indexer, :json_rpc_named_arguments))
+      |> case do
+        {:ok, tx} ->
+          tx["status"]
+
+        {:error, _} ->
+          nil
+      end
+
     %{
+      "tx_status" => tx_status,
       "hash" => transaction.hash,
       "result" => status,
       "status" => transaction.status,
