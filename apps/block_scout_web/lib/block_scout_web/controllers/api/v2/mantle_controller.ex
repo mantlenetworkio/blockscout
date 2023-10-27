@@ -9,7 +9,7 @@ defmodule BlockScoutWeb.API.V2.MantleController do
     ]
 
   alias Explorer.Chain
-  alias Explorer.Chain.{L1ToL2}
+  alias Explorer.Chain.{L1ToL2, L2ToL1}
 
   action_fallback(BlockScoutWeb.API.V2.FallbackController)
 
@@ -71,6 +71,9 @@ defmodule BlockScoutWeb.API.V2.MantleController do
     })
   end
 
+  def withdrawals_count(conn, _params) do
+    items_count(conn, L2ToL1)
+  end
 
   defp items_count(conn, module) do
     count = Chain.get_table_rows_total_count(module, api?: true)

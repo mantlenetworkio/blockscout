@@ -203,7 +203,7 @@ defmodule BlockScoutWeb.ApiRouter do
       get("/deposits", V2.MantleController, :deposits)
       get("/deposits/count", V2.MantleController, :deposits_count)
       get("/withdrawals", V2.MantleController, :withdrawals)
-      # get("/withdrawals/count", V2.OptimismController, :withdrawals_count)
+      get("/withdrawals/count", V2.MantleController, :withdrawals_count)
     end
 
     scope "/withdrawals" do

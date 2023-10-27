@@ -55,11 +55,25 @@ defmodule BlockScoutWeb.API.V2.MantleView do
 
       # msg_nonce_version = Bitwise.bsr(Decimal.to_integer(w.msg_nonce), 240)
 
+      {from_address, from_address_hash} =
+        with false <- is_nil(w.from),
+            {:ok, address_hash} <- Chain.string_to_address_hash(w.from),
+            {:ok, address} <-
+               Chain.hash_to_address(
+                address_hash,
+                 [],
+                 false
+               ) do
+          {address, address.hash}
+        else
+          _ -> {nil, nil}
+        end
+
       %{
         "msg_nonce_raw" => 1,
         "msg_nonce" => w.msg_nonce,
         "msg_nonce_version" => 1,
-        "from" => w.from,
+        "from" => Helper.address_with_info(conn, from_address, from_address_hash, w.from),
         "l2_tx_hash" => w.l2_transaction_hash,
         "l2_timestamp" => w.l2_timestamp,
         "status" => withdrawal_status(w.status),
