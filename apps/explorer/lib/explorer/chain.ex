@@ -2773,7 +2773,7 @@ defmodule Explorer.Chain do
   end
 
     @doc """
-  Lists `t:Explorer.Chain.OptimismWithdrawal.t/0`'s' in descending order based on message nonce.
+  Lists `t:Explorer.Chain.MantleWithdrawal.t/0`'s' in descending order based on message nonce.
 
   """
   @spec list_mantle_withdrawals :: [L2ToL1.t()]
@@ -2783,10 +2783,6 @@ defmodule Explorer.Chain do
     base_query =
       from(w in L2ToL1,
         order_by: [desc: w.msg_nonce],
-        # left_join: l2_tx in Transaction,
-        # on: w.l2_hash == l2_tx.hash,
-        # left_join: l2_block in Block,
-        # on: w.block == l2_block.number,
         select: %{
           msg_nonce: w.msg_nonce,
           hash: w.hash,
@@ -2802,6 +2798,22 @@ defmodule Explorer.Chain do
 
     base_query
     |> page_mantle_withdrawals(paging_options)
+    |> limit(^paging_options.page_size)
+    |> select_repo(options).all()
+  end
+
+  @spec list_mantle_withdrawals :: [DaBatch.t()]
+  def list_mantle_da(options \\ []) do
+    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+
+    base_query =
+      from(da in DaBatch,
+        where: not is_nil(da.batch_index),
+        order_by: [desc: da.batch_index]
+      )
+
+    base_query
+    |> page_mantle_da(paging_options)
     |> limit(^paging_options.page_size)
     |> select_repo(options).all()
   end
@@ -5427,6 +5439,12 @@ defmodule Explorer.Chain do
     from(w in query, where: w.msg_nonce < ^nonce)
   end
 
+  defp page_mantle_da(query, %PagingOptions{key: nil}), do: query
+
+  defp page_mantle_da(query, %PagingOptions{key: {index}}) do
+    from(w in query, where: w.batch_index < ^index)
+  end
+
   defp page_blocks(query, %PagingOptions{key: nil}), do: query
 
   defp page_blocks(query, %PagingOptions{key: {block_number}}) do
@@ -6943,6 +6961,27 @@ defmodule Explorer.Chain do
     inputs
     |> Enum.find(fn input ->
       Map.get(input, "name") == "_masterCopy"
+    end)
+  end
+
+  def gateway_implementation_pattern?(method) do
+    Map.get(method, "type") == "constructor" &&
+      method
+      |> Enum.find(fn item ->
+        case item do
+          {"inputs", inputs} ->
+            gateway_implementation_input?(inputs)
+
+          _ ->
+            false
+        end
+      end)
+  end
+
+  defp gateway_implementation_input?(inputs) do
+    inputs
+    |> Enum.find(fn input ->
+      Map.get(input, "name") == "gatewayImplementation"
     end)
   end
 

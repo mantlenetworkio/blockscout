@@ -204,6 +204,7 @@ defmodule BlockScoutWeb.ApiRouter do
       get("/deposits/count", V2.MantleController, :deposits_count)
       get("/withdrawals", V2.MantleController, :withdrawals)
       get("/withdrawals/count", V2.MantleController, :withdrawals_count)
+      # get("/mantle-da", V2.MantleController, :mantle_da)
     end
 
     scope "/withdrawals" do

@@ -24,14 +24,7 @@ defmodule BlockScoutWeb.API.V2.MantleController do
       |> Chain.list_mantle_deposits()
       |> split_list_by_page()
 
-    Logger.info("--- check here ---")
-    # Logger.info("#{inspect(deposits)}")
-    Logger.info("#{inspect(next_page)}")
-
     next_page_params = next_page_params(next_page, deposits, params)
-
-    Logger.info("--- next_page_params ---")
-    Logger.info("#{inspect(next_page_params)}")
 
     conn
     |> put_status(200)
@@ -53,15 +46,9 @@ defmodule BlockScoutWeb.API.V2.MantleController do
       |> Chain.list_mantle_withdrawals()
       |> split_list_by_page()
 
-    Logger.info("--- check here ---")
-    Logger.info("#{inspect(withdrawals)}")
-    Logger.info("#{inspect(next_page)}")
-    Logger.info("#{inspect(params)}")
 
     next_page_params = next_page_params(next_page, withdrawals, params)
 
-    Logger.info("--- next_page_params ---")
-    Logger.info("#{inspect(next_page_params)}")
 
     conn
     |> put_status(200)
@@ -73,6 +60,26 @@ defmodule BlockScoutWeb.API.V2.MantleController do
 
   def withdrawals_count(conn, _params) do
     items_count(conn, L2ToL1)
+  end
+
+  def mantle_da(conn,params) do
+    {mantle_da, next_page} =
+      params
+      |> paging_options()
+      |> Keyword.put(:api?, true)
+      |> Chain.list_mantle_da()
+      |> split_list_by_page()
+
+
+    next_page_params = next_page_params(next_page, mantle_da, params)
+
+
+    conn
+    |> put_status(200)
+    |> render(:mantle_da, %{
+      mantle_da: mantle_da,
+      next_page_params: next_page_params
+    })
   end
 
   defp items_count(conn, module) do

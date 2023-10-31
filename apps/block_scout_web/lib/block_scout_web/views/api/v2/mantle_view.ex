@@ -85,6 +85,25 @@ defmodule BlockScoutWeb.API.V2.MantleView do
 }
 end
 
+    def render("mantle_da.json", %{
+      mantle_da: mantle_da,
+      next_page_params: next_page_params
+    }) do
+    %{
+    items:
+      Enum.map(mantle_da, fn da ->
+        %{
+          "batch_index" => da.batch_index,
+          "batch_size" => da.batch_size,
+          "status" => da.status,
+          "age" => da.init_time,
+          "da_hash" => da.da_hash,
+        }
+      end),
+    next_page_params: next_page_params
+    }
+    end
+
   def render("mantle_items_count.json", %{count: count}) do
     count
   end

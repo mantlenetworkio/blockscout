@@ -527,7 +527,7 @@ defmodule Explorer.Chain.SmartContract do
       abi
       |> Enum.find(fn method ->
         Map.get(method, "name") == "implementation" ||
-          Chain.master_copy_pattern?(method)
+          Chain.master_copy_pattern?(method) || Chain.gateway_implementation_pattern?(method)
       end)
 
     if implementation_method_abi ||
@@ -673,6 +673,12 @@ defmodule Explorer.Chain.SmartContract do
         Chain.master_copy_pattern?(method)
       end)
 
+    gateway_implementation_input_abi =
+      abi
+      |> Enum.find(fn method ->
+        Chain.gateway_implementation_pattern?(method)
+      end)
+
     implementation_address =
       cond do
         implementation_method_abi ->
@@ -683,6 +689,20 @@ defmodule Explorer.Chain.SmartContract do
 
         master_copy_method_abi ->
           get_implementation_address_hash_from_master_copy_pattern(proxy_address_hash)
+
+        gateway_implementation_input_abi ->
+
+          constructor_abi = Enum.find(abi, fn el -> el["type"] == "constructor" && el["inputs"] != [] end)
+          input_types = Enum.map(constructor_abi["inputs"], &ABI.FunctionSelector.parse_specification_type/1)
+          smart_contract =  Chain.address_hash_to_smart_contract_without_twin(proxy_address_hash,[])
+          {val,result} =
+            smart_contract.constructor_arguments
+            |> BlockScoutWeb.AddressContractView.decode_data(input_types)
+            |> Enum.zip(constructor_abi["inputs"])
+            |> Enum.find(fn {val, %{"type" => type}} ->
+              type == "address"
+            end)
+          address_hash = "0x" <> Base.encode16(val, case: :lower)
 
         true ->
           get_implementation_address_hash_eip_1967(proxy_address_hash)
