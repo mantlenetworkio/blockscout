@@ -695,14 +695,19 @@ defmodule Explorer.Chain.SmartContract do
           constructor_abi = Enum.find(abi, fn el -> el["type"] == "constructor" && el["inputs"] != [] end)
           input_types = Enum.map(constructor_abi["inputs"], &ABI.FunctionSelector.parse_specification_type/1)
           smart_contract =  Chain.address_hash_to_smart_contract_without_twin(proxy_address_hash,[])
-          {val,result} =
-            smart_contract.constructor_arguments
-            |> BlockScoutWeb.AddressContractView.decode_data(input_types)
-            |> Enum.zip(constructor_abi["inputs"])
-            |> Enum.find(fn {val, %{"type" => type}} ->
-              type == "address"
-            end)
-          address_hash = "0x" <> Base.encode16(val, case: :lower)
+
+          if is_nil(smart_contract) or !smart_contract.constructor_arguments do
+            @burn_address_hash_str
+          else
+            {val,result} =
+              smart_contract.constructor_arguments
+              |> BlockScoutWeb.AddressContractView.decode_data(input_types)
+              |> Enum.zip(constructor_abi["inputs"])
+              |> Enum.find(fn {val, %{"type" => type}} ->
+                type == "address"
+              end)
+            address_hash = "0x" <> Base.encode16(val, case: :lower)
+          end
 
         true ->
           get_implementation_address_hash_eip_1967(proxy_address_hash)
