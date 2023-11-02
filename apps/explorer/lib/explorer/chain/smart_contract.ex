@@ -690,6 +690,7 @@ defmodule Explorer.Chain.SmartContract do
         master_copy_method_abi ->
           get_implementation_address_hash_from_master_copy_pattern(proxy_address_hash)
 
+        # check if smart contract have any delegatecall, if not use the contructor gatewayImplementation input as implementation
         gateway_implementation_input_abi ->
             constructor_abi = Enum.find(abi, fn el -> el["type"] == "constructor" && el["inputs"] != [] end)
             input_types = Enum.map(constructor_abi["inputs"], &ABI.FunctionSelector.parse_specification_type/1)

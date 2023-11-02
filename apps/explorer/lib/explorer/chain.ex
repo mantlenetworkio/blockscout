@@ -5109,6 +5109,7 @@ defmodule Explorer.Chain do
     end
   end
 
+  # query an address last 10 success txn and pass result to fetch_internal_transaction_for_delegate_call
   def fetch_latest_delegate_call_txn(address_hash) do
     query = from(
       txn in Transaction,
@@ -5123,6 +5124,7 @@ defmodule Explorer.Chain do
     fetch_internal_transaction_for_delegate_call(results)
   end
 
+  # fetch internal transaction on rpc to check whether this transaction include a delegatecall, if found, return latest delegatecall "to" address, if not return nil
   def fetch_internal_transaction_for_delegate_call(list) do
 
     result = Enum.reduce_while(list, nil, fn %{hash: hash} , _acc ->
@@ -6967,7 +6969,7 @@ defmodule Explorer.Chain do
     end)
   end
 
-
+ # check if smart contract is gateway_implementation standard
   def gateway_implementation_pattern?(method) do
     Map.get(method, "type") == "constructor" &&
       method
