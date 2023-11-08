@@ -404,8 +404,29 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
       "method" => method_name(transaction, decoded_input),
       "tx_types" => tx_types(transaction),
       "tx_tag" => GetTransactionTags.get_transaction_tags(transaction.hash, current_user(single_tx? && conn)),
-      "has_error_in_internal_txs" => transaction.has_error_in_internal_txs
+      "has_error_in_internal_txs" => transaction.has_error_in_internal_txs,
+      "total_fee" => get_total_fee(transaction),
+      "l2_fee" => get_l2_fee(transaction),
+      "l1_rollup_fee" => transaction.l1_fee,
+      "l1_gas_price" => transaction.l1_gas_price,
+      "l1_fee_scalar" => transaction.l1_fee_scalar,
+      "l1_gas_use" => transaction.l1_gas_used,
+      "da_fee" => transaction.da_fee,
+      "da_gas_price" => transaction.da_gas_price,
+      "da_gas_use" => transaction.da_gas_used,
     }
+  end
+
+  defp get_total_fee(%Transaction{} = transaction) do
+    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+    da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
+    l1_and_da_fee = Wei.sum(l1_fee, da_fee)
+    {_, fee} = transaction |> Chain.fee(:wei)
+    total_fee = Wei.sum(Wei.from(fee, :wei), l1_and_da_fee)
+  end
+
+  defp get_l2_fee(%Transaction{gas_price: gas_price, gas: gas, gas_used: gas_used}) do
+    actual_gas = if gas_used == nil, do: gas, else: gas_used
   end
 
   def token_transfers(_, _conn, false), do: nil
