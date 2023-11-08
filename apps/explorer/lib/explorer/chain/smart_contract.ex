@@ -527,7 +527,7 @@ defmodule Explorer.Chain.SmartContract do
       abi
       |> Enum.find(fn method ->
         Map.get(method, "name") == "implementation" ||
-          Chain.master_copy_pattern?(method) || Chain.gateway_implementation_pattern?(method)
+        Chain.master_copy_pattern?(method) || Chain.gateway_implementation_pattern?(method)
       end)
 
     if implementation_method_abi ||
@@ -690,25 +690,37 @@ defmodule Explorer.Chain.SmartContract do
         master_copy_method_abi ->
           get_implementation_address_hash_from_master_copy_pattern(proxy_address_hash)
 
+
+        # check if smart contract have any delegatecall, if not use the contructor gatewayImplementation input as implementation
         gateway_implementation_input_abi ->
+            constructor_abi = Enum.find(abi, fn el -> el["type"] == "constructor" && el["inputs"] != [] end)
+            input_types = Enum.map(constructor_abi["inputs"], &ABI.FunctionSelector.parse_specification_type/1)
+            smart_contract =  Chain.address_hash_to_smart_contract_without_twin(proxy_address_hash,[])
 
-          constructor_abi = Enum.find(abi, fn el -> el["type"] == "constructor" && el["inputs"] != [] end)
-          input_types = Enum.map(constructor_abi["inputs"], &ABI.FunctionSelector.parse_specification_type/1)
-          smart_contract =  Chain.address_hash_to_smart_contract_without_twin(proxy_address_hash,[])
+            delegate = Chain.fetch_latest_delegate_call_txn(proxy_address_hash)
 
-          if is_nil(smart_contract) or !smart_contract.constructor_arguments do
-            @burn_address_hash_str
-          else
-            {val,result} =
-              smart_contract.constructor_arguments
-              |> BlockScoutWeb.AddressContractView.decode_data(input_types)
-              |> Enum.zip(constructor_abi["inputs"])
-              |> Enum.find(fn {val, %{"type" => type}} ->
-                type == "address"
-              end)
-            address_hash = "0x" <> Base.encode16(val, case: :lower)
-          end
+            if is_nil(smart_contract) do
+              @burn_address_hash_str
+            else
+              if is_nil(delegate) do
 
+                if smart_contract.constructor_arguments do
+                  {val,result} =
+                    smart_contract.constructor_arguments
+                    |> BlockScoutWeb.AddressContractView.decode_data(input_types)
+                    |> Enum.zip(constructor_abi["inputs"])
+                    |> Enum.find(fn {val, %{"type" => type}} ->
+                      type == "address"
+                    end)
+                  address_hash = "0x" <> Base.encode16(val, case: :lower)
+                else
+                  @burn_address_hash_str
+                end
+
+              else
+                delegate.to
+              end
+            end
         true ->
           get_implementation_address_hash_eip_1967(proxy_address_hash)
       end

@@ -5188,6 +5188,111 @@ defmodule Explorer.Chain do
     end
   end
 
+  # query an address last 10 success txn and pass result to fetch_internal_transaction_for_delegate_call
+  def fetch_latest_delegate_call_txn(address_hash) do
+    query = from(
+      txn in Transaction,
+      where: txn.to_address_hash == ^address_hash or txn.created_contract_address_hash == ^address_hash,
+      where: txn.status == ^1,
+      order_by: [desc: txn.block_number],
+      limit: 10
+    )
+    results = Repo.all(query)
+
+
+    fetch_internal_transaction_for_delegate_call(results)
+  end
+
+  # fetch internal transaction on rpc to check whether this transaction include a delegatecall, if found, return latest delegatecall "to" address, if not return nil
+  def fetch_internal_transaction_for_delegate_call(list) do
+
+    result = Enum.reduce_while(list, nil, fn %{hash: hash} , _acc ->
+      txn_hash_string = Hash.to_string(hash)
+      trace_url = Application.get_env(:explorer, :json_rpc_named_arguments)[:transport_options][:method_to_url][:debug_traceTransaction]
+      rpc_url = trace_url = Application.get_env(:explorer, :json_rpc_named_arguments)[:transport_options][:url]
+      post_url = case trace_url do
+        nil ->
+          rpc_url
+        _ ->
+          trace_url
+      end
+
+      timeout =  System.get_env("ETHEREUM_JSONRPC_DEBUG_TRACE_TRANSACTION_TIMEOUT", "30s")
+      payload = %{
+        jsonrpc: "2.0",
+        method: "debug_traceTransaction",
+        params: [
+          txn_hash_string,
+          %{
+            tracer: "callTracer",
+            timeout: timeout
+          }
+        ],
+        id: 0
+      }
+      headers = ["Content-Type": "application/json"]
+
+      if is_nil(post_url) do
+        {:halt, nil}
+      end
+
+      case HTTPoison.post(post_url, Jason.encode!(payload), headers, []) do
+        {:ok, %HTTPoison.Response{body: body, status_code: status_code}} ->
+
+          %{"result" => result} = Jason.decode!(body)
+
+          search_delegate_call = delegate_call_list(result)
+
+          if !Enum.empty?(search_delegate_call) do
+            final_delegate_call = List.last(search_delegate_call)
+            {:halt, final_delegate_call}
+          else
+            {:cont, nil}
+          end
+
+        {:error, %HTTPoison.Error{reason: reason}} ->
+
+          {:halt, nil}
+      end
+
+    end)
+
+    result
+  end
+
+  def delegate_call_list(data) do
+    delegate_call_list(data, [])
+  end
+
+  defp delegate_call_list(data, res) when is_map(data) do
+    case data["type"] do
+      "DELEGATECALL" ->
+        updated_res = res ++ [
+          %{
+            from: data["from"],
+            to: data["to"],
+            type: data["type"]
+          }
+        ]
+        if is_list(data["calls"]) do
+          Enum.reduce(data["calls"], res, fn item, acc ->
+            delegate_call_list(item, updated_res)
+          end)
+        else
+          updated_res
+        end
+      _ ->
+        if is_list(data["calls"]) do
+          Enum.reduce(data["calls"], res, fn item, acc ->
+            delegate_call_list(item, acc)
+          end)
+        else
+          res
+        end
+
+    end
+  end
+
   def smart_contract_verified?(address_hash) do
     check_verified(address_hash)
   end
@@ -6964,6 +7069,7 @@ defmodule Explorer.Chain do
     end)
   end
 
+  # check if smart contract is gateway_implementation standard
   def gateway_implementation_pattern?(method) do
     Map.get(method, "type") == "constructor" &&
       method

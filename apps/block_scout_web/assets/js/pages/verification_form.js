@@ -28,7 +28,6 @@ export function reducer (state = initialState, action) {
       if (action.msg.verificationResult === 'ok') {
         return window.location.replace(window.location.href.split('/contract_verifications')[0].split('/verify')[0] + '/contracts')
       } else {
-        // console.log('received verification result',  action.msg.verificationResult)
         return Object.assign({}, state, {
           newForm: action.msg.verificationResult
         })

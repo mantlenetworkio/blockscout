@@ -6,7 +6,7 @@ import {
   L1ToL2,
   Transactions,
 } from 'src/typeorm';
-import { EntityManager, getConnection, getManager, Repository } from 'typeorm';
+import { EntityManager, getConnection, getManager, Repository, Not, IsNull } from 'typeorm';
 import ABI from '../abi/ERC20.json';
 import { Gauge } from "prom-client";
 import { InjectMetric } from "@willsoto/nestjs-prometheus";
@@ -178,6 +178,7 @@ export class MonitorService {
   async getLatestBlockNumber() {
     const { block_number } = await this.transactionsRepository.findOne({
       select: [ 'block_number' ],
+      where: { block_number: Not(IsNull())},
       order: { block_number: 'DESC' },
     })
     return block_number;
