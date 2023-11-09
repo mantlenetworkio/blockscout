@@ -424,13 +424,13 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
       "has_error_in_internal_txs" => transaction.has_error_in_internal_txs,
       "total_fee" => get_total_fee(transaction),
       "l2_fee" => get_l2_fee(transaction),
-      "l1_rollup_fee" => transaction.l1_fee,
+      "l1_fee" => transaction.l1_fee,
       "l1_gas_price" => transaction.l1_gas_price,
       "l1_fee_scalar" => transaction.l1_fee_scalar,
-      "l1_gas_use" => transaction.l1_gas_used,
+      "l1_gas_used" => transaction.l1_gas_used,
       "da_fee" => transaction.da_fee,
       "da_gas_price" => transaction.da_gas_price,
-      "da_gas_use" => transaction.da_gas_used,
+      "da_gas_used" => transaction.da_gas_used,
     }
   end
 
