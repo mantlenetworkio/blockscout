@@ -138,7 +138,10 @@
               </div>
             </li>
           <% end %>
-          <%=# render BlockScoutWeb.LayoutView, "_account_menu_item.html", conn: @conn, current_user: @current_user %>
+          <%= if  System.get_env("ACCOUNT_ENABLED") == "true" do %>
+            <svg viewBox="0 0 12 13" fill="none" xmlns="http://www.w3.org/2000/svg" class="dropdown-toggle-icon"><path d="m3 5 3 3 3-3" stroke="white" stroke-width="1.2"></path></svg>
+          <% end %>
+          <%= render BlockScoutWeb.LayoutView, "_account_menu_item.html", conn: @conn, current_user: @current_user %>
           <li class="nav-item dropdown">
             <a href="#" role="button" id="networkChangerDropdown" class="nav-link topnav-nav-link active-icon network-label dropdown-toggle" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
               <span class="nav-link-icon">
