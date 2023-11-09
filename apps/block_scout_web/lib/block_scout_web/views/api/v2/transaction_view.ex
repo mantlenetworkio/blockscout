@@ -444,6 +444,8 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
   defp get_l2_fee(%Transaction{gas_price: gas_price, gas: gas, gas_used: gas_used}) do
     actual_gas = if gas_used == nil, do: gas, else: gas_used
+    l2_fee = Wei.to(gas_price, :wei)
+    |> Decimal.mult(actual_gas)
   end
 
   def token_transfers(_, _conn, false), do: nil
