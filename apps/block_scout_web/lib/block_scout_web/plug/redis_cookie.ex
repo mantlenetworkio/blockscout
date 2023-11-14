@@ -206,6 +206,16 @@ defmodule BlockScoutWeb.Plug.RedisCookie do
   defp check_in_redis({_sid, session}, cookie) do
     hash = hash(cookie)
 
+    Logger.info("--- Checking redis... ---")
+    case Redix.command(:redix, ["PING"]) do
+      {:ok, "PONG"} ->
+        Logger.info("Redis server is reachable.")
+      {:ok, reply} ->
+        Logger.info("Unexpected reply from Redis: #{inspect(reply)}")
+      {:error, reason} ->
+        Logger.info("Failed to execute PING command: #{inspect(reason)}")
+    end
+
     case Redix.command(:redix, ["GET", hash]) do
       {:ok, one} when one in [1, "1"] ->
         {hash, session}
