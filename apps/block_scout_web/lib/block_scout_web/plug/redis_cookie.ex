@@ -218,9 +218,11 @@ defmodule BlockScoutWeb.Plug.RedisCookie do
 
     case Redix.command(:redix, ["GET", hash]) do
       {:ok, one} when one in [1, "1"] ->
+        Logger.info("--- Redis GET hash ---")
         {hash, session}
 
       _ ->
+        Logger.info("--- Redis GET hash fail ---")
         {nil, %{}}
     end
   end
