@@ -15,6 +15,8 @@ defmodule BlockScoutWeb.API.V2.BlockController do
   alias BlockScoutWeb.API.V2.{TransactionView, WithdrawalView}
   alias Explorer.Chain
 
+  require Logger
+
   @transaction_necessity_by_association [
     necessity_by_association: %{
       [created_contract_address: :names] => :optional,
@@ -94,6 +96,25 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     conn
     |> put_status(200)
     |> render(:blocks, %{blocks: blocks, next_page_params: next_page_params})
+  end
+
+  def transactions_rap(conn, %{"block_hash_or_number" => block_hash_or_number} = params) do
+    with {:ok, type, value} <- parse_block_hash_or_number_param(block_hash_or_number),
+         {:ok, block} <- fetch_block(type, value, @api_true) do
+
+        full_options =
+          @transaction_necessity_by_association
+          |> Keyword.merge([is_index_in_asc_order: true])
+          |> Keyword.merge(Chain.mantle_get_paging(params))
+          |> Keyword.merge(@api_true)
+
+        %{pagination: pagination, transactions: transactions} = Chain.block_to_transactions_rap(block.hash, full_options)
+
+      conn
+      |> put_status(200)
+      |> put_view(TransactionView)
+      |> render(:mantle_transactions,  %{pagination: pagination, transactions: transactions})
+    end
   end
 
   def transactions(conn, %{"block_hash_or_number" => block_hash_or_number} = params) do

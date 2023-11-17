@@ -84,6 +84,8 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   end
 
   def transactions_rap(conn, params ) do
+      filter_options = filter_options(params, :validated)
+
       custom_options = [
         necessity_by_association: @transaction_necessity_by_association
       ]
@@ -92,7 +94,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       |> Keyword.merge(type_filter_options(params))
       |> Keyword.merge(@api_true)
 
-      %{pagination: pagination, transactions: transactions} = Chain.get_transactions_for_rap(custom_options)
+      %{pagination: pagination, transactions: transactions} = Chain.get_transactions_for_rap(custom_options, filter_options)
 
     conn
     |> put_status(200)
