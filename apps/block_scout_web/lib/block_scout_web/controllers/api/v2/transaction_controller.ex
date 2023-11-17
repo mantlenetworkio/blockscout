@@ -21,6 +21,8 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   alias Explorer.Chain
   alias Indexer.Fetcher.FirstTraceOnDemand
 
+  require Logger
+
   action_fallback(BlockScoutWeb.API.V2.FallbackController)
 
   @transaction_necessity_by_association %{
@@ -79,6 +81,23 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       |> put_status(200)
       |> render(:transaction, %{transaction: preloaded})
     end
+  end
+
+  def transactions_rap(conn, params ) do
+      custom_options = [
+        necessity_by_association: @transaction_necessity_by_association
+      ]
+      |> Keyword.merge(Chain.mantle_get_paging(params))
+      |> Keyword.merge(method_filter_options(params))
+      |> Keyword.merge(type_filter_options(params))
+      |> Keyword.merge(@api_true)
+
+      %{pagination: pagination, transactions: transactions} = Chain.get_transactions_for_rap(custom_options)
+
+    conn
+    |> put_status(200)
+    |> render(:mantle_transactions,  %{pagination: pagination, transactions: transactions})
+
   end
 
   def transactions(conn, params) do

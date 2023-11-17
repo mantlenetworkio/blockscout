@@ -89,6 +89,25 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
     prepare_transaction(transaction, conn, true, block_height, decoded_input)
   end
 
+  def render("mantle_transactions.json", %{pagination: pagination, transactions: transactions, conn: conn}) do
+    block_height = Chain.block_height(@api_true)
+    {decoded_transactions, _, _} = decode_transactions(transactions, true)
+
+    res =  %{
+      "items" =>
+        transactions
+        |> Enum.zip(decoded_transactions)
+        |> Enum.map(fn {tx, decoded_input} -> prepare_transaction(tx, conn, false, block_height, decoded_input) end),
+      "pagination" => pagination
+    }
+
+    %{
+      "code" => 2000,
+      "message" => "success",
+      "data" => res
+    }
+  end
+
   def render("raw_trace.json", %{internal_transactions: internal_transactions}) do
     InternalTransaction.internal_transactions_to_raw(internal_transactions)
   end

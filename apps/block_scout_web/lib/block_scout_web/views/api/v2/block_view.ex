@@ -11,6 +11,13 @@ defmodule BlockScoutWeb.API.V2.BlockView do
     ApiView.render("message.json", assigns)
   end
 
+  def render("blocks.json", %{blocks: blocks, pagination: pagination}) do
+    res =  %{
+      "items" => Enum.map(blocks, &prepare_block(&1, nil)),
+      "pagination" => pagination
+    }
+  end
+
   def render("blocks.json", %{blocks: blocks, next_page_params: next_page_params}) do
     %{"items" => Enum.map(blocks, &prepare_block(&1, nil)), "next_page_params" => next_page_params}
   end

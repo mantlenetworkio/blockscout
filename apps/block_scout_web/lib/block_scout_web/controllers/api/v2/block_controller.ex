@@ -66,6 +66,18 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     end
   end
 
+  def blocks_rap(conn, params) do
+    filter_options = select_block_type(params)
+    |> Keyword.merge(Chain.mantle_get_paging(params))
+    |> Keyword.merge(@api_true)
+
+    %{pagination: pagination, blocks: blocks} = Chain.get_blocks_for_rap(filter_options)
+
+    conn
+    |> put_status(200)
+    |> render(:blocks, %{pagination: pagination, blocks: blocks})
+  end
+
   def blocks(conn, params) do
     full_options = select_block_type(params)
 

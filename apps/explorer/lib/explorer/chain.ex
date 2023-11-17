@@ -2624,7 +2624,6 @@ defmodule Explorer.Chain do
     necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
     paging_options = Keyword.get(options, :paging_options) || @default_paging_options
     block_type = Keyword.get(options, :block_type, "Block")
-
     cond do
       block_type == "Block" && !paging_options.key ->
         block_from_cache(block_type, paging_options, necessity_by_association, options)
@@ -2635,6 +2634,32 @@ defmodule Explorer.Chain do
       true ->
         fetch_blocks(block_type, paging_options, necessity_by_association, options)
     end
+  end
+
+  def get_blocks_for_rap(options \\ []) when is_list(options) do
+    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+    paging_options = Keyword.get(options, :paging_options) || @default_paging_options
+    block_type = Keyword.get(options, :block_type, "Block")
+
+    base_query = Block
+      |> Block.block_type_filter(block_type)
+      |> order_by(desc: :number)
+
+    total_blocks_count = base_query |> Repo.aggregate(:count, :hash)
+
+    base_query = base_query
+      |> mantle_paging_options(paging_options)
+      |> join_associations(necessity_by_association)
+
+    res = base_query |> select_repo(options).all()
+
+    pagination = %{
+      total: total_blocks_count,
+      page: paging_options.page,
+      page_size: paging_options. page_size
+    }
+
+    %{pagination: pagination, blocks: res}
   end
 
   defp block_from_cache(block_type, paging_options, necessity_by_association, options) do
@@ -2666,6 +2691,16 @@ defmodule Explorer.Chain do
   end
 
   defp fetch_blocks(block_type, paging_options, necessity_by_association, options) do
+    query = Block
+    |> Block.block_type_filter(block_type)
+    |> page_blocks(paging_options)
+    |> limit(^paging_options.page_size)
+    |> order_by(desc: :number)
+    |> join_associations(necessity_by_association)
+
+    Logger.info("--- query ---")
+    Logger.info("#{inspect(query)}")
+
     Block
     |> Block.block_type_filter(block_type)
     |> page_blocks(paging_options)
@@ -3785,6 +3820,70 @@ defmodule Explorer.Chain do
     fetch_recent_collated_l1_to_l2(paging_options)
   end
 
+  def mantle_get_paging(params) do
+    page = case Map.fetch(params, "page") do
+      {:ok, value} ->
+        case Integer.parse(value) do
+          {number, ""} ->
+            number
+          _ ->
+            1
+        end
+      :error -> 1
+    end
+    page_size = case Map.fetch(params, "page_size") do
+      {:ok, value} ->
+        case Integer.parse(value) do
+          {number, ""} ->
+            number
+          _ ->
+            @default_page_size
+        end
+      :error -> @default_page_size
+    end
+
+    opts = %{
+      page: page,
+      page_size: page_size
+    }
+
+    [paging_options: opts]
+  end
+
+  def mantle_paging_options(query, opts) do
+    query
+    |> offset(^((opts.page - 1) * opts.page_size))
+    |> limit(^opts.page_size)
+  end
+
+  def get_transactions_for_rap(options \\ []) when is_list(options) do
+    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+
+    base_query =
+      from(t in Transaction,
+        where: not is_nil(t.block_number) and not is_nil(t.index),
+        order_by: [desc: t.block_number, desc: t.index],
+      )
+    total_transactions_count = base_query |> Repo.aggregate(:count, :hash)
+
+    base_query = base_query
+    |> mantle_paging_options(paging_options)
+    |> join_associations(necessity_by_association)
+    |> preload([{:token_transfers, [:token, :from_address, :to_address]}])
+
+
+    res = base_query |> Repo.all()
+
+    pagination = %{
+      total: total_transactions_count,
+      page: paging_options.page,
+      page_size: paging_options. page_size
+    }
+
+    %{pagination: pagination, transactions: res}
+  end
+
   # RAP - random access pagination
   @spec recent_collated_transactions_for_rap([paging_options | necessity_by_association_option]) :: %{
           :total_transactions_count => non_neg_integer(),
@@ -3813,6 +3912,20 @@ defmodule Explorer.Chain do
       else
         fetch_recent_collated_transactions_for_rap(paging_options, necessity_by_association)
       end
+
+
+      test = fetch_transactions_for_rap()
+      |> where([transaction], not is_nil(transaction.block_number) and not is_nil(transaction.index))
+      |> handle_random_access_paging_options(paging_options)
+      |> join_associations(necessity_by_association)
+      |> preload([{:token_transfers, [:token, :from_address, :to_address]}])
+
+
+      # |> Repo.all()
+
+
+      Logger.info("--- fetched_transactions ---")
+      Logger.info("#{inspect(fetched_transactions)}")
 
     %{total_transactions_count: total_transactions_count, transactions: fetched_transactions}
   end

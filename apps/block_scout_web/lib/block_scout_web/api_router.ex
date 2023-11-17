@@ -196,6 +196,8 @@ defmodule BlockScoutWeb.ApiRouter do
     end
 
     scope "/mantle" do
+      get("/blocks", V2.BlockController, :blocks_rap)
+      get("/transactions", V2.TransactionController, :transactions_rap)
       # get("/txn-batches", V2.OptimismController, :txn_batches)
       # get("/txn-batches/count", V2.OptimismController, :txn_batches_count)
       # get("/output-roots", V2.OptimismController, :output_roots)
