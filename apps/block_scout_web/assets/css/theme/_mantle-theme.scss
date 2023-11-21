@@ -295,10 +295,6 @@ body {
   gap: 16px;
 }
 
-.btn-refetch-icon {
-  @include square-icon-button-inline($btn-copy-color, $btn-copy-dimensions);
-}
-
 .btn-copy-code {
   border-radius: 6px;
   padding: 4px 10px;
