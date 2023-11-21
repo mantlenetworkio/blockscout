@@ -31,6 +31,32 @@ if (analytics.mixpanelInitialized || analytics.amplitudeInitialized) {
   }
 }
 
+// refetch token metadata
+$('.btn-refetch-icon').on('click', (e) => {
+  const id = e.currentTarget.dataset.id
+  const address = e.currentTarget.dataset.address
+
+  if (e.currentTarget.classList.contains('fetching')) {
+    return
+  }
+
+  if (id && address) {
+    e.currentTarget.classList.add('fetching')
+    $.ajax({
+      url: `/api/v1/asset/${address}/${id}`,
+      success: (_data, _status, xhr) => {
+        console.log(_data)
+        location.reload()
+      },
+      error: (xhr) => {
+        location.reload()
+      }
+    })
+  } else {
+    location.reload()
+  };
+})
+
 const getParam = (key) => {
   if (!key) return false
   const url = window.location
