@@ -2,7 +2,8 @@ $btn-copy-color: $primary !default;
 $btn-copy-dimensions: 31px !default;
 $btn-copy-small-dimensions: 22px !default;
 
-.btn-copy-icon {
+.btn-copy-icon,
+.btn-refetch-icon {
   @include square-icon-button-inline($btn-copy-color, $btn-copy-dimensions);
   &.btn-copy-icon-no-borders {
     &:hover {
@@ -21,7 +22,10 @@ $btn-copy-small-dimensions: 22px !default;
     &.btn-copy-icon-custom {
       position: absolute;
     }
-    @include square-icon-button-inline($btn-copy-color, $btn-copy-small-dimensions);
+    @include square-icon-button-inline(
+      $btn-copy-color,
+      $btn-copy-small-dimensions
+    );
     &.btn-copy-icon-no-borders {
       &:hover {
         background-color: transparent;

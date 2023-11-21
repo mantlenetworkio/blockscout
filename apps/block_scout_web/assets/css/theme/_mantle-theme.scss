@@ -16,7 +16,7 @@ a {
   color: rgba(10, 143, 246, 1);
 }
 
-.text-link{
+.text-link {
   color: #007bff;
 }
 
@@ -24,12 +24,37 @@ body {
   overscroll-behavior: none;
 }
 
+.btn-refetch-icon {
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  &.fetching {
+    cursor: progress;
+  }
+  svg {
+    width: 24px;
+    height: 24px;
+    path {
+      fill: none;
+      stroke: #65b3ae;
+    }
+  }
+  &:hover {
+    svg {
+      path {
+        fill: none;
+        stroke: white;
+      }
+    }
+  }
+}
+
 .smart-contract-form-buttons {
-  &.on-loading{
-    #loading{
+  &.on-loading {
+    #loading {
       position: relative !important;
     }
-    [type='submit']{
+    [type='submit'] {
       display: none;
     }
   }
@@ -136,19 +161,19 @@ body {
         padding: 0 10px;
         align-items: center;
         width: 100%;
-        &.multiple{
+        &.multiple {
           min-height: 42px;
           padding: 10px;
           align-items: flex-start;
           height: auto;
         }
 
-        .bracket{
-          color: #9FA5A9;
+        .bracket {
+          color: #9fa5a9;
         }
 
-        .collapsible-list{
-          .collapsible-toggler{
+        .collapsible-list {
+          .collapsible-toggler {
             height: auto;
             padding: 0;
             background: none;
@@ -159,45 +184,45 @@ body {
             gap: 5px;
             color: #007bff;
             outline: none;
-            .collapsible-toggle-icon{
+            .collapsible-toggle-icon {
               width: 12px;
               height: auto;
               transition: all 150ms cubic-bezier(0.4, 0, 0.2, 1);
-              path{
+              path {
                 stroke: #007bff;
               }
             }
 
-            &[aria-expanded="true"]{
-              .collapsible-toggle-icon{
+            &[aria-expanded='true'] {
+              .collapsible-toggle-icon {
                 transform: rotate(180deg);
               }
-              .more{
+              .more {
                 display: none;
-               }
-               .less{
+              }
+              .less {
                 display: block;
-               }
-               &.only-more{
+              }
+              &.only-more {
                 display: none;
-               }
-               &.only-less{
+              }
+              &.only-less {
                 display: flex;
-               }
+              }
             }
-            &[aria-expanded="false"]{
-             .more{
-              display: block;
-             }
-             .less{
-              display: none;
-             }
-             &.only-more{
-              display: flex;
-             }
-             &.only-less{
-              display: none;
-             }
+            &[aria-expanded='false'] {
+              .more {
+                display: block;
+              }
+              .less {
+                display: none;
+              }
+              &.only-more {
+                display: flex;
+              }
+              &.only-less {
+                display: none;
+              }
             }
           }
         }
@@ -269,6 +294,11 @@ body {
   align-items: center;
   gap: 16px;
 }
+
+.btn-refetch-icon {
+  @include square-icon-button-inline($btn-copy-color, $btn-copy-dimensions);
+}
+
 .btn-copy-code {
   border-radius: 6px;
   padding: 4px 10px;
@@ -987,7 +1017,7 @@ body {
     color: #ffffff;
   }
 
-  .text-link{
+  .text-link {
     color: rgb(69, 161, 232);
   }
 
@@ -1010,15 +1040,15 @@ body {
             color: rgba(255, 255, 255, 0.7);
           }
 
-          .bracket{
+          .bracket {
             color: white;
           }
-          
-          .collapsible-list{
-            .collapsible-toggler{
+
+          .collapsible-list {
+            .collapsible-toggler {
               color: rgb(69, 161, 232);
-              .collapsible-toggle-icon{
-                path{
+              .collapsible-toggle-icon {
+                path {
                   stroke: rgb(69, 161, 232);
                 }
               }
@@ -1275,7 +1305,7 @@ body {
 
   .btn-copy-icon,
   .btn-qr-icon,
-  .btn-address-card-icon .btn-contract-icon {
+  .btn-refetch-icon .btn-address-card-icon .btn-contract-icon {
     border-color: $dark-primary;
 
     path {
