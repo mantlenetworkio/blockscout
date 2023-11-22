@@ -5300,3 +5300,6 @@ msgstr "컴파일러 버전이 일치하지 않습니다. 다시 시도해주세
 
 msgid "There was an error compiling your contract."
 msgstr "계약을 컴파일하는 중 오류가 발생했습니다."
+
+msgid "Refetch Metadata"
+msgstr "메타데이터 다시 불러오기"

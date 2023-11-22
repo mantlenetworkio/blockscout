@@ -5302,3 +5302,6 @@ msgstr "コンパイラのバージョンが一致しません。もう一度お
 
 msgid "There was an error compiling your contract."
 msgstr "コントラクトのコンパイル中にエラーが発生しました。"
+
+msgid "Refetch Metadata"
+msgstr "メタデータのリフェッチ"
