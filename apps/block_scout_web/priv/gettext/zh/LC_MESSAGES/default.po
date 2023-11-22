@@ -5302,3 +5302,6 @@ msgstr "编译器版本不匹配，请重试。"
 
 msgid "There was an error compiling your contract."
 msgstr "编译您的合约时出现错误。"
+
+msgid "Refetch Metadata"
+msgstr "重新获取元数据"
