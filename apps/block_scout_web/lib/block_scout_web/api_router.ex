@@ -221,6 +221,9 @@ defmodule BlockScoutWeb.ApiRouter do
     alias BlockScoutWeb.API.{EthRPC, RPC, V1}
     alias BlockScoutWeb.API.V1.{GasPriceOracleController, HealthController}
     alias BlockScoutWeb.API.V2.SearchController
+    alias BlockScoutWeb.Tokens.Instance.MetadataController
+
+    get("/asset/:address_hash/:token_id", MetadataController, :metadata)
 
     # leave the same endpoint in v1 in order to keep backward compatibility
     get("/search", SearchController, :search)

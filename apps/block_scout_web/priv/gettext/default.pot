@@ -5166,3 +5166,7 @@ msgstr ""
 
 msgid "There was an error compiling your contract."
 msgstr ""
+
+msgid "Refetch Metadata"
+msgstr ""
+
