@@ -118,13 +118,6 @@ require Logger
           status: status(),
           transaction_hash: String.t(),
           transaction_index: non_neg_integer(),
-          l1_fee: non_neg_integer,
-          l1_fee_scalar: non_neg_integer,
-          l1_gas_price: non_neg_integer,
-          l1_gas_used: non_neg_integer,
-          da_fee: non_neg_integer,
-          da_gas_price: non_neg_integer,
-          da_gas_used: non_neg_integer,
         }
   def elixir_to_params(
         %{
@@ -133,16 +126,19 @@ require Logger
           "contractAddress" => created_contract_address_hash,
           "transactionHash" => transaction_hash,
           "transactionIndex" => transaction_index,
-          "l1Fee" => l1_fee,
-          "l1FeeScalar" => l1_fee_scalar,
-          "l1GasPrice" => l1_gas_price,
-          "l1GasUsed" => l1_gas_used,
-          "daFee" => da_fee,
-          "daGasPrice" => da_gas_price,
-          "daGasUsed" => da_gas_used,
         } = elixir
       ) do
     status = elixir_to_status(elixir)
+
+    l1_fee = Map.get(elixir, "l1Fee", nil)
+    l1_fee_scalar = Map.get(elixir, "l1FeeScalar", nil)
+    l1_gas_price = Map.get(elixir, "l1GasPrice", nil)
+    l1_gas_used = Map.get(elixir, "l1GasUsed", nil)
+    token_ratio = Map.get(elixir, "tokenRatio", nil)
+
+    da_fee = Map.get(elixir, "daFee", nil)
+    da_gas_price = Map.get(elixir, "daGasPrice", nil)
+    da_gas_used = Map.get(elixir, "daGasUsed", nil)
 
     %{
       cumulative_gas_used: cumulative_gas_used,
@@ -155,6 +151,7 @@ require Logger
       l1_fee_scalar: l1_fee_scalar,
       l1_gas_price: l1_gas_price,
       l1_gas_used: l1_gas_used,
+      token_ratio: token_ratio,
       da_fee: da_fee,
       da_gas_price: da_gas_price,
       da_gas_used: da_gas_used,

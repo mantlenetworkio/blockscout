@@ -690,12 +690,12 @@ defmodule BlockScoutWeb.TransactionView do
   # end
 
   def l1_gas_price(%Transaction{} = transaction, unit) when unit in ~w(wei gwei ether)a do
-    l1_gas_price = if transaction.l1_gas_price == nil, do: 0, else: transaction.l1_gas_price
+    l1_gas_price = if transaction.l1_gas_price == nil, do: %Wei{value: Decimal.new(0)}, else: transaction.l1_gas_price
     format_wei_value(l1_gas_price, unit)
   end
 
   def l1_gas_price_native(%Transaction{} = transaction, unit) when unit in ~w(wei gwei ether)a do
-    l1_gas_price = if transaction.l1_gas_price == nil, do: 0, else: transaction.l1_gas_price
+    l1_gas_price = if transaction.l1_gas_price == nil, do: %Wei{value: Decimal.new(0)}, else: transaction.l1_gas_price
     format_wei_value(l1_gas_price, unit)
   end
 
