@@ -191,6 +191,53 @@ defmodule BlockScoutWeb.API.RPC.ContractView do
       else: Map.put_new(output, :AdditionalSources, additional_sources_array)
   end
 
+  defp get_timestamp(nil) do
+    nil
+  end
+
+  defp get_timestamp(timestamp) do
+    DateTime.to_unix(timestamp)
+  end
+
+  defp prepare_contract(%{
+      address: %Address{
+        hash: hash,
+        smart_contract: nil
+      },
+      transaction: %{
+        creation_hash: creation_hash,
+        creation_timestamp: creation_timestamp
+      }
+    }) do
+    %{
+      "Address" => to_string(hash),
+      "ABI" => "Contract source code not verified",
+      "CreationHash" => to_string(creation_hash),
+      "CreationTimestamp" => get_timestamp(creation_timestamp),
+    }
+  end
+
+  defp prepare_contract(%{
+    address: %Address{
+      hash: hash,
+      smart_contract: %SmartContract{} = contract
+    },
+    transaction: %{
+      creation_hash: creation_hash,
+      creation_timestamp: creation_timestamp
+    }
+  }) do
+  %{
+    "Address" => to_string(hash),
+    "ABI" => Jason.encode!(contract.abi),
+    "ContractName" => contract.name,
+    "CompilerVersion" => contract.compiler_version,
+    "OptimizationUsed" => if(contract.optimization, do: "1", else: "0"),
+    "CreationHash" => to_string(creation_hash),
+    "CreationTimestamp" => get_timestamp(creation_timestamp) ,
+  }
+end
+
   defp prepare_contract(%Address{
          hash: hash,
          smart_contract: nil
