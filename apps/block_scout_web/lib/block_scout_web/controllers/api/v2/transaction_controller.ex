@@ -83,6 +83,40 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     end
   end
 
+  def batch_transactions_rap(conn, params) do
+    with  {:ok, blockNumber} <- Map.fetch(params, "blockNumber"),
+          {:ok, blockSize} <- Map.fetch(params, "blockSize"),
+          blockNumberInt <- String.to_integer(blockNumber),
+          blockSizeInt <- String.to_integer(blockSize) do
+
+          filter_options = [blocks_range: %{blockNumber: blockNumberInt, blockSize: blockSizeInt}]
+
+            custom_options = [
+              necessity_by_association: @transaction_necessity_by_association
+            ]
+            |> Keyword.merge(Chain.mantle_get_paging(params))
+            |> Keyword.merge(method_filter_options(params))
+            |> Keyword.merge(type_filter_options(params))
+            |> Keyword.merge(@api_true)
+            |> Keyword.merge(filter_options)
+
+          %{pagination: pagination, transactions: transactions} = Chain.get_batch_transactions_for_rap(custom_options)
+
+          conn
+          |> put_status(200)
+          |> render(:mantle_transactions,  %{pagination: pagination, transactions: transactions})
+    else
+    _ ->
+      conn
+      |> put_status(200)
+      |> render(:mantle_transactions, %{pagination: %{
+        page: 1,
+        page_size: 0,
+        total: 0
+      }, transactions: []})
+    end
+  end
+
   def transactions_rap(conn, params ) do
       filter_options = filter_options(params, :validated)
 

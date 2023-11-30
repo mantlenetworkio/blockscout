@@ -93,18 +93,13 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
     block_height = Chain.block_height(@api_true)
     {decoded_transactions, _, _} = decode_transactions(transactions, true)
 
-    res =  %{
-      "items" =>
-        transactions
-        |> Enum.zip(decoded_transactions)
-        |> Enum.map(fn {tx, decoded_input} -> prepare_transaction(tx, conn, false, block_height, decoded_input) end),
-      "pagination" => pagination
-    }
-
     %{
-      "code" => 2000,
-      "message" => "success",
-      "data" => res
+      "Current" => pagination.page,
+      "Size" => pagination.page_size,
+      "Total" => pagination.total,
+      "Records" => transactions
+      |> Enum.zip(decoded_transactions)
+      |> Enum.map(fn {tx, decoded_input} -> prepare_transaction(tx, conn, false, block_height, decoded_input) end),
     }
   end
 

@@ -199,6 +199,9 @@ defmodule BlockScoutWeb.ApiRouter do
       get("/blocks", V2.BlockController, :blocks_rap)
       get("/blocks/:block_hash_or_number/transactions", V2.BlockController, :transactions_rap)
       get("/transactions", V2.TransactionController, :transactions_rap)
+      get("/stateroot/blocks", V2.BlockController, :batch_blocks_rap)
+      get("/stateroot/transactions", V2.TransactionController, :batch_transactions_rap)
+
       # get("/txn-batches", V2.OptimismController, :txn_batches)
       # get("/txn-batches/count", V2.OptimismController, :txn_batches_count)
       # get("/output-roots", V2.OptimismController, :output_roots)

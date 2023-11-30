@@ -2666,6 +2666,8 @@ defmodule Explorer.Chain do
     end
   end
 
+
+
   def get_blocks_for_rap(options \\ []) when is_list(options) do
     necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
     paging_options = Keyword.get(options, :paging_options) || @default_paging_options
@@ -3851,7 +3853,7 @@ defmodule Explorer.Chain do
         end
       :error -> 1
     end
-    page_size = case Map.fetch(params, "page_size") do
+    page_size = case Map.fetch(params, "pageSize") do
       {:ok, value} ->
         case Integer.parse(value) do
           {number, ""} ->
@@ -3937,8 +3939,77 @@ defmodule Explorer.Chain do
     %{pagination: pagination, transactions: res}
   end
 
-  # |> pending_transactions_query()
-  # recent_pending_transactions
+  def get_batch_blocks_for_rap(options \\ []) when is_list(options) do
+    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+    paging_options = Keyword.get(options, :paging_options) || @default_paging_options
+    %{blockNumber: blockNumber, blockSize: blockSize} = Keyword.get(options, :blocks_range)
+    block_type = Keyword.get(options, :block_type, "Block")
+
+    min = blockNumber - blockSize
+
+    base_query = Block
+      |> Block.block_type_filter(block_type)
+      |> order_by(desc: :number)
+      |> join_associations(necessity_by_association)
+
+    base_query = base_query |> where(
+          [block],
+          not is_nil(block.number) and block.number > ^min and
+            block.number <= ^blockNumber
+        )
+
+    total_blocks_count = base_query |> Repo.aggregate(:count, :hash)
+
+    base_query = base_query
+      |> mantle_paging_options(paging_options)
+
+    res = base_query |> select_repo(options).all()
+
+    pagination = %{
+      total: total_blocks_count,
+      page: paging_options.page,
+      page_size: paging_options. page_size
+    }
+
+    %{pagination: pagination, blocks: res}
+  end
+
+  def get_batch_transactions_for_rap(options \\ []) when is_list(options) do
+    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+    %{blockNumber: blockNumber, blockSize: blockSize} = Keyword.get(options, :blocks_range)
+
+    min = blockNumber - blockSize
+
+    base_query =
+      from(t in Transaction,
+        where: not is_nil(t.block_number) and not is_nil(t.index),
+        order_by: [desc: t.block_number, desc: t.index],
+      )
+
+    base_query = base_query |> where(
+      [transaction],
+      not is_nil(transaction.block_number) and not is_nil(transaction.index) and transaction.block_number > ^min and
+          transaction.block_number <= ^blockNumber
+    )
+
+    total_transactions_count = base_query |> Repo.aggregate(:count, :hash)
+
+    base_query = base_query
+    |> mantle_paging_options(paging_options)
+    |> join_associations(necessity_by_association)
+    |> preload([{:token_transfers, [:token, :from_address, :to_address]}])
+
+    res = base_query |> Repo.all()
+
+    pagination = %{
+      total: total_transactions_count,
+      page: paging_options.page,
+      page_size: paging_options. page_size
+    }
+
+    %{pagination: pagination, transactions: res}
+  end
 
   # RAP - random access pagination
   @spec recent_collated_transactions_for_rap([paging_options | necessity_by_association_option]) :: %{

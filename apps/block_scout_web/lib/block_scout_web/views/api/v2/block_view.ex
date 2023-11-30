@@ -12,15 +12,11 @@ defmodule BlockScoutWeb.API.V2.BlockView do
   end
 
   def render("blocks.json", %{blocks: blocks, pagination: pagination}) do
-    res =  %{
-      "items" => Enum.map(blocks, &prepare_block(&1, nil)),
-      "pagination" => pagination
-    }
-
     %{
-      "code" => 2000,
-      "message" => "success",
-      "data" => res
+      "Current" => pagination.page,
+      "Size" => pagination.page_size,
+      "Total" => pagination.total,
+      "Records" => Enum.map(blocks, &prepare_block(&1, nil)),
     }
   end
 

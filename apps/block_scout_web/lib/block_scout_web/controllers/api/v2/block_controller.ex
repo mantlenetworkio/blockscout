@@ -68,6 +68,34 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     end
   end
 
+  def batch_blocks_rap(conn, params) do
+    with  {:ok, blockNumber} <- Map.fetch(params, "blockNumber"),
+          {:ok, blockSize} <- Map.fetch(params, "blockSize"),
+          blockNumberInt <- String.to_integer(blockNumber),
+          blockSizeInt <- String.to_integer(blockSize) do
+
+          filter_options = [blocks_range: %{blockNumber: blockNumberInt, blockSize: blockSizeInt}]
+          |> Keyword.merge( select_block_type(params))
+          |> Keyword.merge(Chain.mantle_get_paging(params))
+          |> Keyword.merge(@api_true)
+
+          %{pagination: pagination, blocks: blocks} = Chain.get_batch_blocks_for_rap(filter_options)
+
+          conn
+          |> put_status(200)
+          |> render(:blocks, %{pagination: pagination, blocks: blocks})
+    else
+      _ ->
+        conn
+        |> put_status(200)
+        |> render(:blocks, %{pagination: %{
+          page: 1,
+          page_size: 0,
+          total: 0
+        }, blocks: []})
+    end
+  end
+
   def blocks_rap(conn, params) do
     filter_options = select_block_type(params)
     |> Keyword.merge(Chain.mantle_get_paging(params))
