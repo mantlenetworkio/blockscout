@@ -12,7 +12,7 @@ defmodule Explorer.Etherscan.Contracts do
     ]
 
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.{Address, Hash, SmartContract}
+  alias Explorer.Chain.{Address, Hash, SmartContract, Transaction, Block}
 
   @spec address_hash_to_address_with_source_code(Hash.Address.t()) :: Address.t() | nil
   def address_hash_to_address_with_source_code(address_hash) do
@@ -93,9 +93,18 @@ defmodule Explorer.Etherscan.Contracts do
       from(
         smart_contract in SmartContract,
         order_by: [asc: smart_contract.inserted_at],
+        left_join: addr in assoc(smart_contract, :address),
+        join: txn in Transaction,
+        on: addr.hash == txn.created_contract_address_hash,
+        left_join: block in Block,
+        on: txn.block_number == block.number,
         limit: ^limit,
         offset: ^offset,
-        preload: [:address]
+        preload: [:address],
+        select: %{
+          smart_contract: smart_contract,
+          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+        }
       )
 
     verified_at_start_timestamp_exist? = Map.has_key?(opts, :verified_at_start_timestamp)
@@ -123,7 +132,13 @@ defmodule Explorer.Etherscan.Contracts do
     query_in_timestamp_range
     |> Repo.replica().all()
     |> Enum.map(fn smart_contract ->
-      Map.put(smart_contract.address, :smart_contract, smart_contract)
+      %{
+        address: Map.put(smart_contract.smart_contract.address, :smart_contract, smart_contract.smart_contract),
+        transaction: %{
+          creation_hash: smart_contract.transaction.creation_hash,
+          creation_timestamp: smart_contract.transaction.creation_timestamp
+        }
+      }
     end)
   end
 
@@ -134,10 +149,18 @@ defmodule Explorer.Etherscan.Contracts do
         where: address.contract_code != <<>>,
         where: not is_nil(address.contract_code),
         where: address.decompiled == true,
+        left_join: txn in Transaction,
+        on: address.hash == txn.created_contract_address_hash,
+        left_join: block in Block,
+        on: txn.block_number == block.number,
         limit: ^limit,
         offset: ^offset,
         order_by: [asc: address.inserted_at],
-        preload: [:smart_contract]
+        preload: [:smart_contract],
+        select: %{
+          address: address,
+          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+        }
       )
 
     query
@@ -152,14 +175,28 @@ defmodule Explorer.Etherscan.Contracts do
         where: address.contract_code != <<>>,
         where: not is_nil(address.contract_code),
         where: fragment("? IS NOT TRUE", address.verified),
+        left_join: txn in Transaction,
+        on: address.hash == txn.created_contract_address_hash,
+        left_join: block in Block,
+        on: txn.block_number == block.number,
         limit: ^limit,
-        offset: ^offset
+        offset: ^offset,
+        select: %{
+          address: address,
+          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+        }
       )
 
     query
     |> Repo.replica().all()
     |> Enum.map(fn address ->
-      %{address | smart_contract: nil}
+      %{
+        address: %{ address.address | smart_contract: nil},
+        transaction: %{
+          creation_hash: address.transaction.creation_hash,
+          creation_timestamp: address.transaction.creation_timestamp
+        }
+      }
     end)
   end
 
@@ -171,14 +208,28 @@ defmodule Explorer.Etherscan.Contracts do
         where: fragment("? IS NOT TRUE", address.decompiled),
         where: address.contract_code != <<>>,
         where: not is_nil(address.contract_code),
+        left_join: txn in Transaction,
+        on: address.hash == txn.created_contract_address_hash,
+        left_join: block in Block,
+        on: txn.block_number == block.number,
         limit: ^limit,
-        offset: ^offset
+        offset: ^offset,
+        select: %{
+          address: address,
+          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+        }
       )
 
     query
     |> Repo.replica().all()
     |> Enum.map(fn address ->
-      %{address | smart_contract: nil}
+      %{
+        address: %{ address.address | smart_contract: nil},
+        transaction: %{
+          creation_hash: address.transaction.creation_hash,
+          creation_timestamp: address.transaction.creation_timestamp
+        }
+      }
     end)
   end
 
@@ -187,9 +238,17 @@ defmodule Explorer.Etherscan.Contracts do
       from(address in Address,
         where: address.contract_code == <<>>,
         preload: [:smart_contract, :decompiled_smart_contracts],
+        left_join: txn in Transaction,
+        on: address.hash == txn.created_contract_address_hash,
+        left_join: block in Block,
+        on: txn.block_number == block.number,
         order_by: [asc: address.inserted_at],
         limit: ^limit,
-        offset: ^offset
+        offset: ^offset,
+        select: %{
+          address: address,
+          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+        }
       )
 
     Repo.replica().all(query)
@@ -200,10 +259,18 @@ defmodule Explorer.Etherscan.Contracts do
       from(
         address in Address,
         where: not is_nil(address.contract_code),
+        left_join: txn in Transaction,
+        on: address.hash == txn.created_contract_address_hash,
+        left_join: block in Block,
+        on: txn.block_number == block.number,
         preload: [:smart_contract],
         order_by: [asc: address.inserted_at],
         limit: ^limit,
-        offset: ^offset
+        offset: ^offset,
+        select: %{
+          address: address,
+          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+        }
       )
 
     Repo.replica().all(query)

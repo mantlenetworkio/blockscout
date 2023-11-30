@@ -2362,6 +2362,14 @@ defmodule BlockScoutWeb.Etherscan do
     ]
   }
 
+  @contract_model_extended @contract_model
+  |> put_in([:fields, "CreationTimestamp"], %{
+    type: "timestamp",
+    definition: "The transaction's block-timestamp.",
+    example: ~s("1439232889")
+  })
+  |> put_in([:fields, "CreationHash"], @transaction_hash_type)
+
   @contract_listcontracts_action %{
     name: "listcontracts",
     description: "Get a list of contracts, sorted ascending by the time they were first seen by the explorer. If you provide the filters `not_decompiled`(`4`) or `not_verified(4)` the results will not be sorted for performance reasons.",
@@ -2423,7 +2431,7 @@ defmodule BlockScoutWeb.Etherscan do
             message: @message_type,
             result: %{
               type: "array",
-              array_type: @contract_model
+              array_type: @contract_model_extended
             }
           }
         }
@@ -3112,6 +3120,67 @@ defmodule BlockScoutWeb.Etherscan do
     ]
   }
 
+
+  @nft_metadata_model %{
+    name: "NftMetadata",
+    fields: %{
+      metadata: %{
+        type: "Object",
+      },
+      token_contract_address_hash: @address_hash_type,
+      token_id: @id_type
+    }
+  }
+
+  @nft_refetchmetadata_action %{
+    name: "refetchmetadata",
+    description: "Refetch NFT metadata",
+    required_params: [
+      %{
+        key: "addressHash",
+        placeholder: "addressHash",
+        type: "string",
+        description: "Token Address hash.",
+        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+      },
+      %{
+        key: "tokenId",
+        placeholder: "tokenId",
+        type: "string",
+        description: "Token ID",
+        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+      }
+    ],
+    optional_params: [],
+    responses: [
+      %{
+        code: "200",
+        description: "successful operation",
+        example_value: Jason.encode!(%{
+          "token_contract_address_hash" => "Address Hash",
+          "token_id" => "Token Id",
+          "metadata" => "NFT Metadata"
+        }),
+        model: %{
+          name: "Result",
+          fields: %{
+            result: %{
+              type: "model",
+              model: @nft_metadata_model
+            }
+          }
+        }
+      }
+    ]
+  }
+
+  @nft_module %{
+    name: "nft",
+    actions: [
+      @nft_refetchmetadata_action,
+    ]
+  }
+
   @documentation [
     @account_module,
     @logs_module,
@@ -3119,7 +3188,8 @@ defmodule BlockScoutWeb.Etherscan do
     @stats_module,
     @block_module,
     @contract_module,
-    @transaction_module
+    @transaction_module,
+    @nft_module
   ]
 
   def get_documentation do
@@ -3301,6 +3371,10 @@ defmodule BlockScoutWeb.Etherscan do
         gettext("Transaction hash. Hash of contents of the transaction.")
       "getstatus-txhash" ->
         gettext("Transaction hash. Hash of contents of the transaction.")
+      "refetchmetadata-addressHash" ->
+        gettext("The address of the contract.")
+      "refetchmetadata-tokenId" ->
+        gettext("The ID of the token.")
     end
   end
 
