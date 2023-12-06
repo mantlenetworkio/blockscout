@@ -16,8 +16,8 @@ const L2_RELAYED = 'l2_relayed_block_number';
 const TXN_BATCH = 'txn_batch_block_number';
 const STATE_BATCH = 'state_batch_block_number';
 const DA_BATCH_INDEX = 'DA_BATCH_INDEX';
-const SYNC_STEP = 10;
-const SYNC_STEP_L2 = 100;
+const SYNC_STEP = 200;
+const SYNC_STEP_L2 = 2000;
 const DA_MISS_UPDATE_LATEST_BATCH = 'DA_MISS_UPDATE_LATEST_BATCH';
 
 @Injectable()
@@ -164,7 +164,7 @@ export class TasksService {
     this.updateDaBatchMissed();
   }
 
-  @Interval(12000)
+  @Interval(1000)
   async l1_sent_latest() {
     // sync from latest block
     let end = 0;
@@ -208,7 +208,7 @@ export class TasksService {
     }
   }
 
-  @Interval('l1_sent_history', 12000)
+  @Interval('l1_sent_history', 1000)
   async l1_sent_history() {
     // sync history block, stop when sync reach latest starting block.
     let end = 0;
@@ -254,7 +254,7 @@ export class TasksService {
     }
   }
 
-  @Interval(12200)
+  @Interval(1000)
   async l1_relayed() {
     let end = 0;
     const currentL1BlockNumber =
@@ -294,7 +294,7 @@ export class TasksService {
       }
     }
   }
-  @Interval(2000)
+  @Interval(1000)
   async l2_sent() {
     let end = 0;
     const currentL2BlockNumber =
@@ -330,7 +330,7 @@ export class TasksService {
       }
     }
   }
-  @Interval(2000)
+  @Interval(1000)
   async l2_relayed() {
     let end = 0;
     const currentL2BlockNumber =
@@ -367,7 +367,7 @@ export class TasksService {
     }
   }
 
-  @Interval(12300)
+  @Interval(1000)
   async state_batch() {
     let end = 0;
     const currentL1BlockNumber =
@@ -433,7 +433,7 @@ export class TasksService {
     }
   }
 
-  @Interval(10000)
+  @Interval(2000)
   async l1l2_merge() {
     try {
       await this.l1IngestionService.createL1L2Relation();
@@ -445,7 +445,7 @@ export class TasksService {
       });
     }
   }
-  @Interval(10000)
+  @Interval(2000)
   async l2l1_merge() {
     try {
       await this.l1IngestionService.createL2L1Relation();
@@ -457,7 +457,7 @@ export class TasksService {
       });
     }
   }
-  @Interval(10000)
+  @Interval(2000)
   async l2l1_merge_waiting() {
     try {
       await this.l2IngestionService.handleWaitTransaction();
@@ -469,7 +469,7 @@ export class TasksService {
       });
     }
   }
-  @Interval(5000)
+  @Interval(1000)
   async eigen_da_batch_txns() {
     const fromStoreNumber = Number(await this.cacheManager.get(DA_BATCH_INDEX));
     console.log({
