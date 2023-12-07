@@ -9,6 +9,8 @@ defmodule Explorer.Factory do
 
   alias Explorer.Account.{
     Identity,
+    TagAddress,
+    TagTransaction,
     Watchlist,
     WatchlistAddress
   }
@@ -107,6 +109,26 @@ defmodule Explorer.Factory do
     }
   end
 
+  def watchlist_address_db_factory(%{wl_id: id}) do
+    hash = build(:address).hash
+
+    %WatchlistAddress{
+      name: sequence("test"),
+      watchlist_id: id,
+      address_hash: hash,
+      address_hash_hash: hash_to_lower_case_string(hash),
+      watch_coin_input: random_bool(),
+      watch_coin_output: random_bool(),
+      watch_erc_20_input: random_bool(),
+      watch_erc_20_output: random_bool(),
+      watch_erc_721_input: random_bool(),
+      watch_erc_721_output: random_bool(),
+      watch_erc_1155_input: random_bool(),
+      watch_erc_1155_output: random_bool(),
+      notify_email: random_bool()
+    }
+  end
+
   def custom_abi_factory do
     contract_address_hash = to_string(insert(:contract_address).hash)
 
@@ -140,13 +162,25 @@ defmodule Explorer.Factory do
     %{"name" => sequence("name"), "transaction_hash" => to_string(insert(:transaction).hash)}
   end
 
+  def tag_address_db_factory(%{user: user}) do
+    %TagAddress{name: sequence("name"), address_hash: build(:address).hash, identity_id: user.id}
+  end
+
+  def tag_transaction_db_factory(%{user: user}) do
+    %TagTransaction{name: sequence("name"), tx_hash: insert(:transaction).hash, identity_id: user.id}
+  end
+
   def address_to_tag_factory do
     %AddressToTag{
-      tag: %AddressTag{
-        label: sequence("label"),
-        display_name: sequence("display_name")
-      },
+      tag: build(:address_tag),
       address: build(:address)
+    }
+  end
+
+  def address_tag_factory do
+    %AddressTag{
+      label: sequence("label"),
+      display_name: sequence("display_name")
     }
   end
 
@@ -158,15 +192,15 @@ defmodule Explorer.Factory do
       watchlist: build(:account_watchlist),
       address_hash: hash,
       address_hash_hash: hash_to_lower_case_string(hash),
-      watch_coin_input: true,
-      watch_coin_output: true,
-      watch_erc_20_input: true,
-      watch_erc_20_output: true,
-      watch_erc_721_input: true,
-      watch_erc_721_output: true,
-      watch_erc_1155_input: true,
-      watch_erc_1155_output: true,
-      notify_email: true
+      watch_coin_input: random_bool(),
+      watch_coin_output: random_bool(),
+      watch_erc_20_input: random_bool(),
+      watch_erc_20_output: random_bool(),
+      watch_erc_721_input: random_bool(),
+      watch_erc_721_output: random_bool(),
+      watch_erc_1155_input: random_bool(),
+      watch_erc_1155_output: random_bool(),
+      notify_email: random_bool()
     }
   end
 
@@ -656,7 +690,8 @@ defmodule Explorer.Factory do
       type: "ERC-20",
       cataloged: true,
       icon_url: sequence("https://example.com/icon"),
-      fiat_value: 10.1
+      fiat_value: 10.1,
+      is_verified_via_admin_panel: Enum.random([true, false])
     }
   end
 
@@ -853,8 +888,20 @@ defmodule Explorer.Factory do
     %Instance{
       token_contract_address_hash: insert(:token).contract_address_hash,
       token_id: sequence("token_id", & &1),
-      metadata: %{key: "value"},
-      error: nil
+      metadata: %{
+        "key" => sequence("value"),
+        "image_url" => sequence("image_url"),
+        "animation_url" => sequence("image_url"),
+        "external_url" => sequence("external_url")
+      },
+      error: nil,
+      owner_address_hash: insert(:address).hash
+    }
+  end
+
+  def log_index_factory do
+    %{
+      log_index: sequence("token_id", & &1)
     }
   end
 
@@ -893,7 +940,58 @@ defmodule Explorer.Factory do
 
     %CurrentTokenBalance{
       address: build(:address),
-      token_contract_address_hash: insert(:token).contract_address_hash,
+      token_contract_address_hash: insert(:token, type: token_type).contract_address_hash,
+      block_number: block_number(),
+      value: Enum.random(1_000_000_000_000_000_000..10_000_000_000_000_000_000),
+      value_fetched_at: DateTime.utc_now(),
+      token_id: token_id,
+      token_type: token_type
+    }
+  end
+
+  def address_current_token_balance_with_token_id_and_fixed_token_type_factory(%{
+        token_type: token_type,
+        address: address,
+        token_id: token_id,
+        token_contract_address_hash: token_contract_address_hash,
+        value: value
+      }) do
+    %CurrentTokenBalance{
+      address: address,
+      token_contract_address_hash: token_contract_address_hash,
+      block_number: block_number(),
+      value: value,
+      value_fetched_at: DateTime.utc_now(),
+      token_id: token_id,
+      token_type: token_type
+    }
+  end
+
+  def address_current_token_balance_with_token_id_and_fixed_token_type_factory(%{
+        token_type: token_type,
+        address: address,
+        token_id: token_id,
+        token_contract_address_hash: token_contract_address_hash
+      }) do
+    %CurrentTokenBalance{
+      address: address,
+      token_contract_address_hash: token_contract_address_hash,
+      block_number: block_number(),
+      value: Enum.random(1_000_000_000_000_000_000..10_000_000_000_000_000_000),
+      value_fetched_at: DateTime.utc_now(),
+      token_id: token_id,
+      token_type: token_type
+    }
+  end
+
+  def address_current_token_balance_with_token_id_and_fixed_token_type_factory(%{
+        token_type: token_type,
+        address: address,
+        token_id: token_id
+      }) do
+    %CurrentTokenBalance{
+      address: address,
+      token_contract_address_hash: insert(:token, type: token_type).contract_address_hash,
       block_number: block_number(),
       value: Enum.random(1_000_000_000_000_000_000..10_000_000_000_000_000_000),
       value_fetched_at: DateTime.utc_now(),

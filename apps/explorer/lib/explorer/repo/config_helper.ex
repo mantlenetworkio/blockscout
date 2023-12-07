@@ -28,6 +28,8 @@ defmodule Explorer.Repo.ConfigHelper do
 
   def get_account_db_url, do: System.get_env("ACCOUNT_DATABASE_URL") || System.get_env("DATABASE_URL")
 
+  def get_suave_db_url, do: System.get_env("SUAVE_DATABASE_URL") || System.get_env("DATABASE_URL")
+
   def get_api_db_url, do: System.get_env("DATABASE_READ_ONLY_API_URL") || System.get_env("DATABASE_URL")
 
   def ssl_enabled?, do: String.equivalent?(System.get_env("ECTO_USE_SSL") || "true", "true")
@@ -56,6 +58,17 @@ defmodule Explorer.Repo.ConfigHelper do
     path = System.get_env("NETWORK_PATH", "/")
 
     path_from_env(path)
+  end
+
+  @doc """
+  Defines http port of the application
+  """
+  @spec get_port() :: non_neg_integer()
+  def get_port do
+    case System.get_env("PORT") && Integer.parse(System.get_env("PORT")) do
+      {port, _} -> port
+      _ -> 4000
+    end
   end
 
   defp path_from_env(path_env_var) do

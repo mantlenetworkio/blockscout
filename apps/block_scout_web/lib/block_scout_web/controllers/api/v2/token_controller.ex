@@ -2,8 +2,9 @@ defmodule BlockScoutWeb.API.V2.TokenController do
   use BlockScoutWeb, :controller
 
   alias BlockScoutWeb.AccessHelper
-  alias BlockScoutWeb.API.V2.TransactionView
-  alias Explorer.Chain
+  alias BlockScoutWeb.API.V2.{AddressView, TransactionView}
+  alias Explorer.{Chain, Repo}
+  alias Explorer.Chain.{Address, Token, Token.Instance}
   alias Indexer.Fetcher.TokenTotalSupplyOnDemand
 
   import BlockScoutWeb.Chain,
@@ -23,7 +24,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
 
   @api_true [api?: true]
 
-  def token(conn, %{"address_hash" => address_hash_string} = params) do
+  def token(conn, %{"address_hash_param" => address_hash_string} = params) do
     with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, {:ok, token}} <- {:not_found, Chain.token_from_address_hash(address_hash, @api_true)} do
@@ -35,7 +36,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     end
   end
 
-  def counters(conn, %{"address_hash" => address_hash_string} = params) do
+  def counters(conn, %{"address_hash_param" => address_hash_string} = params) do
     with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, true} <- {:not_found, Chain.token_from_address_hash_exists?(address_hash, @api_true)} do
@@ -45,7 +46,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     end
   end
 
-  def transfers(conn, %{"address_hash" => address_hash_string} = params) do
+  def transfers(conn, %{"address_hash_param" => address_hash_string} = params) do
     with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, true} <- {:not_found, Chain.token_from_address_hash_exists?(address_hash, @api_true)} do
@@ -61,8 +62,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
 
       next_page_params =
         next_page
-        |> token_transfers_next_page_params(token_transfers, params)
-        |> delete_parameters_from_next_page_params()
+        |> token_transfers_next_page_params(token_transfers, delete_parameters_from_next_page_params(params))
 
       conn
       |> put_status(200)
@@ -71,7 +71,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     end
   end
 
-  def holders(conn, %{"address_hash" => address_hash_string} = params) do
+  def holders(conn, %{"address_hash_param" => address_hash_string} = params) do
     with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, {:ok, token}} <- {:not_found, Chain.token_from_address_hash(address_hash, @api_true)} do
@@ -80,8 +80,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
 
       {token_balances, next_page} = split_list_by_page(results_plus_one)
 
-      next_page_params =
-        next_page |> next_page_params(token_balances, params) |> delete_parameters_from_next_page_params()
+      next_page_params = next_page |> next_page_params(token_balances, delete_parameters_from_next_page_params(params))
 
       conn
       |> put_status(200)
@@ -89,7 +88,44 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     end
   end
 
-  def instances(conn, %{"address_hash" => address_hash_string} = params) do
+  def instances(
+        conn,
+        %{"address_hash_param" => address_hash_string, "holder_address_hash" => holder_address_hash_string} = params
+      ) do
+    with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
+         {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
+         {:not_found, {:ok, token}} <- {:not_found, Chain.token_from_address_hash(address_hash, @api_true)},
+         {:not_found, false} <- {:not_found, Chain.is_erc_20_token?(token)},
+         {:format, {:ok, holder_address_hash}} <- {:format, Chain.string_to_address_hash(holder_address_hash_string)},
+         {:ok, false} <- AccessHelper.restricted_access?(holder_address_hash_string, params) do
+      holder_address = Repo.get_by(Address, hash: holder_address_hash)
+
+      results_plus_one =
+        Instance.token_instances_by_holder_address_hash(
+          token,
+          holder_address_hash,
+          params
+          |> unique_tokens_paging_options()
+          |> Keyword.merge(@api_true)
+        )
+
+      {token_instances, next_page} = split_list_by_page(results_plus_one)
+
+      next_page_params =
+        next_page |> unique_tokens_next_page(token_instances, delete_parameters_from_next_page_params(params))
+
+      conn
+      |> put_status(200)
+      |> put_view(AddressView)
+      |> render(:nft_list, %{
+        token_instances: token_instances |> put_owner(holder_address),
+        next_page_params: next_page_params,
+        token: token
+      })
+    end
+  end
+
+  def instances(conn, %{"address_hash_param" => address_hash_string} = params) do
     with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, {:ok, token}} <- {:not_found, Chain.token_from_address_hash(address_hash, @api_true)} do
@@ -102,7 +138,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
       {token_instances, next_page} = split_list_by_page(results_plus_one)
 
       next_page_params =
-        next_page |> unique_tokens_next_page(token_instances, params) |> delete_parameters_from_next_page_params()
+        next_page |> unique_tokens_next_page(token_instances, delete_parameters_from_next_page_params(params))
 
       conn
       |> put_status(200)
@@ -110,7 +146,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     end
   end
 
-  def instance(conn, %{"address_hash" => address_hash_string, "token_id" => token_id_str} = params) do
+  def instance(conn, %{"address_hash_param" => address_hash_string, "token_id" => token_id_str} = params) do
     with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, {:ok, token}} <- {:not_found, Chain.token_from_address_hash(address_hash, @api_true)},
@@ -131,7 +167,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     end
   end
 
-  def transfers_by_instance(conn, %{"address_hash" => address_hash_string, "token_id" => token_id_str} = params) do
+  def transfers_by_instance(conn, %{"address_hash_param" => address_hash_string, "token_id" => token_id_str} = params) do
     with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, {:ok, token}} <- {:not_found, Chain.token_from_address_hash(address_hash, @api_true)},
@@ -149,8 +185,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
 
       next_page_params =
         next_page
-        |> token_transfers_next_page_params(token_transfers, params)
-        |> delete_parameters_from_next_page_params()
+        |> token_transfers_next_page_params(token_transfers, delete_parameters_from_next_page_params(params))
 
       conn
       |> put_status(200)
@@ -159,7 +194,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     end
   end
 
-  def holders_by_instance(conn, %{"address_hash" => address_hash_string, "token_id" => token_id_str} = params) do
+  def holders_by_instance(conn, %{"address_hash_param" => address_hash_string, "token_id" => token_id_str} = params) do
     with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, {:ok, token}} <- {:not_found, Chain.token_from_address_hash(address_hash, @api_true)},
@@ -178,8 +213,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
 
       next_page_params =
         next_page
-        |> next_page_params(token_holders, params)
-        |> delete_parameters_from_next_page_params()
+        |> next_page_params(token_holders, delete_parameters_from_next_page_params(params))
 
       conn
       |> put_status(200)
@@ -187,7 +221,10 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     end
   end
 
-  def transfers_count_by_instance(conn, %{"address_hash" => address_hash_string, "token_id" => token_id_str} = params) do
+  def transfers_count_by_instance(
+        conn,
+        %{"address_hash_param" => address_hash_string, "token_id" => token_id_str} = params
+      ) do
     with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, {:ok, token}} <- {:not_found, Chain.token_from_address_hash(address_hash, @api_true)},
@@ -211,12 +248,15 @@ defmodule BlockScoutWeb.API.V2.TokenController do
       |> Keyword.merge(tokens_sorting(params))
       |> Keyword.merge(@api_true)
 
-    {tokens, next_page} = filter |> Chain.list_top_tokens(options) |> split_list_by_page()
+    {tokens, next_page} = filter |> Token.list_top(options) |> split_list_by_page()
 
-    next_page_params = next_page |> next_page_params(tokens, params) |> delete_parameters_from_next_page_params()
+    next_page_params = next_page |> next_page_params(tokens, delete_parameters_from_next_page_params(params))
 
     conn
     |> put_status(200)
     |> render(:tokens, %{tokens: tokens, next_page_params: next_page_params})
   end
+
+  defp put_owner(token_instances, holder_address),
+    do: Enum.map(token_instances, fn token_instance -> %Instance{token_instance | owner: holder_address} end)
 end

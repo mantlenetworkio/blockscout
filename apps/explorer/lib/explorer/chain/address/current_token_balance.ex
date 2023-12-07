@@ -10,6 +10,7 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
 
   import Ecto.Changeset
   import Ecto.Query, only: [from: 2, limit: 2, offset: 2, order_by: 3, preload: 2, dynamic: 2]
+  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
 
   alias Explorer.{Chain, PagingOptions, Repo}
   alias Explorer.Chain.{Address, Block, Hash, Token}
@@ -37,7 +38,10 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
           updated_at: DateTime.t(),
           value: Decimal.t() | nil,
           token_id: non_neg_integer() | nil,
-          token_type: String.t()
+          token_type: String.t(),
+          distinct_token_instances_count: non_neg_integer(),
+          token_ids: list(Decimal.t()),
+          preloaded_token_instances: list()
         }
 
   schema "address_current_token_balances" do
@@ -48,6 +52,9 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
     field(:token_id, :decimal)
     field(:token_type, :string)
     field(:fiat_value, :decimal, virtual: true)
+    field(:distinct_token_instances_count, :integer, virtual: true)
+    field(:token_ids, {:array, :decimal}, virtual: true)
+    field(:preloaded_token_instances, {:array, :any}, virtual: true)
 
     # A transient field for deriving token holder count deltas during address_current_token_balances upserts
     field(:old_value, :decimal)
@@ -74,11 +81,9 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
     token_balance
     |> cast(attrs, @allowed_fields)
     |> validate_required(@required_fields)
-    |> foreign_key_constraint(:address_hash)
-    |> foreign_key_constraint(:token_contract_address_hash)
   end
 
-  {:ok, burn_address_hash} = Chain.string_to_address_hash("0x0000000000000000000000000000000000000000")
+  {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
   @burn_address_hash burn_address_hash
 
   @doc """
@@ -159,6 +164,25 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   end
 
   @doc """
+  Builds an `t:Ecto.Query.t/0` to fetch the current token balances of the given address (include unfetched).
+  """
+  def last_token_balances_include_unfetched(address_hash) do
+    fiat_balance = fiat_value_query()
+
+    from(
+      ctb in __MODULE__,
+      where: ctb.address_hash == ^address_hash,
+      left_join: t in assoc(ctb, :token),
+      on: ctb.token_contract_address_hash == t.contract_address_hash,
+      preload: [token: t],
+      select: ctb,
+      select_merge: ^%{fiat_value: fiat_balance},
+      order_by: ^[desc_nulls_last: fiat_balance],
+      order_by: [desc: ctb.value, desc: ctb.id]
+    )
+  end
+
+  @doc """
   Builds an `t:Ecto.Query.t/0` to fetch the current token balances of the given address.
   """
   def last_token_balances(address_hash, type \\ [])
@@ -170,10 +194,10 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
       ctb in __MODULE__,
       where: ctb.address_hash == ^address_hash,
       where: ctb.value > 0,
-      where: ctb.token_type == ^type,
       left_join: t in assoc(ctb, :token),
       on: ctb.token_contract_address_hash == t.contract_address_hash,
       preload: [token: t],
+      where: t.type == ^type,
       select: ctb,
       select_merge: ^%{fiat_value: fiat_balance},
       order_by: ^[desc_nulls_last: fiat_balance],

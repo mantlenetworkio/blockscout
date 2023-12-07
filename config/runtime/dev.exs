@@ -7,25 +7,20 @@ alias Explorer.Repo.ConfigHelper, as: ExplorerConfigHelper
 ### BlockScout Web ###
 ######################
 
-port =
-  case System.get_env("PORT") && Integer.parse(System.get_env("PORT")) do
-    {port, _} -> port
-    :error -> nil
-    nil -> nil
-  end
+port = ExplorerConfigHelper.get_port()
 
 config :block_scout_web, BlockScoutWeb.Endpoint,
   secret_key_base:
     System.get_env("SECRET_KEY_BASE") || "RMgI4C1HSkxsEjdhtGMfwAHfyT6CKWXOgzCboJflfSm4jeAlic52io05KB6mqzc5",
   http: [
-    port: port || 4000
+    port: port
   ],
   url: [
     scheme: "http",
     host: System.get_env("BLOCKSCOUT_HOST", "localhost")
   ],
   https: [
-    port: (port && port + 1) || 4001,
+    port: port + 1,
     cipher_suite: :strong,
     certfile: System.get_env("CERTFILE") || "priv/cert/selfsigned.pem",
     keyfile: System.get_env("KEYFILE") || "priv/cert/selfsigned_key.pem"
@@ -73,6 +68,40 @@ config :explorer, Explorer.Repo.Account,
   hostname: hostname_account,
   url: ExplorerConfigHelper.get_account_db_url(),
   pool_size: ConfigHelper.parse_integer_env_var("ACCOUNT_POOL_SIZE", 10)
+
+# Configure PolygonEdge database
+config :explorer, Explorer.Repo.PolygonEdge,
+  database: database,
+  hostname: hostname,
+  url: System.get_env("DATABASE_URL"),
+  # actually this repo is not started, and its pool size remains unused.
+  # separating repos for different CHAIN_TYPE is implemented only for the sake of keeping DB schema update relevant to the current chain type
+  pool_size: 1
+
+# Configure PolygonZkevm database
+config :explorer, Explorer.Repo.PolygonZkevm,
+  database: database,
+  hostname: hostname,
+  url: System.get_env("DATABASE_URL"),
+  # actually this repo is not started, and its pool size remains unused.
+  # separating repos for different CHAIN_TYPE is implemented only for the sake of keeping DB schema update relevant to the current chain type
+  pool_size: 1
+
+# Configure Rootstock database
+config :explorer, Explorer.Repo.RSK,
+  database: database,
+  hostname: hostname,
+  url: System.get_env("DATABASE_URL"),
+  # actually this repo is not started, and its pool size remains unused.
+  # separating repos for different CHAIN_TYPE is implemented only for the sake of keeping DB schema update relevant to the current chain type
+  pool_size: 1
+
+# Configure Suave database
+config :explorer, Explorer.Repo.Suave,
+  database: database,
+  hostname: hostname,
+  url: ExplorerConfigHelper.get_suave_db_url(),
+  pool_size: 1
 
 variant = Variant.get()
 

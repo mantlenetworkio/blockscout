@@ -11,13 +11,7 @@ msgstr ""
 "Language: ko\n"
 "Plural-Forms: nplurals=1\n"
 
-msgid "%{count} token"
-msgid_plural "%{count} token"
-msgstr[0] "%{count} 토큰"
 
-msgid "%{count} transaction"
-msgid_plural "%{count} transaction"
-msgstr[0] "%{count} 거래"
 
 #: lib/block_scout_web/templates/common_components/_minimal_proxy_pattern.html.eex:9
 #, elixir-autogen

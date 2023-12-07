@@ -11,15 +11,7 @@ msgstr ""
 "Language: zh\n"
 "Plural-Forms: nplurals=1\n"
 
-#, fuzzy
-msgid "%{count} token"
-msgid_plural "%{count} token"
-msgstr[0] "%{count} 代币"
 
-#, fuzzy
-msgid "%{count} transaction"
-msgid_plural "%{count} transaction"
-msgstr[0] "%{count} 交易"
 
 #: lib/block_scout_web/templates/common_components/_minimal_proxy_pattern.html.eex:9
 #, elixir-autogen

@@ -1,6 +1,7 @@
 defmodule BlockScoutWeb.API.V2.SmartContractView do
   use BlockScoutWeb, :view
 
+  import Explorer.Helper, only: [decode_data: 2]
   import Explorer.SmartContract.Reader, only: [zip_tuple_values_with_types: 2]
 
   alias ABI.FunctionSelector
@@ -10,6 +11,7 @@ defmodule BlockScoutWeb.API.V2.SmartContractView do
   alias Ecto.Changeset
   alias Explorer.Chain
   alias Explorer.Chain.{Address, SmartContract}
+  alias Explorer.Chain.SmartContract.Proxy.EIP1167
   alias Explorer.Visualize.Sol2uml
 
   require Logger
@@ -133,12 +135,12 @@ defmodule BlockScoutWeb.API.V2.SmartContractView do
 
   # credo:disable-for-next-line
   def prepare_smart_contract(%Address{smart_contract: %SmartContract{} = smart_contract} = address) do
-    minimal_proxy_template = Chain.get_minimal_proxy_template(address.hash, @api_true)
-    twin = Chain.get_address_verified_twin_contract(address.hash, @api_true)
+    minimal_proxy_template = EIP1167.get_implementation_address(address.hash, @api_true)
+    twin = SmartContract.get_address_verified_twin_contract(address.hash, @api_true)
     metadata_for_verification = minimal_proxy_template || twin.verified_contract
     smart_contract_verified = AddressView.smart_contract_verified?(address)
     additional_sources_from_twin = twin.additional_sources
-    fully_verified = Chain.smart_contract_fully_verified?(address.hash, @api_true)
+    fully_verified = SmartContract.verified_with_full_match?(address.hash, @api_true)
 
     additional_sources =
       if smart_contract_verified, do: address.smart_contract_additional_sources, else: additional_sources_from_twin
@@ -231,7 +233,7 @@ defmodule BlockScoutWeb.API.V2.SmartContractView do
 
     result =
       constructor_arguments
-      |> AddressContractView.decode_data(input_types)
+      |> decode_data(input_types)
       |> Enum.zip(constructor_abi["inputs"])
       |> Enum.map(fn {value, %{"type" => type} = input_arg} ->
         [ABIEncodedValueView.value_json(type, value), input_arg]
@@ -256,7 +258,13 @@ defmodule BlockScoutWeb.API.V2.SmartContractView do
     token = smart_contract.address.token
 
     %{
-      "address" => Helper.address_with_info(nil, smart_contract.address, smart_contract.address.hash, false),
+      "address" =>
+        Helper.address_with_info(
+          nil,
+          %Address{smart_contract.address | smart_contract: smart_contract},
+          smart_contract.address.hash,
+          false
+        ),
       "compiler_version" => smart_contract.compiler_version,
       "optimization_enabled" => smart_contract.optimization,
       "tx_count" => smart_contract.address.transactions_count,

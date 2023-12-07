@@ -7,9 +7,11 @@ defmodule BlockScoutWeb.ChainController do
   alias BlockScoutWeb.{ChainView, Controller}
   alias Explorer.{Chain, PagingOptions, Repo}
   alias Explorer.Chain.{Address, Block, Transaction, DaBatch}
+  alias Explorer.Chain.Address.Counters
   alias Explorer.Chain.Cache.Block, as: BlockCache
   alias Explorer.Chain.Cache.GasUsage
   alias Explorer.Chain.Cache.Transaction, as: TransactionCache
+  alias Explorer.Chain.Search
   alias Explorer.Chain.Supply.RSK
   alias Explorer.Counters.AverageBlockTime
   alias Explorer.Market
@@ -18,7 +20,7 @@ defmodule BlockScoutWeb.ChainController do
   def show(conn, _params) do
     total_gas_usage = GasUsage.total()
     block_count = BlockCache.estimated_count()
-    address_count = Chain.address_estimated_count()
+    address_count = Counters.address_estimated_count()
 
     market_cap_calculation =
       case Application.get_env(:explorer, :supply) do
@@ -93,7 +95,8 @@ defmodule BlockScoutWeb.ChainController do
 
     results =
       paging_options
-      |> Chain.joint_search(offset, term)
+      |> Search.joint_search(offset, term)
+
     encoded_results =
       results
       |> Enum.map(fn item ->

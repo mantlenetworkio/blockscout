@@ -5,10 +5,14 @@
 # is restricted to this project.
 import Config
 
+[__DIR__ | ~w(.. .. .. config config_helper.exs)]
+|> Path.join()
+|> Code.eval_file()
+
 # General application configuration
 config :block_scout_web,
   namespace: BlockScoutWeb,
-  ecto_repos: [Explorer.Repo, Explorer.Repo.Account],
+  ecto_repos: ConfigHelper.repos(),
   l1_token_symbol: System.get_env("L1_TOKEN_SYMBOL") || "MNT",
   cookie_domain: System.get_env("SESSION_COOKIE_DOMAIN"),
   # 604800 seconds, 1 week
