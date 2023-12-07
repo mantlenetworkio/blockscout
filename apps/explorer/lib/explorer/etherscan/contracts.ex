@@ -12,7 +12,7 @@ defmodule Explorer.Etherscan.Contracts do
     ]
 
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.{Address, Hash, SmartContract, Transaction, Block}
+  alias Explorer.Chain.{Address, Hash, SmartContract, Transaction, Block, InternalTransaction}
 
   @spec address_hash_to_address_with_source_code(Hash.Address.t()) :: Address.t() | nil
   def address_hash_to_address_with_source_code(address_hash) do
@@ -96,14 +96,19 @@ defmodule Explorer.Etherscan.Contracts do
         left_join: addr in assoc(smart_contract, :address),
         join: txn in Transaction,
         on: addr.hash == txn.created_contract_address_hash,
+        left_join: in_txn in InternalTransaction,
+        on: addr.hash == in_txn.created_contract_address_hash,
         left_join: block in Block,
-        on: txn.block_number == block.number,
+        on: txn.block_number == block.number or in_txn.block_number == block.number,
         limit: ^limit,
         offset: ^offset,
         preload: [:address],
         select: %{
           smart_contract: smart_contract,
-          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+          transaction: %{
+            creation_hash: coalesce(txn.hash, in_txn.transaction_hash),
+            creation_timestamp: block.timestamp
+          }
         }
       )
 
@@ -151,15 +156,20 @@ defmodule Explorer.Etherscan.Contracts do
         where: address.decompiled == true,
         left_join: txn in Transaction,
         on: address.hash == txn.created_contract_address_hash,
+        left_join: in_txn in InternalTransaction,
+        on: address.hash == in_txn.created_contract_address_hash,
         left_join: block in Block,
-        on: txn.block_number == block.number,
+        on: txn.block_number == block.number or in_txn.block_number == block.number,
         limit: ^limit,
         offset: ^offset,
         order_by: [asc: address.inserted_at],
         preload: [:smart_contract],
         select: %{
           address: address,
-          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+          transaction: %{
+            creation_hash: coalesce(txn.hash, in_txn.transaction_hash),
+            creation_timestamp: block.timestamp
+          }
         }
       )
 
@@ -177,13 +187,18 @@ defmodule Explorer.Etherscan.Contracts do
         where: fragment("? IS NOT TRUE", address.verified),
         left_join: txn in Transaction,
         on: address.hash == txn.created_contract_address_hash,
+        left_join: in_txn in InternalTransaction,
+        on: address.hash == in_txn.created_contract_address_hash,
         left_join: block in Block,
-        on: txn.block_number == block.number,
+        on: txn.block_number == block.number or in_txn.block_number == block.number,
         limit: ^limit,
         offset: ^offset,
         select: %{
           address: address,
-          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+          transaction: %{
+            creation_hash: coalesce(txn.hash, in_txn.transaction_hash),
+            creation_timestamp: block.timestamp
+          }
         }
       )
 
@@ -210,13 +225,18 @@ defmodule Explorer.Etherscan.Contracts do
         where: not is_nil(address.contract_code),
         left_join: txn in Transaction,
         on: address.hash == txn.created_contract_address_hash,
+        left_join: in_txn in InternalTransaction,
+        on: address.hash == in_txn.created_contract_address_hash,
         left_join: block in Block,
-        on: txn.block_number == block.number,
+        on: txn.block_number == block.number or in_txn.block_number == block.number,
         limit: ^limit,
         offset: ^offset,
         select: %{
           address: address,
-          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+          transaction: %{
+            creation_hash: coalesce(txn.hash, in_txn.transaction_hash),
+            creation_timestamp: block.timestamp
+          }
         }
       )
 
@@ -240,14 +260,19 @@ defmodule Explorer.Etherscan.Contracts do
         preload: [:smart_contract, :decompiled_smart_contracts],
         left_join: txn in Transaction,
         on: address.hash == txn.created_contract_address_hash,
+        left_join: in_txn in InternalTransaction,
+        on: address.hash == in_txn.created_contract_address_hash,
         left_join: block in Block,
-        on: txn.block_number == block.number,
+        on: txn.block_number == block.number or in_txn.block_number == block.number,
         order_by: [asc: address.inserted_at],
         limit: ^limit,
         offset: ^offset,
         select: %{
           address: address,
-          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+          transaction: %{
+            creation_hash: coalesce(txn.hash, in_txn.transaction_hash),
+            creation_timestamp: block.timestamp
+          }
         }
       )
 
@@ -261,15 +286,20 @@ defmodule Explorer.Etherscan.Contracts do
         where: not is_nil(address.contract_code),
         left_join: txn in Transaction,
         on: address.hash == txn.created_contract_address_hash,
+        left_join: in_txn in InternalTransaction,
+        on: address.hash == in_txn.created_contract_address_hash,
         left_join: block in Block,
-        on: txn.block_number == block.number,
+        on: txn.block_number == block.number or in_txn.block_number == block.number,
         preload: [:smart_contract],
         order_by: [asc: address.inserted_at],
         limit: ^limit,
         offset: ^offset,
         select: %{
           address: address,
-          transaction: %{creation_hash: txn.hash, creation_timestamp: block.timestamp}
+          transaction: %{
+            creation_hash: coalesce(txn.hash, in_txn.transaction_hash),
+            creation_timestamp: block.timestamp
+          }
         }
       )
 
