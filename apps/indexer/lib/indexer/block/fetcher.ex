@@ -127,7 +127,7 @@ defmodule Indexer.Block.Fetcher do
     {fetch_time, fetched_blocks} =
       :timer.tc(fn -> EthereumJSONRPC.fetch_blocks_by_range(range, json_rpc_named_arguments) end)
 
-    with {:blocks,
+      with {:blocks,
           {:ok,
            %Blocks{
              blocks_params: blocks_params,

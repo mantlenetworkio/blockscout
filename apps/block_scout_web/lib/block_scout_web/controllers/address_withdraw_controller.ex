@@ -117,7 +117,7 @@ defmodule BlockScoutWeb.AddressWithdrawController do
         "index.html",
         address: address,
         coin_balance_status: CoinBalanceOnDemand.trigger_fetch(address),
-        exchange_rate: Market.get_exchange_rate(Explorer.coin()) || Token.null(),
+        exchange_rate: Market.get_coin_exchange_rate(),
         filter: params["filter"],
         current_path: Controller.current_full_path(conn),
         counters_path:
