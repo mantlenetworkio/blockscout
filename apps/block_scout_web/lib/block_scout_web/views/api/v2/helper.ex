@@ -114,9 +114,11 @@ defmodule BlockScoutWeb.API.V2.Helper do
   end
 
   def get_transaction_stats do
-    #stats_scale = date_range(1)
-    today = Date.utc_today()
-    transaction_stats = TransactionStats.by_date_range(today, today)
+    stats_scale = date_range(1)
+    transaction_stats = TransactionStats.by_date_range(stats_scale.earliest, stats_scale.latest)
+
+    # today = Date.utc_today()
+    # transaction_stats = TransactionStats.by_date_range(today, today)
 
     # Need datapoint for legend if none currently available.
     if Enum.empty?(transaction_stats) do
