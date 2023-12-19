@@ -467,6 +467,52 @@ defmodule EthereumJSONRPC.Transaction do
     end
   end
 
+  # for mantle, different BedRock, it have gasPrice
+  def elixir_to_params(
+        %{
+          "blockHash" => block_hash,
+          "blockNumber" => block_number,
+          "from" => from_address_hash,
+          "gas" => gas,
+          "gasPrice" => gas_price,
+          "hash" => hash,
+          "input" => input,
+          "nonce" => nonce,
+          "r" => r,
+          "s" => s,
+          "to" => to_address_hash,
+          "transactionIndex" => index,
+          "type" => type,
+          "v" => v,
+          "value" => value
+        } = transaction
+      ) do
+    result = %{
+      block_hash: block_hash,
+      block_number: block_number,
+      from_address_hash: from_address_hash,
+      gas: gas,
+      gas_price: gas_price,
+      hash: hash,
+      index: index,
+      input: input,
+      nonce: nonce,
+      r: r,
+      s: s,
+      to_address_hash: to_address_hash,
+      v: v,
+      value: value,
+      transaction_index: index,
+      type: type
+    }
+
+    if transaction["creates"] do
+      Map.put(result, :created_contract_address_hash, transaction["creates"])
+    else
+      result
+    end
+  end
+
   # eth_getTransactionReceipt on Optimism BedRock Geth node
   # doesn't return gas price and L1 fields for system transactions
   def elixir_to_params(
@@ -857,19 +903,14 @@ defmodule EthereumJSONRPC.Transaction do
     {key, quantity_to_integer(quantity)}
   end
 
-  # defp entry_to_elixir({key, quantity})
-  #      when key in ~w(gas gasPrice nonce r s standardV v value) and
-  #             quantity != nil do
-  #   {key, quantity_to_integer(quantity)}
-  # end
-
   # as always ganache has it's own vision on JSON RPC standard
   defp entry_to_elixir({key, nil}) when key in ~w(r s v) do
     {key, 0}
   end
 
   # quantity or nil for pending
-  defp entry_to_elixir({key, quantity_or_nil}) when key in ~w(blockNumber transactionIndex) do
+  defp entry_to_elixir({key, quantity_or_nil})
+       when key in ~w(blockNumber transactionIndex l1Fee l1FeeScalar l1GasPrice l1GasUsed l1TxOrigin l1BlockNumber) do
     elixir =
       case quantity_or_nil do
         nil -> nil
