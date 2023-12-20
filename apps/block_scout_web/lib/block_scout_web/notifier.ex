@@ -333,6 +333,7 @@ defmodule BlockScoutWeb.Notifier do
   end
 
   defp broadcast_latest_block?(block, last_broadcasted_block_number) do
+    Logger.info("--- broadcast_latest_block: #{inspect(block.number)}, #{inspect(last_broadcasted_block_number)}")
     cond do
       last_broadcasted_block_number == 0 || last_broadcasted_block_number == block.number - 1 ||
           last_broadcasted_block_number < block.number - 4 ->
@@ -389,6 +390,7 @@ defmodule BlockScoutWeb.Notifier do
     preloaded_block = Repo.preload(block, [[miner: :names], :transactions, :rewards])
     average_block_time = AverageBlockTime.average_block_time()
 
+    Logger.info("--- broadcast_block: #{inspect(preloaded_block.number)}")
 
     Logger.info("broadcast_block start1")
     last_24hrs_stats = get_last_24hrs_stats()
