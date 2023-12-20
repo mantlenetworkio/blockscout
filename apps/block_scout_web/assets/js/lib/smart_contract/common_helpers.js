@@ -427,3 +427,22 @@ export const mantleQa = {
     default: { name: 'BlockScout', url: 'https://explorer.qa.gomantle.org/' }
   }
 }
+
+export const mantleSepolia = {
+  id: 5003,
+  name: 'Mantle Sepolia',
+  network: 'Mantle Sepolia',
+  nativeCurrency: {
+    decimals: 18,
+    name: 'Mantle',
+    symbol: 'MNT'
+  },
+  rpcUrls: {
+    public: { http: ['https://rpc-internal.sepolia.mantle.xyz'] },
+    default: { http: ['https://rpc-internal.sepolia.mantle.xyz'] }
+  },
+  blockExplorers: {
+    blockScout: { name: 'BlockScout', url: 'https://explorer-v2.sepolia.mantle.xyz/' },
+    default: { name: 'BlockScout', url: 'https://explorer-v2.sepolia.mantle.xyz/' }
+  }
+}

@@ -42,7 +42,7 @@ defmodule Explorer.Chain.Search do
         tx_query = search_tx_query(string)
         address_query = search_address_query(string)
         block_query = search_block_query(string)
-        eigenda_query = search_eigenda_query(string)
+        # eigenda_query = search_eigenda_query(string)
 
         basic_query =
           from(
@@ -61,7 +61,7 @@ defmodule Explorer.Chain.Search do
               basic_query
               |> union(^tx_query)
               |> union(^block_query)
-              |> union(^eigenda_query)
+              # |> union(^eigenda_query)
 
             block_query ->
               basic_query
