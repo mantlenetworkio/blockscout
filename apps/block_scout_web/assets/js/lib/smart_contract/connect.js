@@ -32,7 +32,7 @@ let web3Modal
  */
 export async function web3ModalInit (connectToWallet, ...args) {
   return new Promise((resolve) => {
-    const projectId = 'a85398a55b8ecc45aecdfb252276c71e'
+    const projectId = '0f46802d607f6eddd6bc1a57428357f0'
     let chains = []
     if (instanceChainId === 1705003) {
       chains = [mantleQa]
