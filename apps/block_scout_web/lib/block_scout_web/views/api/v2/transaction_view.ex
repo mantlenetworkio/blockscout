@@ -22,6 +22,8 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
   import HTTPoison
   import EthereumJSONRPC
 
+  require Logger
+
 
   @api_true [api?: true]
   @suave_bid_event "0x83481d5b04dea534715acad673a8177a46fc93882760f36bdc16ccac439d504e"
@@ -605,10 +607,16 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
     total_fee = Wei.sum(Wei.from(fee, :wei), l1_and_da_fee)
   end
 
-  defp get_l2_fee(%Transaction{gas_price: gas_price, gas: gas, gas_used: gas_used}) do
-    actual_gas = if gas_used == nil, do: gas, else: gas_used
-    l2_fee = Wei.to(gas_price, :wei)
+  defp get_l2_fee(%Transaction{} = transaction) do
+    actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
+    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+    l2_fee = Wei.to(transaction.gas_price, :wei)
     |> Decimal.mult(actual_gas)
+    |> Wei.from(:wei)
+    |> Wei.sub(l1_fee)
+    |> Wei.to(:wei)
+
+    l2_fee
   end
 
   def token_transfers(_, _conn, false), do: nil

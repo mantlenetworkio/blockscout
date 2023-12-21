@@ -1066,18 +1066,18 @@ defmodule Explorer.Chain do
   end
 
   defp fee(tx, gas_price, gas, unit) do
-    l1_fee =
-      case Map.get(tx, :l1_fee) do
-        nil -> Wei.from(Decimal.new(0), :wei)
-        value -> value
-      end
+    # l1_fee =
+    #   case Map.get(tx, :l1_fee) do
+    #     nil -> Wei.from(Decimal.new(0), :wei)
+    #     value -> value
+    #   end
 
     gas_price
     |> Wei.to(unit)
     |> Decimal.mult(gas)
-    |> Wei.from(unit)
-    |> Wei.sum(l1_fee)
-    |> Wei.to(unit)
+    # |> Wei.from(unit)
+    # |> Wei.sum(l1_fee)
+    # |> Wei.to(unit)
   end
 
   @doc """
