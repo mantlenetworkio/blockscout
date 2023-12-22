@@ -109,7 +109,6 @@
                     size="<%= String.length(input["name"]) + String.length(input["type"]) + 2 %>" />
                   <% end %>
                 </div>
-
               <% end %>
             <% end %>
 

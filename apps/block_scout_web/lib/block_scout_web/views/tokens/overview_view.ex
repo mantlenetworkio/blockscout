@@ -70,7 +70,6 @@ defmodule BlockScoutWeb.Tokens.OverviewView do
       }),
       do: false
 
-
   def token_smart_contract_is_proxy?(%Token{
         contract_address: %Address{smart_contract: %SmartContract{} = smart_contract}
       }) do

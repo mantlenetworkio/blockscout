@@ -34,7 +34,6 @@ defmodule BlockScoutWeb.AddressChannel do
     "address_current_token_balances"
   ])
 
-
   {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
   @burn_address_hash burn_address_hash
   @current_token_balances_limit 50
@@ -244,6 +243,34 @@ defmodule BlockScoutWeb.AddressChannel do
 
   def handle_out("pending_transaction", data, socket),
     do: handle_transaction(data, socket, "transaction")
+
+  def handle_out(
+        "address_current_token_balances",
+        %{address_current_token_balances: address_current_token_balances},
+        %Phoenix.Socket{handler: BlockScoutWeb.UserSocketV2} = socket
+      ) do
+    push_current_token_balances(socket, address_current_token_balances, "erc_20", "ERC-20")
+    push_current_token_balances(socket, address_current_token_balances, "erc_721", "ERC-721")
+    push_current_token_balances(socket, address_current_token_balances, "erc_1155", "ERC-1155")
+
+    {:noreply, socket}
+  end
+
+  def handle_out("address_current_token_balances", _, socket) do
+    {:noreply, socket}
+  end
+
+  defp push_current_token_balances(socket, address_current_token_balances, event_postfix, token_type) do
+    filtered_ctbs = address_current_token_balances |> Enum.filter(fn ctb -> ctb.token_type == token_type end)
+
+    push(socket, "updated_token_balances_" <> event_postfix, %{
+      token_balances:
+        AddressViewAPI.render("token_balances.json", %{
+          token_balances: Enum.take(filtered_ctbs, @current_token_balances_limit)
+        }),
+      overflow: Enum.count(filtered_ctbs) > @current_token_balances_limit
+    })
+  end
 
   def handle_out(
         "address_current_token_balances",

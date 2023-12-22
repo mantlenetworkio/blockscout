@@ -383,17 +383,18 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
     decoded_input_data = decoded_input(decoded_input)
 
-    # for l2 status
-    tx_status =
-      EthereumJSONRPC.request(%{id: 0, method: "eth_getTxStatusDetailByHash", params: [transaction.hash]})
-      |> json_rpc(Application.get_env(:indexer, :json_rpc_named_arguments))
-      |> case do
-        {:ok, tx} ->
-          tx["status"]
+    # for l2 status, deprecated
+    # tx_status =
+    #   EthereumJSONRPC.request(%{id: 0, method: "eth_getTxStatusDetailByHash", params: [transaction.hash]})
+    #   |> json_rpc(Application.get_env(:indexer, :json_rpc_named_arguments))
+    #   |> case do
+    #     {:ok, tx} ->
+    #       tx["status"]
 
-        {:error, _} ->
-          nil
-      end
+    #     {:error, _} ->
+    #       nil
+    #   end
+    tx_status = nil
 
     result = %{
       "tx_status" => tx_status,

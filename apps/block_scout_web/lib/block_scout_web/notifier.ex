@@ -2,6 +2,9 @@ defmodule BlockScoutWeb.Notifier do
   @moduledoc """
   Responds to events by sending appropriate channel updates to front-end.
   """
+
+  require Logger
+
   alias Absinthe.Subscription
 
   alias BlockScoutWeb.API.V2, as: API_V2

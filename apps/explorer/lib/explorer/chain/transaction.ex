@@ -41,6 +41,8 @@ defmodule Explorer.Chain.Transaction do
 
   @suave_optional_attrs ~w(execution_node_hash wrapped_type wrapped_nonce wrapped_to_address_hash wrapped_gas wrapped_gas_price wrapped_max_priority_fee_per_gas wrapped_max_fee_per_gas wrapped_value wrapped_input wrapped_v wrapped_r wrapped_s wrapped_hash)a
 
+  @suave_optional_attrs ~w(execution_node_hash wrapped_type wrapped_nonce wrapped_to_address_hash wrapped_gas wrapped_gas_price wrapped_max_priority_fee_per_gas wrapped_max_fee_per_gas wrapped_value wrapped_input wrapped_v wrapped_r wrapped_s wrapped_hash)a
+
   @required_attrs ~w(from_address_hash gas hash input nonce r s v value)a
 
   @empty_attrs ~w()a
@@ -198,6 +200,7 @@ defmodule Explorer.Chain.Transaction do
               type: non_neg_integer() | nil,
               has_error_in_internal_txs: boolean(),
               transaction_fee_log: any(),
+
               transaction_fee_token: any(),
               da_fee: wei_per_gas,
               da_gas_price: wei_per_gas,

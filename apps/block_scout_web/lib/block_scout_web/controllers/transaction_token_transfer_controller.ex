@@ -16,7 +16,6 @@ defmodule BlockScoutWeb.TransactionTokenTransferController do
   import EthereumJSONRPC
   require Logger
 
-
   {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
   @burn_address_hash burn_address_hash
 

@@ -215,7 +215,6 @@ defmodule BlockScoutWeb.Plug.RedisCookie do
     hash = hash(cookie)
     key = cookie_key(hash)
 
-
     Logger.info("--- Checking redis... ---")
     case Redix.command(:redix, ["PING"]) do
       {:ok, "PONG"} ->
