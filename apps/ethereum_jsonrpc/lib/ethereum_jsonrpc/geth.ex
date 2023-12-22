@@ -29,10 +29,15 @@ defmodule EthereumJSONRPC.Geth do
 
     json_rpc_named_arguments_corrected_timeout = correct_timeouts(json_rpc_named_arguments)
 
+    Logger.info("--- start fetching internal_transactions: #{inspect(length(transactions_params))}")
+
     with {:ok, responses} <-
            id_to_params
            |> debug_trace_transaction_requests()
            |> json_rpc(json_rpc_named_arguments_corrected_timeout) do
+
+      Logger.info("--- fetch_internal_transactions success: #{inspect(length(responses))}")
+
       debug_trace_transaction_responses_to_internal_transactions_params(
         responses,
         id_to_params,
