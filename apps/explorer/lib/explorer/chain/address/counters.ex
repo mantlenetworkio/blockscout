@@ -218,9 +218,12 @@ defmodule Explorer.Chain.Address.Counters do
   end
 
   def address_hash_to_token_balances_query(address_hash) do
+    {:ok, token_contract_address_hash_to_remove} = Chain.string_to_address_hash("0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000")
+
     from(
       tb in CurrentTokenBalance,
       where: tb.address_hash == ^address_hash,
+      where: tb.token_contract_address_hash != ^token_contract_address_hash_to_remove,
       where: tb.value > 0
     )
   end

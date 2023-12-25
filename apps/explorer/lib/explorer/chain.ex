@@ -5055,8 +5055,24 @@ defmodule Explorer.Chain do
 
     address_hash
     |> CurrentTokenBalance.last_token_balances(options, filter)
+    |> fetchTokenBalancesExcludeNativeCoin()
     |> page_current_token_balances(options)
     |> select_repo(options).all()
+  end
+
+  def fetchTokenBalancesExcludeNativeCoin(query) do
+    {:ok, token_contract_address_hash_to_remove} = Chain.string_to_address_hash("0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000")
+    condition =
+      dynamic(
+        [ctb],
+        ctb.token_contract_address_hash != ^token_contract_address_hash_to_remove
+      )
+
+    where(
+      query,
+        [ctb],
+        ^condition
+    )
   end
 
   @spec erc721_or_erc1155_token_instance_from_token_id_and_token_address(non_neg_integer(), Hash.Address.t(), [api?]) ::

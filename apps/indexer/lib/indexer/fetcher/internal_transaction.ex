@@ -117,7 +117,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
 
       _ ->
         try do
-          Logger.info("--- unique numbers: #{inspect(filtered_unique_numbers)}")
+          # Logger.info("--- unique numbers: #{inspect(filtered_unique_numbers)}")
           fetch_block_internal_transactions_by_transactions(filtered_unique_numbers, json_rpc_named_arguments)
         rescue
           error ->
