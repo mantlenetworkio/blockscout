@@ -181,7 +181,13 @@ defmodule Explorer.Chain.Token do
     token_type = Keyword.get(options, :token_type, nil)
     sorting = Keyword.get(options, :sorting, [])
 
-    query = from(t in Token, preload: [:contract_address])
+    {:ok, token_contract_address_hash_to_remove} = Chain.string_to_address_hash("0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000")
+
+    query = from(
+        t in Token,
+        where: t.contract_address_hash != ^token_contract_address_hash_to_remove,
+        preload: [:contract_address]
+      )
 
     sorted_paginated_query =
       query

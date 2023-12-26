@@ -27,6 +27,8 @@ defmodule Explorer.Chain.Search do
     DaBatch
   }
 
+  require Logger
+
   @doc """
     Search function used in web interface. Returns paginated search results
   """
@@ -271,11 +273,14 @@ defmodule Explorer.Chain.Search do
       is_not_contract_address: true,
     }
 
+    {:ok, token_contract_address_hash_to_remove} = Chain.string_to_address_hash("0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000")
+
     case Chain.string_to_address_hash(string) do
       {:ok, address_hash} ->
         from(token in Token,
           left_join: smart_contract in SmartContract,
           on: token.contract_address_hash == smart_contract.address_hash,
+          where: token.contract_address_hash != ^token_contract_address_hash_to_remove,
           where: token.contract_address_hash == ^address_hash,
           select: ^token_search_fields
         )
@@ -284,6 +289,7 @@ defmodule Explorer.Chain.Search do
         from(token in Token,
           left_join: smart_contract in SmartContract,
           on: token.contract_address_hash == smart_contract.address_hash,
+          where: token.contract_address_hash != ^token_contract_address_hash_to_remove,
           where: fragment("to_tsvector('english', ? || ' ' || ?) @@ to_tsquery(?)", token.symbol, token.name, ^term),
           select: ^token_search_fields
         )
@@ -348,6 +354,8 @@ defmodule Explorer.Chain.Search do
           is_not_contract_address: dynamic([address, _], is_nil(address.contract_code)),
         }
 
+        {:ok, token_contract_address_hash_to_remove} = Chain.string_to_address_hash("0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000")
+
         from(address in Address,
           left_join:
             address_name in subquery(
@@ -358,6 +366,7 @@ defmodule Explorer.Chain.Search do
               )
             ),
           on: address.hash == address_name.address_hash,
+          where: address.hash != ^token_contract_address_hash_to_remove,
           where: address.hash == ^address_hash,
           select: ^address_search_fields
         )

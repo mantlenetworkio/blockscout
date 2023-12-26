@@ -194,6 +194,8 @@ defmodule Indexer.Fetcher.InternalTransaction do
   end
 
   defp fetch_block_internal_transactions_by_transactions(unique_numbers, json_rpc_named_arguments) do
+    trace_length_limit = Application.get_env(:indexer, :trace_ignore_length)
+
     Enum.reduce(unique_numbers, {:ok, []}, fn
       block_number, {:ok, acc_list} ->
         block_number
@@ -204,11 +206,17 @@ defmodule Indexer.Fetcher.InternalTransaction do
             {:ok, []}
 
           transactions ->
-            try do
-              EthereumJSONRPC.fetch_internal_transactions(transactions, json_rpc_named_arguments)
-            catch
-              :exit, error ->
-                {:error, error, __STACKTRACE__}
+            case length(transactions) do
+              length when length <= trace_length_limit ->
+                try do
+                  EthereumJSONRPC.fetch_internal_transactions(transactions, json_rpc_named_arguments)
+                catch
+                  :exit, error ->
+                    {:error, error, __STACKTRACE__}
+                end
+              length ->
+                # Logger.info("Ignore trance length: #{length}")
+                {:ok, []}
             end
         end
         |> case do
