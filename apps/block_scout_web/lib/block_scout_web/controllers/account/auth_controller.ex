@@ -15,7 +15,7 @@ defmodule BlockScoutWeb.Account.AuthController do
   end
 
   def logout(conn, _params) do
-    Logger.info("--- lougout ---")
+    Logger.info("--- logout ---")
     conn
     |> configure_session(drop: true)
     |> redirect(to: root())
