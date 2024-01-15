@@ -2,14 +2,15 @@ import Web3 from 'web3'
 import { EthereumClient, w3mConnectors, w3mProvider } from '@web3modal/ethereum'
 import { Web3Modal } from '@web3modal/html'
 import { configureChains, createConfig } from '@wagmi/core'
-import { mantle, mantleTestnet } from '@wagmi/core/chains'
+import { mantle } from '@wagmi/core/chains'
 import {
   compareChainIDs,
   formatError,
   showConnectElements,
   showConnectedToElements,
   mantleQa,
-  mantleSepolia
+  mantleSepolia,
+  mantleTestnet
 } from './common_helpers'
 import { openWarningModal } from '../modals'
 
@@ -30,10 +31,11 @@ let web3Modal
 /**
  * Setup the orchestra
  */
-export async function web3ModalInit (connectToWallet, ...args) {
+export async function web3ModalInit(connectToWallet, ...args) {
   return new Promise((resolve) => {
     const projectId = '0f46802d607f6eddd6bc1a57428357f0'
     let chains = []
+
     if (instanceChainId === 1705003) {
       chains = [mantleQa]
     } else if (instanceChainId === 5001) {
@@ -44,20 +46,25 @@ export async function web3ModalInit (connectToWallet, ...args) {
       chains = [mantleSepolia]
     }
 
-    const { publicClient } = configureChains(chains, [w3mProvider({ projectId })])
+    const { publicClient } = configureChains(chains, [
+      w3mProvider({ projectId })
+    ])
     const wagmiConfig = createConfig({
       autoConnect: true,
       connectors: w3mConnectors({ projectId, chains }),
       publicClient
     })
     const ethereumClient = new EthereumClient(wagmiConfig, chains)
-    web3Modal = new Web3Modal({
-      projectId,
-      defaultChain: {
-        id: chains[0].id,
-        name: chains[0].name
-      }
-    }, ethereumClient)
+    web3Modal = new Web3Modal(
+      {
+        projectId,
+        defaultChain: {
+          id: chains[0].id,
+          name: chains[0].name
+        }
+      },
+      ethereumClient
+    )
 
     window.ec = ethereumClient
 

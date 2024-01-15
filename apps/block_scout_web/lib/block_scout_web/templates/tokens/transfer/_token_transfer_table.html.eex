@@ -59,7 +59,7 @@
       ) %>
     </span>
     <span style="width: 10%;">
-      <span data-from-now="<%= @token_transfer.transaction.block && @token_transfer.transaction.block.timestamp %>"></span>
+      <span data-from-now="<%= @token_transfer.transaction.block_timestamp && @token_transfer.transaction.block_timestamp %>"></span>
     </span>
     <span style="width: 14%;" class="text-truncate address">
       <%= if BlockScoutWeb.AddressView.contract?(@token_transfer.from_address) do %>

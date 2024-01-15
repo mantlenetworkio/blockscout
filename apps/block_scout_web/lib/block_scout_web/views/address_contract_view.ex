@@ -14,6 +14,7 @@ defmodule BlockScoutWeb.AddressContractView do
   alias Explorer.SmartContract.{Helper, Writer}
 
   import BlockScoutWeb.Account.AuthController, only: [current_user: 1]
+
   alias Explorer.Chain.SmartContract
   alias Explorer.Chain.SmartContract.Proxy.EIP1167
 

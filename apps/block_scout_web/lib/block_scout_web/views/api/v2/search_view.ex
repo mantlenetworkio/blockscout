@@ -47,7 +47,8 @@ defmodule BlockScoutWeb.API.V2.SearchView do
       "name" => search_result.name,
       "address" => search_result.address_hash,
       "url" => address_path(Endpoint, :show, search_result.address_hash),
-      "is_smart_contract_verified" => search_result.verified
+      "is_smart_contract_verified" => search_result.verified,
+      "ens_info" => search_result[:ens_info]
     }
   end
 
@@ -91,7 +92,6 @@ defmodule BlockScoutWeb.API.V2.SearchView do
   end
 
   defp hash_to_string(%Hash{bytes: bytes}), do: hash_to_string(bytes)
-
   defp hash_to_string(hash), do: "0x" <> Base.encode16(hash, case: :lower)
 
   defp hash(%Hash{} = hash), do: hash

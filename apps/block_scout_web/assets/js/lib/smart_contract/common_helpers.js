@@ -428,6 +428,25 @@ export const mantleQa = {
   }
 }
 
+export const mantleTestnet = {
+  id: 5001,
+  name: 'Mantle Testnet',
+  network: 'Mantle Testnet',
+  nativeCurrency: {
+    decimals: 18,
+    name: 'Mantle',
+    symbol: 'MNT'
+  },
+  rpcUrls: {
+    public: { http: ['https://rpc.testnet.mantle.xyz'] },
+    default: { http: ['https://rpc.testnet.mantle.xyz'] }
+  },
+  blockExplorers: {
+    blockScout: { name: 'BlockScout', url: 'https://explorer.testnet.mantle.xyz/' },
+    default: { name: 'BlockScout', url: 'https://explorer.testnet.mantle.xyz/' }
+  }
+}
+
 export const mantleSepolia = {
   id: 5003,
   name: 'Mantle Sepolia',
@@ -438,11 +457,11 @@ export const mantleSepolia = {
     symbol: 'MNT'
   },
   rpcUrls: {
-    public: { http: ['https://rpc-internal.sepolia.mantle.xyz'] },
-    default: { http: ['https://rpc-internal.sepolia.mantle.xyz'] }
+    public: { http: ['https://rpc.sepolia.mantle.xyz'] },
+    default: { http: ['https://rpc.sepolia.mantle.xyz'] }
   },
   blockExplorers: {
-    blockScout: { name: 'BlockScout', url: 'https://explorer-v2.sepolia.mantle.xyz/' },
-    default: { name: 'BlockScout', url: 'https://explorer-v2.sepolia.mantle.xyz/' }
+    blockScout: { name: 'BlockScout', url: 'https://explorer.sepolia.mantle.xyz/' },
+    default: { name: 'BlockScout', url: 'https://explorer.sepolia.mantle.xyz/' }
   }
 }

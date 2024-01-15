@@ -1,4 +1,4 @@
-<% burned_fee = if !is_nil(@block.base_fee_per_gas), do: Wei.mult(@block.base_fee_per_gas, BlockBurnedFeeCounter.fetch(@block.hash)), else: nil %>
+<% burned_fee = if !is_nil(@block.base_fee_per_gas), do: Wei.mult(@block.base_fee_per_gas, BlockBurntFeeCounter.fetch(@block.hash)), else: nil %>
 <% priority_fee = if !is_nil(@block.base_fee_per_gas), do: BlockPriorityFeeCounter.fetch(@block.hash), else: nil %>
 <div class="table-tile tile tile-type-<%= String.downcase(@block_type) %>" data-selector="block-tile" data-block-number="<%= to_string(@block.number) %>" data-block-hash="<%= @block.hash %>">
 

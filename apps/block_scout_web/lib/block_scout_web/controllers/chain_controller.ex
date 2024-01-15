@@ -6,8 +6,8 @@ defmodule BlockScoutWeb.ChainController do
   alias BlockScoutWeb.API.V2.Helper
   alias BlockScoutWeb.{ChainView, Controller}
   alias Explorer.{Chain, PagingOptions, Repo}
-  alias Explorer.Chain.{Address, Block, Transaction, DaBatch}
   alias Explorer.Chain.Address.Counters
+  alias Explorer.Chain.{Address, Block, Transaction, DaBatch}
   alias Explorer.Chain.Cache.Block, as: BlockCache
   alias Explorer.Chain.Cache.GasUsage
   alias Explorer.Chain.Cache.Transaction, as: TransactionCache

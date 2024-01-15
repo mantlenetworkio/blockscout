@@ -16,7 +16,7 @@ defmodule BlockScoutWeb.Chain.TransactionHistoryChartController do
       Logger.info("#{inspect(today)}")
       Logger.info("#{inspect(latest)}")
       Logger.info("#{inspect(earliest)}")
-      Logger.info("#{inspect(date_range)}")
+      # Logger.info("#{inspect(date_range)}")
       transaction_history_data =
         date_range
         |> extract_history

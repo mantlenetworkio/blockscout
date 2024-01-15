@@ -22,7 +22,10 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       type_filter_options: 1
     ]
 
+  import Explorer.MicroserviceInterfaces.BENS, only: [maybe_preload_ens: 1, maybe_preload_ens_to_transaction: 1]
+
   alias BlockScoutWeb.AccessHelper
+  alias BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation, as: TransactionInterpretationService
   alias BlockScoutWeb.Models.TransactionStateHelper
   alias Explorer.Chain
   alias Explorer.Chain.Zkevm.Reader
@@ -38,7 +41,6 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     [created_contract_address: :token] => :optional,
     [from_address: :names] => :optional,
     [to_address: :names] => :optional,
-    # as far as I remember this needed for substituting implementation name in `to` address instead of is's real name (in transactions)
     [to_address: :smart_contract] => :optional
   }
 
@@ -62,7 +64,6 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       [created_contract_address: :names] => :optional,
       [from_address: :names] => :optional,
       [to_address: :names] => :optional,
-      [transaction: :block] => :optional,
       [created_contract_address: :smart_contract] => :optional,
       [from_address: :smart_contract] => :optional,
       [to_address: :smart_contract] => :optional
@@ -97,21 +98,16 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
           necessity_by_association_with_actions
       end
 
-    with {:format, {:ok, transaction_hash}} <- {:format, Chain.string_to_transaction_hash(transaction_hash_string)},
-         {:not_found, {:ok, transaction}} <-
-           {:not_found,
-            Chain.hash_to_transaction(
-              transaction_hash,
-              necessity_by_association: necessity_by_association,
-              api?: true
-            )},
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.from_address_hash), params),
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.to_address_hash), params),
+    with {:ok, transaction, _transaction_hash} <-
+           validate_transaction(transaction_hash_string, params,
+             necessity_by_association: necessity_by_association,
+             api?: true
+           ),
          preloaded <-
            Chain.preload_token_transfers(transaction, @token_transfers_in_tx_necessity_by_association, @api_true, false) do
       conn
       |> put_status(200)
-      |> render(:transaction, %{transaction: preloaded})
+      |> render(:transaction, %{transaction: preloaded |> maybe_preload_ens_to_transaction()})
     end
   end
 
@@ -192,7 +188,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
 
     conn
     |> put_status(200)
-    |> render(:transactions, %{transactions: transactions, next_page_params: next_page_params})
+    |> render(:transactions, %{transactions: transactions |> maybe_preload_ens(), next_page_params: next_page_params})
   end
 
   @doc """
@@ -209,7 +205,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
 
     conn
     |> put_status(200)
-    |> render(:transactions, %{transactions: transactions, items: true})
+    |> render(:transactions, %{transactions: transactions |> maybe_preload_ens(), items: true})
   end
 
   def execution_node(conn, %{"execution_node_hash_param" => execution_node_hash_string} = params) do
@@ -229,7 +225,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
 
       conn
       |> put_status(200)
-      |> render(:transactions, %{transactions: transactions, next_page_params: next_page_params})
+      |> render(:transactions, %{transactions: transactions |> maybe_preload_ens(), next_page_params: next_page_params})
     end
   end
 
@@ -238,11 +234,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   """
   @spec raw_trace(Plug.Conn.t(), map()) :: Plug.Conn.t() | {atom(), any()}
   def raw_trace(conn, %{"transaction_hash_param" => transaction_hash_string} = params) do
-    with {:format, {:ok, transaction_hash}} <- {:format, Chain.string_to_transaction_hash(transaction_hash_string)},
-         {:not_found, {:ok, transaction}} <-
-           {:not_found, Chain.hash_to_transaction(transaction_hash, @api_true)},
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.from_address_hash), params),
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.to_address_hash), params) do
+    with {:ok, transaction, transaction_hash} <- validate_transaction(transaction_hash_string, params) do
       if is_nil(transaction.block_number) do
         conn
         |> put_status(200)
@@ -271,11 +263,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   """
   @spec token_transfers(Plug.Conn.t(), map()) :: Plug.Conn.t() | {atom(), any()}
   def token_transfers(conn, %{"transaction_hash_param" => transaction_hash_string} = params) do
-    with {:format, {:ok, transaction_hash}} <- {:format, Chain.string_to_transaction_hash(transaction_hash_string)},
-         {:not_found, {:ok, transaction}} <-
-           {:not_found, Chain.hash_to_transaction(transaction_hash, @api_true)},
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.from_address_hash), params),
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.to_address_hash), params) do
+    with {:ok, _transaction, transaction_hash} <- validate_transaction(transaction_hash_string, params) do
       paging_options = paging_options(params)
 
       full_options =
@@ -298,7 +286,10 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
 
       conn
       |> put_status(200)
-      |> render(:token_transfers, %{token_transfers: token_transfers, next_page_params: next_page_params})
+      |> render(:token_transfers, %{
+        token_transfers: token_transfers |> maybe_preload_ens(),
+        next_page_params: next_page_params
+      })
     end
   end
 
@@ -307,11 +298,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   """
   @spec internal_transactions(Plug.Conn.t(), map()) :: Plug.Conn.t() | {atom(), any()}
   def internal_transactions(conn, %{"transaction_hash_param" => transaction_hash_string} = params) do
-    with {:format, {:ok, transaction_hash}} <- {:format, Chain.string_to_transaction_hash(transaction_hash_string)},
-         {:not_found, {:ok, transaction}} <-
-           {:not_found, Chain.hash_to_transaction(transaction_hash, @api_true)},
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.from_address_hash), params),
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.to_address_hash), params) do
+    with {:ok, _transaction, transaction_hash} <- validate_transaction(transaction_hash_string, params) do
       full_options =
         @internal_transaction_necessity_by_association
         |> Keyword.merge(paging_options(params))
@@ -328,7 +315,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       conn
       |> put_status(200)
       |> render(:internal_transactions, %{
-        internal_transactions: internal_transactions,
+        internal_transactions: internal_transactions |> maybe_preload_ens(),
         next_page_params: next_page_params
       })
     end
@@ -339,11 +326,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   """
   @spec logs(Plug.Conn.t(), map()) :: Plug.Conn.t() | {atom(), any()}
   def logs(conn, %{"transaction_hash_param" => transaction_hash_string} = params) do
-    with {:format, {:ok, transaction_hash}} <- {:format, Chain.string_to_transaction_hash(transaction_hash_string)},
-         {:not_found, {:ok, transaction}} <-
-           {:not_found, Chain.hash_to_transaction(transaction_hash, @api_true)},
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.from_address_hash), params),
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.to_address_hash), params) do
+    with {:ok, _transaction, transaction_hash} <- validate_transaction(transaction_hash_string, params) do
       full_options =
         [
           necessity_by_association: %{
@@ -367,7 +350,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       |> put_status(200)
       |> render(:logs, %{
         tx_hash: transaction_hash,
-        logs: logs,
+        logs: logs |> maybe_preload_ens(),
         next_page_params: next_page_params
       })
     end
@@ -378,16 +361,12 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   """
   @spec state_changes(Plug.Conn.t(), map()) :: Plug.Conn.t() | {atom(), any()}
   def state_changes(conn, %{"transaction_hash_param" => transaction_hash_string} = params) do
-    with {:format, {:ok, transaction_hash}} <- {:format, Chain.string_to_transaction_hash(transaction_hash_string)},
-         {:not_found, {:ok, transaction}} <-
-           {:not_found,
-            Chain.hash_to_transaction(transaction_hash,
-              necessity_by_association:
-                Map.merge(@transaction_necessity_by_association, %{[block: [miner: :names]] => :optional}),
-              api?: true
-            )},
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.from_address_hash), params),
-         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.to_address_hash), params) do
+    with {:ok, transaction, _transaction_hash} <-
+           validate_transaction(transaction_hash_string, params,
+             necessity_by_association:
+               Map.merge(@transaction_necessity_by_association, %{[block: [miner: :names]] => :optional}),
+             api?: true
+           ) do
       state_changes_plus_next_page =
         transaction |> TransactionStateHelper.state_changes(params |> paging_options() |> Keyword.merge(api?: true))
 
@@ -425,10 +404,52 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       conn
       |> put_status(200)
       |> render(:transactions_watchlist, %{
-        transactions: transactions,
+        transactions: transactions |> maybe_preload_ens(),
         next_page_params: next_page_params,
         watchlist_names: watchlist_names
       })
+    end
+  end
+
+  def summary(conn, %{"transaction_hash_param" => transaction_hash_string, "just_request_body" => "true"} = params) do
+    with {:tx_interpreter_enabled, true} <- {:tx_interpreter_enabled, TransactionInterpretationService.enabled?()},
+         {:ok, transaction, _transaction_hash} <- validate_transaction(transaction_hash_string, params) do
+      conn
+      |> json(TransactionInterpretationService.get_request_body(transaction))
+    end
+  end
+
+  @doc """
+    Function to handle GET requests to `/api/v2/transactions/:transaction_hash_param/summary` endpoint.
+  """
+  @spec summary(Plug.Conn.t(), map()) ::
+          {:format, :error}
+          | {:not_found, {:error, :not_found}}
+          | {:restricted_access, true}
+          | {:tx_interpreter_enabled, boolean}
+          | Plug.Conn.t()
+  def summary(conn, %{"transaction_hash_param" => transaction_hash_string} = params) do
+    with {:tx_interpreter_enabled, true} <- {:tx_interpreter_enabled, TransactionInterpretationService.enabled?()},
+         {:ok, transaction, _transaction_hash} <- validate_transaction(transaction_hash_string, params) do
+      response =
+        case TransactionInterpretationService.interpret(transaction) do
+          {:ok, response} -> response
+          {:error, %Jason.DecodeError{}} -> %{error: "Error while tx interpreter response decoding"}
+          {:error, error} -> %{error: error}
+        end
+
+      conn
+      |> json(response)
+    end
+  end
+
+  defp validate_transaction(transaction_hash_string, params, options \\ @api_true) do
+    with {:format, {:ok, transaction_hash}} <- {:format, Chain.string_to_transaction_hash(transaction_hash_string)},
+         {:not_found, {:ok, transaction}} <-
+           {:not_found, Chain.hash_to_transaction(transaction_hash, options)},
+         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.from_address_hash), params),
+         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.to_address_hash), params) do
+      {:ok, transaction, transaction_hash}
     end
   end
 end
