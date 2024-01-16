@@ -297,7 +297,13 @@ defmodule Explorer.Chain.Cache.GasPriceOracle do
         {key, nil}
 
       {key, value} ->
-        value = if is_list(value), do: value, else: [value]
+        value = if is_list(value), do: Enum.map(value, fn elem ->
+          if is_float(elem) do
+            Decimal.from_float(elem)
+          else
+            elem
+          end
+        end), else: [Decimal.from_float(value)]
         count = Enum.count(value)
         {key, value |> Enum.reduce(Decimal.new(0), &Decimal.add/2) |> Decimal.div(count)}
     end)
