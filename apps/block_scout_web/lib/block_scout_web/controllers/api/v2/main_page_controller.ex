@@ -26,7 +26,7 @@ defmodule BlockScoutWeb.API.V2.MainPageController do
 
   def blocks(conn, _params) do
     blocks =
-      [paging_options: %PagingOptions{page_size: 4}, api?: true]
+      [paging_options: %PagingOptions{page_size: 5}, api?: true]
       |> Chain.list_blocks()
       |> Repo.replica().preload([[miner: :names], :transactions, :rewards])
 
