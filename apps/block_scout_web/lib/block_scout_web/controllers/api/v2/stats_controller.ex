@@ -59,6 +59,8 @@ defmodule BlockScoutWeb.API.V2.StatsController do
 
     gas_price = Application.get_env(:block_scout_web, :gas_price)
 
+    exchange_rate = Market.get_coin_exchange_rate()
+
     json(
       conn,
       %{
@@ -66,7 +68,7 @@ defmodule BlockScoutWeb.API.V2.StatsController do
         "total_addresses" => @api_true |> Counters.address_estimated_count() |> to_string(),
         "total_transactions" => TransactionCache.estimated_count() |> to_string(),
         "average_block_time" => AverageBlockTime.average_block_time() |> Duration.to_milliseconds(),
-        "coin_price" => exchange_rate_from_db.usd_value,
+        "coin_price" => exchange_rate.usd_value,
         "coin_price_change_percentage" => coin_price_change,
         "total_gas_used" => GasUsage.total() |> to_string(),
         "transactions_today" => Enum.at(transaction_stats, 0).number_of_transactions |> to_string(),
