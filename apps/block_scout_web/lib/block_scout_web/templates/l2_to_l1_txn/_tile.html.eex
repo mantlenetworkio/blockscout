@@ -22,7 +22,7 @@
           data-html="true"
           data-placement="top"
           data-toggle="tooltip"
-          title="<%= Gettext.gettext(BlockScoutWeb.Gettext, @l2_to_l1.display_status_tooltip) %>"
+          title="test"
       >
           <%= @l2_to_l1.display_status %>
       </span>

@@ -100,6 +100,9 @@ defmodule BlockScoutWeb.L2ToL1TxnController do
       %{
         items:
           Enum.map(l2_to_l1, fn l ->
+
+            Logger.info("--- see status: #{inspect(l.status)}")
+
             display_status = case l.status do
               "0" ->
                 gettext("Waiting for relay")
