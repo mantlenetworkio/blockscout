@@ -4,20 +4,25 @@
 
 ### Features
 
+- [#9158](https://github.com/blockscout/blockscout/pull/9158) - Increase shared memory for PostgreSQL containers
 - [#9155](https://github.com/blockscout/blockscout/pull/9155) - Allow bypassing avg block time in proxy implementation re-fetch ttl calculation
+- [#9148](https://github.com/blockscout/blockscout/pull/9148) - Add `/api/v2/utils/decode-calldata`
 - [#9145](https://github.com/blockscout/blockscout/pull/9145) - Proxy for Account abstraction microservice
+- [#9132](https://github.com/blockscout/blockscout/pull/9132) - Fetch token image from CoinGecko
 - [#9131](https://github.com/blockscout/blockscout/pull/9131) - Merge addresses stage with address referencing
 - [#9072](https://github.com/blockscout/blockscout/pull/9072) - Add tracing by block logic for geth
 - [#9068](https://github.com/blockscout/blockscout/pull/9068) - New RPC API v1 endpoints
 - [#9056](https://github.com/blockscout/blockscout/pull/9056) - Noves.fi API proxy
-- [#9158](https://github.com/blockscout/blockscout/pull/9158) - Increase shared memory for PostgreSQL containers
 
 ### Fixes
 
+- [#9241](https://github.com/blockscout/blockscout/pull/9241) - Fix log decoding bug
 - [#9229](https://github.com/blockscout/blockscout/pull/9229) - Add missing filter to txlist query
+- [#9187](https://github.com/blockscout/blockscout/pull/9187) - Fix Internal Server Error on request for nonexistent token instance
+- [#9178](https://github.com/blockscout/blockscout/pull/9178) - Change internal txs tracer type to opcode for Hardhat node
+- [#9173](https://github.com/blockscout/blockscout/pull/9173) - Exclude genesis block from average block time calculation
 - [#9143](https://github.com/blockscout/blockscout/pull/9143) - Handle nil token_ids in token transfers on render
 - [#9139](https://github.com/blockscout/blockscout/pull/9139) - TokenBalanceOnDemand fixes
-- [#9178](https://github.com/blockscout/blockscout/pull/9178) - Change internal txs tracer type to opcode for Hardhat node
 - [#9125](https://github.com/blockscout/blockscout/pull/9125) - Fix Explorer.Chain.Cache.GasPriceOracle.merge_fees
 - [#9124](https://github.com/blockscout/blockscout/pull/9124) - EIP-1167 display multiple sources of implementation
 - [#9110](https://github.com/blockscout/blockscout/pull/9110) - Improve update_in in gas tracker
@@ -29,10 +34,12 @@
 
 ### Chore
 
+- [#9233](https://github.com/blockscout/blockscout/pull/9233) - "cataloged" index on tokens table
 - [#9198](https://github.com/blockscout/blockscout/pull/9198) - Make Postgres@15 default option
 - [#9197](https://github.com/blockscout/blockscout/pull/9197) - Add `MARKET_HISTORY_FETCH_INTERVAL` env
 - [#9196](https://github.com/blockscout/blockscout/pull/9196) - Compatibility with docker-compose 2.24
 - [#9193](https://github.com/blockscout/blockscout/pull/9193) - Equalize elixir stack versions
+- [#9153](https://github.com/blockscout/blockscout/pull/9153) - Enhanced unfetched token balances index
 
 <details>
   <summary>Dependencies version bumps</summary>
