@@ -266,16 +266,25 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
     }
   end
 
+  # credo:disable-for-next-line /Complexity/
   def prepare_token_transfer_total(token_transfer) do
     case TokensHelper.token_transfer_amount_for_api(token_transfer) do
       {:ok, :erc721_instance} ->
-        %{"token_id" => List.first(token_transfer.token_ids)}
+        %{"token_id" => token_transfer.token_ids && List.first(token_transfer.token_ids)}
 
       {:ok, :erc1155_instance, value, decimals} ->
-        %{"token_id" => List.first(token_transfer.token_ids), "value" => value, "decimals" => decimals}
+        %{
+          "token_id" => token_transfer.token_ids && List.first(token_transfer.token_ids),
+          "value" => value,
+          "decimals" => decimals
+        }
 
       {:ok, :erc1155_instance, values, token_ids, decimals} ->
-        %{"token_id" => List.first(token_ids), "value" => List.first(values), "decimals" => decimals}
+        %{
+          "token_id" => token_ids && List.first(token_ids),
+          "value" => values && List.first(values),
+          "decimals" => decimals
+        }
 
       {:ok, value, decimals} ->
         %{"value" => value, "decimals" => decimals}
@@ -437,7 +446,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
       "confirmations" => transaction.block |> Chain.confirmations(block_height: block_height) |> format_confirmations(),
       "confirmation_duration" => processing_time_duration(transaction),
       "value" => transaction.value,
-      "fee" => transaction |> Chain.fee(:wei) |> format_fee(),
+      "fee" => get_total_fee(transaction),
       "gas_price" => transaction.gas_price,
       "type" => transaction.type,
       "gas_used" => transaction.gas_used,
@@ -460,7 +469,6 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
       "tx_types" => tx_types(transaction),
       "tx_tag" => GetTransactionTags.get_transaction_tags(transaction.hash, current_user(single_tx? && conn)),
       "has_error_in_internal_txs" => transaction.has_error_in_internal_txs,
-      "total_fee" => get_total_fee(transaction),
       "l2_fee" => get_l2_fee(transaction),
       "l1_fee" => transaction.l1_fee,
       "l1_gas_price" => transaction.l1_gas_price,
@@ -604,27 +612,56 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
   end
 
   defp sanitize_log_first_topic(first_topic) do
-    if is_nil(first_topic), do: "", else: String.downcase(first_topic)
+    if is_nil(first_topic) do
+      ""
+    else
+      sanitized =
+        if is_binary(first_topic) do
+          first_topic
+        else
+          Hash.to_string(first_topic)
+        end
+
+      String.downcase(sanitized)
+    end
   end
 
   defp get_total_fee(%Transaction{} = transaction) do
-    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-    da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
-    l1_and_da_fee = Wei.sum(l1_fee, da_fee)
-    {_, fee} = transaction |> Chain.fee(:wei)
-    total_fee = Wei.sum(Wei.from(fee, :wei), l1_and_da_fee)
+    if is_nil(transaction.da_fee) do
+      transaction |> Chain.fee(:wei) |> format_fee()
+    else
+      l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+      da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
+      l1_and_da_fee = Wei.sum(l1_fee, da_fee)
+
+      test = transaction |> Chain.fee(:wei)
+
+      {type, fee} = transaction |> Chain.fee(:wei)
+      total_fee = Wei.sum(Wei.from(fee, :wei), l1_and_da_fee)
+
+      {type, total_fee} |> format_fee()
+    end
   end
 
   defp get_l2_fee(%Transaction{} = transaction) do
-    actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
-    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-    l2_fee = Wei.to(transaction.gas_price, :wei)
-    |> Decimal.mult(actual_gas)
-    |> Wei.from(:wei)
-    |> Wei.sub(l1_fee)
-    |> Wei.to(:wei)
+    if is_nil(transaction.da_fee) do
+      actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
+      l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+      l2_fee = Wei.to(transaction.gas_price, :wei)
+      |> Decimal.mult(actual_gas)
+      |> Wei.from(:wei)
+      |> Wei.sub(l1_fee)
+      |> Wei.to(:wei)
 
-    l2_fee
+      l2_fee
+    else
+      actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
+      l2_fee = Wei.to(transaction.gas_price, :wei)
+      |> Decimal.mult(actual_gas)
+      |> Wei.from(:wei)
+
+      l2_fee
+    end
   end
 
   def token_transfers(_, _conn, false), do: nil
@@ -788,7 +825,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
         _,
         skip_sc_check?
       ) do
-    if skip_sc_check? || Address.is_smart_contract(to_address) do
+    if skip_sc_check? || Address.smart_contract?(to_address) do
       "0x" <> Base.encode16(method_id, case: :lower)
     else
       nil
@@ -857,7 +894,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
   def tx_types(%Transaction{to_address: to_address} = tx, types, :contract_call) do
     types =
-      if Address.is_smart_contract(to_address) do
+      if Address.smart_contract?(to_address) do
         [:contract_call | types]
       else
         types
@@ -879,7 +916,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
   def tx_types(tx, types, :rootstock_remasc) do
     types =
-      if Transaction.is_rootstock_remasc_transaction(tx) do
+      if Transaction.rootstock_remasc_transaction?(tx) do
         [:rootstock_remasc | types]
       else
         types
@@ -889,7 +926,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
   end
 
   def tx_types(tx, types, :rootstock_bridge) do
-    if Transaction.is_rootstock_bridge_transaction(tx) do
+    if Transaction.rootstock_bridge_transaction?(tx) do
       [:rootstock_bridge | types]
     else
       types
