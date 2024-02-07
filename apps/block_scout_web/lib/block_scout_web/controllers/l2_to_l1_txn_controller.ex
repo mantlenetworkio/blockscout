@@ -180,7 +180,7 @@ defmodule BlockScoutWeb.L2ToL1TxnController do
           render(
             conn,
             "show_token_transfers.html",
-            exchange_rate: Market.get_exchange_rate(Explorer.coin()) || Token.null(),
+            exchange_rate: Market.get_coin_exchange_rate(),
             block_height: Chain.block_height(),
             current_path: Controller.current_full_path(conn),
             show_token_transfers: true,
@@ -210,7 +210,7 @@ defmodule BlockScoutWeb.L2ToL1TxnController do
           render(
             conn,
             "show_internal_transactions.html",
-            exchange_rate: Market.get_exchange_rate(Explorer.coin()) || Token.null(),
+            exchange_rate: Market.get_coin_exchange_rate(),
             current_path: Controller.current_full_path(conn),
             block_height: Chain.block_height(),
             show_token_transfers: Chain.transaction_has_token_transfers?(transaction_hash),

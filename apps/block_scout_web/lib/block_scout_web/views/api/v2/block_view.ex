@@ -11,6 +11,15 @@ defmodule BlockScoutWeb.API.V2.BlockView do
     ApiView.render("message.json", assigns)
   end
 
+  def render("blocks.json", %{blocks: blocks, pagination: pagination}) do
+    %{
+      "Current" => pagination.page,
+      "Size" => pagination.page_size,
+      "Total" => pagination.total,
+      "Records" => Enum.map(blocks, &prepare_block(&1, nil)),
+    }
+  end
+
   def render("blocks.json", %{blocks: blocks, next_page_params: next_page_params}) do
     %{"items" => Enum.map(blocks, &prepare_block(&1, nil)), "next_page_params" => next_page_params}
   end
@@ -50,9 +59,9 @@ defmodule BlockScoutWeb.API.V2.BlockView do
       "base_fee_per_gas" => block.base_fee_per_gas,
       "burnt_fees" => burned_fee,
       "priority_fee" => priority_fee,
-      "extra_data" => "TODO",
+      # "extra_data" => "TODO",
       "uncles_hashes" => prepare_uncles(block.uncle_relations),
-      "state_root" => "TODO",
+      # "state_root" => "TODO",
       "rewards" => prepare_rewards(block.rewards, block, single_block?),
       "gas_target_percentage" => gas_target(block),
       "gas_used_percentage" => gas_used_percentage(block),
@@ -61,6 +70,7 @@ defmodule BlockScoutWeb.API.V2.BlockView do
       "tx_fees" => tx_fees,
       "withdrawals_count" => count_withdrawals(block)
     }
+    |> chain_type_fields(block, single_block?)
   end
 
   def prepare_rewards(rewards, block, single_block?) do
@@ -85,13 +95,21 @@ defmodule BlockScoutWeb.API.V2.BlockView do
   end
 
   def gas_target(block) do
-    elasticity_multiplier = Application.get_env(:explorer, :elasticity_multiplier)
-    ratio = Decimal.div(block.gas_used, Decimal.div(block.gas_limit, elasticity_multiplier))
-    ratio |> Decimal.sub(1) |> Decimal.mult(100) |> Decimal.to_float()
+    if Decimal.compare(block.gas_limit, 0) == :gt do
+      elasticity_multiplier = Application.get_env(:explorer, :elasticity_multiplier)
+      ratio = Decimal.div(block.gas_used, Decimal.div(block.gas_limit, elasticity_multiplier))
+      ratio |> Decimal.sub(1) |> Decimal.mult(100) |> Decimal.to_float()
+    else
+      Decimal.new(0)
+    end
   end
 
   def gas_used_percentage(block) do
-    block.gas_used |> Decimal.div(block.gas_limit) |> Decimal.mult(100) |> Decimal.to_float()
+    if Decimal.compare(block.gas_limit, 0) == :gt do
+      block.gas_used |> Decimal.div(block.gas_limit) |> Decimal.mult(100) |> Decimal.to_float()
+    else
+      Decimal.new(0)
+    end
   end
 
   def burnt_fees_percentage(_, %Decimal{coef: 0}), do: nil
@@ -107,4 +125,19 @@ defmodule BlockScoutWeb.API.V2.BlockView do
 
   def count_withdrawals(%Block{withdrawals: withdrawals}) when is_list(withdrawals), do: Enum.count(withdrawals)
   def count_withdrawals(_), do: nil
+
+  defp chain_type_fields(result, block, single_block?) do
+    case single_block? && Application.get_env(:explorer, :chain_type) do
+      "rsk" ->
+        result
+        |> Map.put("minimum_gas_price", block.minimum_gas_price)
+        |> Map.put("bitcoin_merged_mining_header", block.bitcoin_merged_mining_header)
+        |> Map.put("bitcoin_merged_mining_coinbase_transaction", block.bitcoin_merged_mining_coinbase_transaction)
+        |> Map.put("bitcoin_merged_mining_merkle_proof", block.bitcoin_merged_mining_merkle_proof)
+        |> Map.put("hash_for_merged_mining", block.hash_for_merged_mining)
+
+      _ ->
+        result
+    end
+  end
 end

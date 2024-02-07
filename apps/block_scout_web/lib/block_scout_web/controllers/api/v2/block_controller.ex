@@ -15,6 +15,8 @@ defmodule BlockScoutWeb.API.V2.BlockController do
   alias BlockScoutWeb.API.V2.{TransactionView, WithdrawalView}
   alias Explorer.Chain
 
+  require Logger
+
   @transaction_necessity_by_association [
     necessity_by_association: %{
       [created_contract_address: :names] => :optional,
@@ -66,6 +68,46 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     end
   end
 
+  def batch_blocks_rap(conn, params) do
+    with  {:ok, blockNumber} <- Map.fetch(params, "blockNumber"),
+          {:ok, blockSize} <- Map.fetch(params, "blockSize"),
+          blockNumberInt <- String.to_integer(blockNumber),
+          blockSizeInt <- String.to_integer(blockSize) do
+
+          filter_options = [blocks_range: %{blockNumber: blockNumberInt, blockSize: blockSizeInt}]
+          |> Keyword.merge( select_block_type(params))
+          |> Keyword.merge(Chain.mantle_get_paging(params))
+          |> Keyword.merge(@api_true)
+
+          %{pagination: pagination, blocks: blocks} = Chain.get_batch_blocks_for_rap(filter_options)
+
+          conn
+          |> put_status(200)
+          |> render(:blocks, %{pagination: pagination, blocks: blocks})
+    else
+      _ ->
+        conn
+        |> put_status(200)
+        |> render(:blocks, %{pagination: %{
+          page: 1,
+          page_size: 0,
+          total: 0
+        }, blocks: []})
+    end
+  end
+
+  def blocks_rap(conn, params) do
+    filter_options = select_block_type(params)
+    |> Keyword.merge(Chain.mantle_get_paging(params))
+    |> Keyword.merge(@api_true)
+
+    %{pagination: pagination, blocks: blocks} = Chain.get_blocks_for_rap(filter_options)
+
+    conn
+    |> put_status(200)
+    |> render(:blocks, %{pagination: pagination, blocks: blocks})
+  end
+
   def blocks(conn, params) do
     full_options = select_block_type(params)
 
@@ -77,11 +119,30 @@ defmodule BlockScoutWeb.API.V2.BlockController do
 
     {blocks, next_page} = split_list_by_page(blocks_plus_one)
 
-    next_page_params = next_page |> next_page_params(blocks, params) |> delete_parameters_from_next_page_params()
+    next_page_params = next_page |> next_page_params(blocks, delete_parameters_from_next_page_params(params))
 
     conn
     |> put_status(200)
     |> render(:blocks, %{blocks: blocks, next_page_params: next_page_params})
+  end
+
+  def transactions_rap(conn, %{"block_hash_or_number" => block_hash_or_number} = params) do
+    with {:ok, type, value} <- parse_block_hash_or_number_param(block_hash_or_number),
+         {:ok, block} <- fetch_block(type, value, @api_true) do
+
+        full_options =
+          @transaction_necessity_by_association
+          |> Keyword.merge([is_index_in_asc_order: true])
+          |> Keyword.merge(Chain.mantle_get_paging(params))
+          |> Keyword.merge(@api_true)
+
+        %{pagination: pagination, transactions: transactions} = Chain.block_to_transactions_rap(block.hash, full_options)
+
+      conn
+      |> put_status(200)
+      |> put_view(TransactionView)
+      |> render(:mantle_transactions,  %{pagination: pagination, transactions: transactions})
+    end
   end
 
   def transactions(conn, %{"block_hash_or_number" => block_hash_or_number} = params) do
@@ -98,8 +159,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
 
       next_page_params =
         next_page
-        |> next_page_params(transactions, params)
-        |> delete_parameters_from_next_page_params()
+        |> next_page_params(transactions, delete_parameters_from_next_page_params(params))
 
       conn
       |> put_status(200)
@@ -118,7 +178,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       withdrawals_plus_one = Chain.block_to_withdrawals(block.hash, full_options)
       {withdrawals, next_page} = split_list_by_page(withdrawals_plus_one)
 
-      next_page_params = next_page |> next_page_params(withdrawals, params) |> delete_parameters_from_next_page_params()
+      next_page_params = next_page |> next_page_params(withdrawals, delete_parameters_from_next_page_params(params))
 
       conn
       |> put_status(200)

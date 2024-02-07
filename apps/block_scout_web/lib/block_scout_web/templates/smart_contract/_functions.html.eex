@@ -1,5 +1,5 @@
-<% minimal_proxy_template = if assigns[:custom_abi], do: nil, else: Chain.get_minimal_proxy_template(@address.hash) %>
-<% metadata_for_verification = if assigns[:custom_abi], do: nil, else: minimal_proxy_template || Chain.get_address_verified_twin_contract(@address.hash).verified_contract %>
+<% minimal_proxy_template = if assigns[:custom_abi], do: nil, else: EIP1167.get_implementation_address(@address.hash) %>
+<% metadata_for_verification = if assigns[:custom_abi], do: nil, else: minimal_proxy_template || SmartContract.get_address_verified_twin_contract(@address.hash).verified_contract %>
 <% smart_contract_verified = if assigns[:custom_abi], do: false, else: BlockScoutWeb.AddressView.smart_contract_verified?(@address) %>
 <%= unless smart_contract_verified do %>
   <%= if metadata_for_verification do %>
@@ -67,7 +67,6 @@
     <div id="<%= if @action == "write" do "#{function["name"]}-write-#{counter}" else "#{function["name"]}-read-#{counter}" end %>" class="collapse" aria-labelledby="<%= if @action == "write" do "#{function["name"]}-write-#{counter}" else "#{function["name"]}-read-#{counter}" end %>-heading" >
 
       <div class="contract-function-body">
-
 
         <%= if queryable?(function["inputs"]) || writable?(function) || Helper.read_with_wallet_method?(function) do %>
 
@@ -184,7 +183,6 @@
 
     </div>
   </div>
-
 
   </div>
 <% end %>

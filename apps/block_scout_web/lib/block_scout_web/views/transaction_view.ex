@@ -321,7 +321,8 @@ defmodule BlockScoutWeb.TransactionView do
   end
 
   def formatted_fee(%Transaction{} = transaction, opts) do
-    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+    # l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+    l1_fee = Wei.from(Decimal.new(0), :wei)
     da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
 
     transaction
@@ -690,12 +691,12 @@ defmodule BlockScoutWeb.TransactionView do
   # end
 
   def l1_gas_price(%Transaction{} = transaction, unit) when unit in ~w(wei gwei ether)a do
-    l1_gas_price = if transaction.l1_gas_price == nil, do: 0, else: transaction.l1_gas_price
+    l1_gas_price = if transaction.l1_gas_price == nil, do: %Wei{value: Decimal.new(0)}, else: transaction.l1_gas_price
     format_wei_value(l1_gas_price, unit)
   end
 
   def l1_gas_price_native(%Transaction{} = transaction, unit) when unit in ~w(wei gwei ether)a do
-    l1_gas_price = if transaction.l1_gas_price == nil, do: 0, else: transaction.l1_gas_price
+    l1_gas_price = if transaction.l1_gas_price == nil, do: %Wei{value: Decimal.new(0)}, else: transaction.l1_gas_price
     format_wei_value(l1_gas_price, unit)
   end
 

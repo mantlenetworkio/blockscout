@@ -6,6 +6,8 @@ defmodule BlockScoutWeb.Account.AuthController do
   alias Explorer.Repo.ConfigHelper
   alias Plug.CSRFProtection
 
+  require Logger
+
   plug(Ueberauth)
 
   def request(conn, _) do
@@ -13,6 +15,7 @@ defmodule BlockScoutWeb.Account.AuthController do
   end
 
   def logout(conn, _params) do
+    Logger.info("--- logout ---")
     conn
     |> configure_session(drop: true)
     |> redirect(to: root())
@@ -71,6 +74,7 @@ defmodule BlockScoutWeb.Account.AuthController do
   end
 
   def current_user(%{private: %{plug_session: %{"current_user" => _}}} = conn) do
+    Logger.info("--- check currenct user... ---")
     if Account.enabled?() do
       conn
       |> get_session(:current_user)

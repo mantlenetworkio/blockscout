@@ -8,7 +8,8 @@ import {
   formatError,
   showConnectElements,
   showConnectedToElements,
-  mantleQa
+  mantleQa,
+  mantleSepolia
 } from './common_helpers'
 import { openWarningModal } from '../modals'
 
@@ -31,7 +32,7 @@ let web3Modal
  */
 export async function web3ModalInit (connectToWallet, ...args) {
   return new Promise((resolve) => {
-    const projectId = 'a85398a55b8ecc45aecdfb252276c71e'
+    const projectId = '0f46802d607f6eddd6bc1a57428357f0'
     let chains = []
     if (instanceChainId === 1705003) {
       chains = [mantleQa]
@@ -39,7 +40,10 @@ export async function web3ModalInit (connectToWallet, ...args) {
       chains = [mantleTestnet]
     } else if (instanceChainId === 5000) {
       chains = [mantle]
+    } else if (instanceChainId === 5003) {
+      chains = [mantleSepolia]
     }
+
     const { publicClient } = configureChains(chains, [w3mProvider({ projectId })])
     const wagmiConfig = createConfig({
       autoConnect: true,

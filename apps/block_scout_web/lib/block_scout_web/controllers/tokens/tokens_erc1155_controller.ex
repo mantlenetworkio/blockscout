@@ -2,7 +2,7 @@ defmodule BlockScoutWeb.TokensERC1155Controller do
   use BlockScoutWeb, :controller
 
   import BlockScoutWeb.Chain, only: [paging_options: 1, next_page_params: 3, split_list_by_page: 1]
-
+  alias Explorer.Chain.Token
   alias BlockScoutWeb.{Controller, TokensView}
   alias Explorer.Chain
   alias Phoenix.View
@@ -20,7 +20,7 @@ defmodule BlockScoutWeb.TokensERC1155Controller do
       |> paging_options()
       |> Keyword.merge([ token_type: ["ERC-1155"] ])
 
-    tokens = Chain.list_top_tokens(filter, paging_params)
+    tokens = Token.list_top(filter, paging_params)
 
     {tokens_erc1155_page, next_page} = split_list_by_page(tokens)
 

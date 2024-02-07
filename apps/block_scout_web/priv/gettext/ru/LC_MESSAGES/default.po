@@ -11,20 +11,6 @@ msgstr ""
 "Language: ru\n"
 "Plural-Forms: nplurals=1\n"
 
-#, fuzzy
-msgid "%{count} token"
-msgid_plural "%{count} token"
-msgstr[0] "%{count} токенов"
-msgstr[1] "%{count} токенов"
-msgstr[2] "%{count} токенов"
-
-#, fuzzy
-msgid "%{count} transaction"
-msgid_plural "%{count} transaction"
-msgstr[0] "%{count} транзакций"
-msgstr[1] "%{count} транзакций"
-msgstr[2] "%{count} транзакций"
-
 #: lib/block_scout_web/templates/common_components/_minimal_proxy_pattern.html.eex:9
 #, elixir-autogen
 msgid " - minimal bytecode implementation that delegates all calls to a known address"

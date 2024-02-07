@@ -1,5 +1,5 @@
 <% address_hash = Address.checksum(@token.contract_address_hash) %>
-<% is_proxy = BlockScoutWeb.Tokens.OverviewView.smart_contract_is_proxy?(@token) %>
+<% is_proxy = BlockScoutWeb.Tokens.OverviewView.token_smart_contract_is_proxy?(@token) %>
 <div class="card-tabs js-card-tabs">
   <%= link(
         gettext("Token Transfers"),
@@ -37,5 +37,25 @@
     <% end %>
   <% end %>
 
-
+  <%= if smart_contract_with_write_functions?(@token) do %>
+    <%= link(
+        gettext("Write Contract"),
+        to: AccessHelper.get_path(@conn, :token_write_contract_path, :index, address_hash),
+        class: "card-tab #{tab_status("write-contract", @conn.request_path)}")
+        %>
+  <% end %>
+  <%= if is_proxy do %>
+    <%= link(
+        gettext("Read Proxy"),
+        to: AccessHelper.get_path(@conn, :token_read_proxy_path, :index, address_hash),
+        class: "card-tab #{tab_status("read-proxy", @conn.request_path)}")
+        %>
+  <% end %>
+  <%= if smart_contract_with_write_functions?(@token) && is_proxy  do %>
+    <%= link(
+        gettext("Write Proxy"),
+        to: AccessHelper.get_path(@conn, :token_write_proxy_path, :index, address_hash),
+        class: "card-tab #{tab_status("write-proxy", @conn.request_path)}")
+        %>
+  <% end %>
 </div>

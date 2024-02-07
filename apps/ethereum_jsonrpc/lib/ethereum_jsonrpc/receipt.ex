@@ -7,7 +7,9 @@ defmodule EthereumJSONRPC.Receipt do
   import EthereumJSONRPC, only: [quantity_to_integer: 1]
 
   alias EthereumJSONRPC.Logs
-require Logger
+
+  require Logger
+
   @type elixir :: %{String.t() => String.t() | non_neg_integer}
 
   @typedoc """
@@ -117,16 +119,11 @@ require Logger
           created_contract_address_hash: String.t() | nil,
           status: status(),
           transaction_hash: String.t(),
-          transaction_index: non_neg_integer(),
-          l1_fee: non_neg_integer,
-          l1_fee_scalar: non_neg_integer,
-          l1_gas_price: non_neg_integer,
-          l1_gas_used: non_neg_integer,
-          da_fee: non_neg_integer,
-          da_gas_price: non_neg_integer,
-          da_gas_used: non_neg_integer,
+          transaction_index: non_neg_integer()
         }
-  def elixir_to_params(
+
+  # Mantle V1
+   def elixir_to_params(
         %{
           "cumulativeGasUsed" => cumulative_gas_used,
           "gasUsed" => gas_used,
@@ -134,16 +131,20 @@ require Logger
           "transactionHash" => transaction_hash,
           "transactionIndex" => transaction_index,
           "l1Fee" => l1_fee,
-          "l1FeeScalar" => l1_fee_scalar,
+          "l1FeeScalar" => l1_fee_scalar_string,
           "l1GasPrice" => l1_gas_price,
           "l1GasUsed" => l1_gas_used,
           "daFee" => da_fee,
           "daGasPrice" => da_gas_price,
           "daGasUsed" => da_gas_used,
+          "tokenRatio" => token_ratio,
         } = elixir
       ) do
     status = elixir_to_status(elixir)
 
+    {l1_fee_scalar, _} =
+      l1_fee_scalar_string
+      |> Float.parse()
     %{
       cumulative_gas_used: cumulative_gas_used,
       gas_used: gas_used,
@@ -158,6 +159,100 @@ require Logger
       da_fee: da_fee,
       da_gas_price: da_gas_price,
       da_gas_used: da_gas_used,
+      token_ratio: token_ratio,
+    }
+  end
+
+
+  def elixir_to_params(
+    %{
+      "cumulativeGasUsed" => cumulative_gas_used,
+      "gasUsed" => gas_used,
+      "contractAddress" => created_contract_address_hash,
+      "transactionHash" => transaction_hash,
+      "transactionIndex" => transaction_index,
+      "l1Fee" => l1_fee,
+      "l1FeeScalar" => l1_fee_scalar_string,
+      "l1GasPrice" => l1_gas_price,
+      "l1GasUsed" => l1_gas_used,
+      "tokenRatio" => token_ratio,
+    } = elixir
+  ) do
+      status = elixir_to_status(elixir)
+
+      {l1_fee_scalar, _} =
+        l1_fee_scalar_string
+        |> Float.parse()
+
+      %{
+        cumulative_gas_used: cumulative_gas_used,
+        gas_used: gas_used,
+        created_contract_address_hash: created_contract_address_hash,
+        status: status,
+        transaction_hash: transaction_hash,
+        transaction_index: transaction_index,
+        l1_fee: l1_fee,
+        l1_fee_scalar: l1_fee_scalar,
+        l1_gas_price: l1_gas_price,
+        l1_gas_used: l1_gas_used,
+        token_ratio: token_ratio,
+      }
+    end
+
+
+  def elixir_to_params(
+        %{
+          "cumulativeGasUsed" => cumulative_gas_used,
+          "gasUsed" => gas_used,
+          "contractAddress" => created_contract_address_hash,
+          "transactionHash" => transaction_hash,
+          "transactionIndex" => transaction_index,
+          "l1Fee" => l1_fee,
+          "l1FeeScalar" => l1_fee_scalar_string,
+          "l1GasPrice" => l1_gas_price,
+          "l1GasUsed" => l1_gas_used
+        } = elixir
+      ) do
+    status = elixir_to_status(elixir)
+
+    {l1_fee_scalar, _} =
+      l1_fee_scalar_string
+      |> Float.parse()
+
+    %{
+      cumulative_gas_used: cumulative_gas_used,
+      gas_used: gas_used,
+      created_contract_address_hash: created_contract_address_hash,
+      status: status,
+      transaction_hash: transaction_hash,
+      transaction_index: transaction_index,
+      l1_fee: l1_fee,
+      l1_fee_scalar: l1_fee_scalar,
+      l1_gas_price: l1_gas_price,
+      l1_gas_used: l1_gas_used
+    }
+  end
+
+  # eth_getTransactionReceipt on Optimism BedRock Geth node
+  # doesn't return L1 fields for system transactions
+  def elixir_to_params(
+        %{
+          "cumulativeGasUsed" => cumulative_gas_used,
+          "gasUsed" => gas_used,
+          "contractAddress" => created_contract_address_hash,
+          "transactionHash" => transaction_hash,
+          "transactionIndex" => transaction_index
+        } = elixir
+      ) do
+    status = elixir_to_status(elixir)
+
+    %{
+      cumulative_gas_used: cumulative_gas_used,
+      gas_used: gas_used,
+      created_contract_address_hash: created_contract_address_hash,
+      status: status,
+      transaction_hash: transaction_hash,
+      transaction_index: transaction_index
     }
   end
 
@@ -274,12 +369,11 @@ require Logger
   # hash format
   # gas is passed in from the `t:EthereumJSONRPC.Transaction.params/0` to allow pre-Byzantium status to be derived
   defp entry_to_elixir({key, _} = entry)
-       when key in ~w(blockHash contractAddress from gas logsBloom root to transactionHash revertReason type effectiveGasPrice),
+       when key in ~w(blockHash contractAddress from gas logsBloom root to transactionHash revertReason type effectiveGasPrice l1FeeScalar),
        do: {:ok, entry}
 
-# l1GasUsed l1GasPrice l1Fee are from Optimstic Rollups l2Geth
   defp entry_to_elixir({key, quantity})
-       when key in ~w(blockNumber cumulativeGasUsed gasUsed transactionIndex l1GasUsed l1GasPrice l1Fee daFee daGasPrice daGasUsed) do
+       when key in ~w(blockNumber cumulativeGasUsed gasUsed transactionIndex l1Fee l1GasPrice l1GasUsed) do
     result =
       if is_nil(quantity) do
         nil
@@ -289,20 +383,6 @@ require Logger
 
     {:ok, {key, result}}
   end
-
-  defp entry_to_elixir({key, quantity})
-    when key in ~w(l1FeeScalar) do
-  result =
-    if is_nil(quantity) do
-      nil
-    else
-      {data, _} = Float.parse(quantity)
-      data
-    end
-
-    {:ok, {key, result}}
-  end
-
 
   defp entry_to_elixir({"logs" = key, logs}) do
     {:ok, {key, Logs.to_elixir(logs)}}
@@ -336,12 +416,17 @@ require Logger
   end
 
   # Arbitrum fields
-  defp entry_to_elixir({key, _}) when key in ~w(returnData returnCode feeStats l1BlockNumber) do
+  defp entry_to_elixir({key, _}) when key in ~w(returnData returnCode feeStats) do
+    :ignore
+  end
+
+  # Mantle V1 fields
+  defp entry_to_elixir({key, _}) when key in ~w(l1GasUsed l1GasPrice l1FeeScalar l1Fee daFee daGasPrice daGasUsed tokenRatio) do
     :ignore
   end
 
   # Metis fields
-  defp entry_to_elixir({key, _}) when key in ~w(l1GasUsed l1GasPrice l1FeeScalar l1Fee daFee daGasPrice daGasUsed) do
+  defp entry_to_elixir({key, _}) when key in ~w(l1GasUsed l1GasPrice l1FeeScalar l1Fee) do
     :ignore
   end
 
@@ -351,7 +436,7 @@ require Logger
   end
 
   # Optimism specific transaction receipt fields
-  defp entry_to_elixir({key, _}) when key in ~w(depositNonce) do
+  defp entry_to_elixir({key, _}) when key in ~w(depositNonce depositReceiptVersion) do
     :ignore
   end
 

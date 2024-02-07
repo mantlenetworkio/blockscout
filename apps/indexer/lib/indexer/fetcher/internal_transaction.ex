@@ -85,6 +85,27 @@ defmodule Indexer.Fetcher.InternalTransaction do
     %{block_number: block_number, hash_data: to_string(hash), transaction_index: index}
   end
 
+  defp filter_large_size(block_numbers) do
+    trace_length_limit = Application.get_env(:indexer, :trace_max_fetch_length)
+    # Logger.info("--- before: #{inspect(block_numbers)}, #{inspect(trace_length_limit)}")
+    if !is_nil(trace_length_limit) do
+      block_numbers
+      |> Enum.filter(fn block_number ->
+        size = block_number
+        |> Chain.get_transactions_of_block_number()
+        |> length()
+        # Logger.info("--- size: #{inspect(size)}, block: #{inspect(block_number)}")
+        if size > trace_length_limit do
+          false
+        else
+          true
+        end
+      end)
+    else
+      block_numbers
+    end
+  end
+
   @impl BufferedTask
   @decorate trace(
               name: "fetch",
@@ -100,8 +121,12 @@ defmodule Indexer.Fetcher.InternalTransaction do
 
     filtered_unique_numbers =
       unique_numbers
-      |> EthereumJSONRPC.block_numbers_in_range()
+      |> EthereumJSONRPC.are_block_numbers_in_range?()
       |> drop_genesis(json_rpc_named_arguments)
+      |> filter_large_size()
+
+      # Logger.info("--- after: #{inspect(filtered_unique_numbers)}")
+
 
     filtered_unique_numbers_count = Enum.count(filtered_unique_numbers)
     Logger.metadata(count: filtered_unique_numbers_count)
@@ -111,11 +136,13 @@ defmodule Indexer.Fetcher.InternalTransaction do
     json_rpc_named_arguments
     |> Keyword.fetch!(:variant)
     |> case do
-      variant when variant in [EthereumJSONRPC.Nethermind, EthereumJSONRPC.Erigon, EthereumJSONRPC.Besu] ->
+      variant
+      when variant in [EthereumJSONRPC.Nethermind, EthereumJSONRPC.Erigon, EthereumJSONRPC.Besu, EthereumJSONRPC.RSK] ->
         EthereumJSONRPC.fetch_block_internal_transactions(filtered_unique_numbers, json_rpc_named_arguments)
 
       _ ->
         try do
+          # Logger.info("--- unique numbers: #{inspect(filtered_unique_numbers)}")
           fetch_block_internal_transactions_by_transactions(filtered_unique_numbers, json_rpc_named_arguments)
         rescue
           error ->
@@ -158,7 +185,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
   end
 
   defp drop_genesis(block_numbers, json_rpc_named_arguments) do
-    first_block = EthereumJSONRPC.first_block_to_fetch(:trace_first_block)
+    first_block = Application.get_env(:indexer, :trace_first_block)
 
     if first_block in block_numbers do
       case EthereumJSONRPC.fetch_blocks_by_numbers([first_block], json_rpc_named_arguments) do
@@ -192,6 +219,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
   end
 
   defp fetch_block_internal_transactions_by_transactions(unique_numbers, json_rpc_named_arguments) do
+
     Enum.reduce(unique_numbers, {:ok, []}, fn
       block_number, {:ok, acc_list} ->
         block_number
@@ -305,7 +333,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
         |> Map.delete(:created_contract_code)
         |> Map.delete(:gas_used)
         |> Map.delete(:output)
-        |> Map.put(:error, failed_parent[:error])
+        |> Map.put(:error, internal_transaction_param[:error] || failed_parent[:error])
       else
         internal_transaction_param
       end

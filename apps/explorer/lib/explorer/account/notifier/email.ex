@@ -146,7 +146,7 @@ defmodule Explorer.Account.Notifier.Email do
   end
 
   defp host do
-    url_params()[:host]
+    System.get_env("SENDGRID_EXPLORER_HOST") || url_params()[:host]
   end
 
   defp port do

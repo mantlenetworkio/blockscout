@@ -52,7 +52,7 @@ defmodule BlockScoutWeb.API.V2.Helper do
   defp address_with_info(%Address{} = address, _address_hash) do
     %{
       "hash" => Address.checksum(address),
-      "is_contract" => is_smart_contract(address),
+      "is_contract" => Address.is_smart_contract(address),
       "name" => address_name(address),
       "implementation_name" => implementation_name(address),
       "is_verified" => is_verified(address)
@@ -95,27 +95,18 @@ defmodule BlockScoutWeb.API.V2.Helper do
 
   def implementation_name(_), do: nil
 
-  def is_smart_contract(%Address{contract_code: nil}), do: false
-  def is_smart_contract(%Address{contract_code: _}), do: true
-  def is_smart_contract(%NotLoaded{}), do: nil
-  def is_smart_contract(_), do: false
-
   def is_verified(%Address{smart_contract: nil}), do: false
   def is_verified(%Address{smart_contract: %{metadata_from_verified_twin: true}}), do: false
   def is_verified(%Address{smart_contract: %NotLoaded{}}), do: nil
   def is_verified(%Address{smart_contract: _}), do: true
 
-  def market_cap(:standard, %{available_supply: available_supply, usd_value: usd_value})
+  def market_cap(:standard, %{available_supply: available_supply, usd_value: usd_value, market_cap_usd: market_cap_usd})
       when is_nil(available_supply) or is_nil(usd_value) do
-    Decimal.new(0)
+    max(Decimal.new(0), market_cap_usd)
   end
 
   def market_cap(:standard, %{available_supply: available_supply, usd_value: usd_value}) do
     Decimal.mult(available_supply, usd_value)
-  end
-
-  def market_cap(:standard, exchange_rate) do
-    exchange_rate.market_cap_usd
   end
 
   def market_cap(module, exchange_rate) do
@@ -123,9 +114,11 @@ defmodule BlockScoutWeb.API.V2.Helper do
   end
 
   def get_transaction_stats do
-    #stats_scale = date_range(1)
-    today = Date.utc_today()
-    transaction_stats = TransactionStats.by_date_range(today, today)
+    stats_scale = date_range(1)
+    transaction_stats = TransactionStats.by_date_range(stats_scale.earliest, stats_scale.latest)
+
+    # today = Date.utc_today()
+    # transaction_stats = TransactionStats.by_date_range(today, today)
 
     # Need datapoint for legend if none currently available.
     if Enum.empty?(transaction_stats) do
