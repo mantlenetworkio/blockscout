@@ -5216,7 +5216,7 @@ msgstr "Массив с файлами исходных кодов и метад
 msgid "A nonnegative integer that represents the log index to be used for pagination."
 msgstr "Неотрицательное целое число, которое представляет индекс журнала, который будет использоваться для пагинации."
 
-msgid "verified|decompiled|unverified|not_decompiled|empty, or 1|2|3|4|5 respectively. This requests only contracts with that status"
+msgid "verified|decompiled|unverified|not_decompiled|empty|not_empty, or 1|2|3|4|5|6 respectively. This requests only contracts with that status."
 msgstr "проверено|декомпилировано|непроверено|не декомпилировано|пусто, или соответственно 1|2|3|4|5. Требуются только контракты с таким статусом."
 
 msgid "Ensures that none of the returned contracts were decompiled with the provided version. Ignored unless filtering for decompiled contracts."

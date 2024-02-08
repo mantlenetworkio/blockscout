@@ -5214,7 +5214,7 @@ msgstr "数组与来源和元数据文件"
 msgid "A nonnegative integer that represents the log index to be used for pagination."
 msgstr "一个非负整数，表示用于分页的日志索引。"
 
-msgid "verified|decompiled|unverified|not_decompiled|empty, or 1|2|3|4|5 respectively. This requests only contracts with that status"
+msgid "verified|decompiled|unverified|not_decompiled|empty|not_empty, or 1|2|3|4|5|6 respectively. This requests only contracts with that status."
 msgstr "已验证|反编译|未验证|未反编译|空，分别为1|2|3|4|5。此请求仅限于该状态下的合同。"
 
 msgid "Ensures that none of the returned contracts were decompiled with the provided version. Ignored unless filtering for decompiled contracts."

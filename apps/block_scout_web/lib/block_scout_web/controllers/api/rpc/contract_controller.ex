@@ -515,6 +515,9 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
       :empty ->
         Contracts.list_empty_contracts(page_size, offset)
 
+      :not_empty ->
+        Contracts.list_not_empty_contracts(page_size, offset)
+
       _ ->
         Contracts.list_contracts(page_size, offset)
     end
@@ -555,11 +558,13 @@ defmodule BlockScoutWeb.API.RPC.ContractController do
   defp contracts_filter(3), do: {:ok, :unverified}
   defp contracts_filter(4), do: {:ok, :not_decompiled}
   defp contracts_filter(5), do: {:ok, :empty}
+  defp contracts_filter(6), do: {:ok, :not_empty}
   defp contracts_filter("verified"), do: {:ok, :verified}
   defp contracts_filter("decompiled"), do: {:ok, :decompiled}
   defp contracts_filter("unverified"), do: {:ok, :unverified}
   defp contracts_filter("not_decompiled"), do: {:ok, :not_decompiled}
   defp contracts_filter("empty"), do: {:ok, :empty}
+  defp contracts_filter("not_empty"), do: {:ok, :not_empty}
 
   defp contracts_filter(filter) when is_bitstring(filter) do
     case Integer.parse(filter) do

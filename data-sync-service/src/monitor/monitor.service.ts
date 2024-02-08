@@ -121,28 +121,34 @@ export class MonitorService {
       this.metricEthTotalWithdrawValue.set(Number(utils.formatEther(ethTotalWithdraw || 0)))
       /* ---------USDT--------- */
       const l1_usdt = this.configService.get('L1_USDT_ADDRESS')
-      const usdtLockedBalance = await this.getL1BalanceOf(l1_usdt, l1_bridge)
-      const usdtTotalDeposit = await this.getTotalDepositValueByL1Token(l1_usdt);
-      const usdtTotalWithdraw = await this.getTotalWithdrawValueByL1Token(l1_usdt);
-      this.metricUSDTTotalLockedValue.set(Number(utils.formatEther(usdtLockedBalance || 0)))
-      this.metricUSDTTotalDepositValue.set(Number(utils.formatEther(usdtTotalDeposit || 0)))
-      this.metricUSDTTotalWithdrawValue.set(Number(utils.formatEther(usdtTotalWithdraw || 0)))
+      if(l1_usdt){
+        const usdtLockedBalance = await this.getL1BalanceOf(l1_usdt, l1_bridge)
+        const usdtTotalDeposit = await this.getTotalDepositValueByL1Token(l1_usdt);
+        const usdtTotalWithdraw = await this.getTotalWithdrawValueByL1Token(l1_usdt);
+        this.metricUSDTTotalLockedValue.set(Number(utils.formatEther(usdtLockedBalance || 0)))
+        this.metricUSDTTotalDepositValue.set(Number(utils.formatEther(usdtTotalDeposit || 0)))
+        this.metricUSDTTotalWithdrawValue.set(Number(utils.formatEther(usdtTotalWithdraw || 0)))
+      }
       /* ---------USDC--------- */
       const l1_usdc = this.configService.get('L1_USDC_ADDRESS')
-      const usdcLockedBalance = await this.getL1BalanceOf(l1_usdc, l1_bridge)
-      const usdcTotalDeposit = await this.getTotalDepositValueByL1Token(l1_usdc);
-      const usdcTotalWithdraw = await this.getTotalWithdrawValueByL1Token(l1_usdc);
-      this.metricUSDCTotalLockedValue.set(Number(utils.formatEther(usdcLockedBalance || 0)))
-      this.metricUSDCTotalDepositValue.set(Number(utils.formatEther(usdcTotalDeposit || 0)))
-      this.metricUSDCTotalWithdrawValue.set(Number(utils.formatEther(usdcTotalWithdraw || 0)))
+      if(l1_usdc){
+        const usdcLockedBalance = await this.getL1BalanceOf(l1_usdc, l1_bridge)
+        const usdcTotalDeposit = await this.getTotalDepositValueByL1Token(l1_usdc);
+        const usdcTotalWithdraw = await this.getTotalWithdrawValueByL1Token(l1_usdc);
+        this.metricUSDCTotalLockedValue.set(Number(utils.formatEther(usdcLockedBalance || 0)))
+        this.metricUSDCTotalDepositValue.set(Number(utils.formatEther(usdcTotalDeposit || 0)))
+        this.metricUSDCTotalWithdrawValue.set(Number(utils.formatEther(usdcTotalWithdraw || 0)))
+      }
       /* ---------LUSD--------- */
       const l1_lusd = this.configService.get('L1_LUSD_ADDRESS')
-      const lusdLockedBalance = await this.getL1BalanceOf(l1_lusd, l1_bridge)
-      const lusdTotalDeposit = await this.getTotalDepositValueByL1Token(l1_lusd);
-      const lusdTotalWithdraw = await this.getTotalWithdrawValueByL1Token(l1_lusd);
-      this.metricLUSDTotalLockedValue.set(Number(utils.formatEther(lusdLockedBalance || 0)))
-      this.metricLUSDTotalDepositValue.set(Number(utils.formatEther(lusdTotalDeposit || 0)))
-      this.metricLUSDTotalWithdrawValue.set(Number(utils.formatEther(lusdTotalWithdraw || 0)))
+      if(l1_lusd){
+        const lusdLockedBalance = await this.getL1BalanceOf(l1_lusd, l1_bridge)
+        const lusdTotalDeposit = await this.getTotalDepositValueByL1Token(l1_lusd);
+        const lusdTotalWithdraw = await this.getTotalWithdrawValueByL1Token(l1_lusd);
+        this.metricLUSDTotalLockedValue.set(Number(utils.formatEther(lusdLockedBalance || 0)))
+        this.metricLUSDTotalDepositValue.set(Number(utils.formatEther(lusdTotalDeposit || 0)))
+        this.metricLUSDTotalWithdrawValue.set(Number(utils.formatEther(lusdTotalWithdraw || 0)))
+      }
     } catch (error) {
       console.log({
         type: 'ERROR',

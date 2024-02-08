@@ -2394,7 +2394,7 @@ defmodule BlockScoutWeb.Etherscan do
         key: "filter",
         type: "string",
         description:
-          "verified|decompiled|unverified|not_decompiled|empty, or 1|2|3|4|5 respectively. This requests only contracts with that status.",
+          "verified|decompiled|unverified|not_decompiled|empty|not_empty, or 1|2|3|4|5|6 respectively. This requests only contracts with that status.",
         getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
       },
       %{
@@ -3503,7 +3503,7 @@ defmodule BlockScoutWeb.Etherscan do
       "listcontracts-offset" ->
         gettext("A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.")
       "listcontracts-filter" ->
-        gettext("verified|decompiled|unverified|not_decompiled|empty, or 1|2|3|4|5 respectively. This requests only contracts with that status")
+        gettext("verified|decompiled|unverified|not_decompiled|empty|not_empty, or 1|2|3|4|5|6 respectively. This requests only contracts with that status.")
       "listcontracts-not_decompiled_with_version" ->
         gettext("Ensures that none of the returned contracts were decompiled with the provided version. Ignored unless filtering for decompiled contracts.")
       "listcontracts-verified_at_start_timestamp" ->

@@ -158,14 +158,25 @@
                   <span class="nav-link-icon">
                     <%= render BlockScoutWeb.IconsView, "_active_icon.html" %>
                   </span>
-                  Mantle
+                  Mantle Mainnet
                 </a>
-                <a href='<%= System.get_env("TESTNET_URL") %>' class='dropdown-item <%= host_status(System.get_env("TESTNET_URL"), @conn.host) %>' >
-                  <span class="nav-link-icon">
-                    <%= render BlockScoutWeb.IconsView, "_active_icon.html" %>
-                  </span>
-                  Mantle Testnet
-                </a>
+                  <%= if  System.get_env("TESTNET_URL") do %>
+                    <a href='<%= System.get_env("TESTNET_URL") %>' class='dropdown-item <%= host_status(System.get_env("TESTNET_URL"), @conn.host) %>' >
+                      <span class="nav-link-icon">
+                        <%= render BlockScoutWeb.IconsView, "_active_icon.html" %>
+                      </span>
+                      Mantle Goerli
+                    </a>
+                  <% end %>
+                  <%= if  System.get_env("TESTNET_URL_SEPOLIA") do %>
+                  <a href='<%= System.get_env("TESTNET_URL_SEPOLIA") %>' class='dropdown-item <%= host_status(System.get_env("TESTNET_URL_SEPOLIA"), @conn.host) %>' >
+                    <span class="nav-link-icon">
+                      <%= render BlockScoutWeb.IconsView, "_active_icon.html" %>
+                    </span>
+                    Mantle Sepolia
+                  </a>
+                  <% end %>
+
               </div>
             <% end %>
           </li>

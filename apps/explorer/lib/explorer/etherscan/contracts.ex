@@ -312,6 +312,34 @@ defmodule Explorer.Etherscan.Contracts do
     Repo.replica().all(query)
   end
 
+  def list_not_empty_contracts(limit, offset) do
+    query =
+      from(
+        address in Address,
+        where: not is_nil(address.contract_code),
+        left_join: txn in Transaction,
+        on: address.hash == txn.created_contract_address_hash,
+        left_join: in_txn in InternalTransaction,
+        on: address.hash == in_txn.created_contract_address_hash,
+        left_join: block in Block,
+        on: txn.block_number == block.number or in_txn.block_number == block.number,
+        preload: [:smart_contract],
+        order_by: [asc: address.inserted_at],
+        limit: ^limit,
+        offset: ^offset,
+        where: not is_nil(coalesce(txn.created_contract_address_hash, in_txn.created_contract_address_hash)),
+        select: %{
+          address: address,
+          transaction: %{
+            creation_hash: coalesce(txn.hash, in_txn.transaction_hash),
+            creation_timestamp: block.timestamp
+          }
+        }
+      )
+
+    Repo.replica().all(query)
+  end
+
   defp format_source_code_output(smart_contract), do: smart_contract.contract_source_code
 
   defp reject_decompiled_with_version(query, nil), do: query
