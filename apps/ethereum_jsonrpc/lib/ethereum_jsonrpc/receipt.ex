@@ -137,7 +137,6 @@ defmodule EthereumJSONRPC.Receipt do
           "daFee" => da_fee,
           "daGasPrice" => da_gas_price,
           "daGasUsed" => da_gas_used,
-          "tokenRatio" => token_ratio,
         } = elixir
       ) do
     status = elixir_to_status(elixir)
@@ -159,7 +158,6 @@ defmodule EthereumJSONRPC.Receipt do
       da_fee: da_fee,
       da_gas_price: da_gas_price,
       da_gas_used: da_gas_used,
-      token_ratio: token_ratio,
     }
   end
 
@@ -371,6 +369,19 @@ defmodule EthereumJSONRPC.Receipt do
   defp entry_to_elixir({key, _} = entry)
        when key in ~w(blockHash contractAddress from gas logsBloom root to transactionHash revertReason type effectiveGasPrice l1FeeScalar),
        do: {:ok, entry}
+
+
+  defp entry_to_elixir({key, quantity})
+       when key in ~w(daFee daGasPrice daGasUsed) do
+    result =
+      if is_nil(quantity) do
+        nil
+      else
+        quantity_to_integer(quantity)
+      end
+
+    {:ok, {key, result}}
+  end
 
   defp entry_to_elixir({key, quantity})
        when key in ~w(blockNumber cumulativeGasUsed gasUsed transactionIndex l1Fee l1GasPrice l1GasUsed) do

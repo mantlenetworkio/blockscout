@@ -321,16 +321,25 @@ defmodule BlockScoutWeb.TransactionView do
   end
 
   def formatted_fee(%Transaction{} = transaction, opts) do
-    # l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-    l1_fee = Wei.from(Decimal.new(0), :wei)
-    da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
+    if is_nil(transaction.da_fee) do
+      transaction
+      |> Chain.fee(:wei)
+      |> fee_to_denomination(opts)
+      |> case do
+        {:actual, value} -> value
+        {:maximum, value} -> "#{gettext("Max of")} #{value}"
+      end
+    else
+      l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+      da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
 
-    transaction
-    |> Chain.fee(:wei)
-    |> fee_to_denomination(l1_fee, da_fee, opts)
-    |> case do
-      {:actual, value} -> value
-      {:maximum, value} -> "#{gettext("Max of")} #{value}"
+      transaction
+      |> Chain.fee(:wei)
+      |> fee_to_denomination(l1_fee, da_fee, opts)
+      |> case do
+        {:actual, value} -> value
+        {:maximum, value} -> "#{gettext("Max of")} #{value}"
+      end
     end
   end
 
@@ -829,6 +838,12 @@ defmodule BlockScoutWeb.TransactionView do
     decimal = Decimal.new(value)
     token_value = Decimal.mult(decimal, token_price)
     Decimal.round(token_value, 8)
+  end
+
+  defp fee_to_denomination({fee_type, fee}, opts) do
+    denomination = Keyword.get(opts, :denomination)
+    include_label? = Keyword.get(opts, :include_label, true)
+    {fee_type, format_wei_value(Wei.from(fee, :wei), denomination, include_unit_label: include_label?)}
   end
 
   @doc """
