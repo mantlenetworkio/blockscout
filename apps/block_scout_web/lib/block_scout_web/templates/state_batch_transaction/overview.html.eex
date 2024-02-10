@@ -475,7 +475,7 @@
               <dd class="col-sm-9 col-lg-10"> <%= format_wei_value(priority_fee, :ether) %> </dd>
             </dl>
           <% end %>
-           <%= if !is_nil(burned_fee) do %>
+          <!-- <%= if !is_nil(burned_fee) do %>
             <dl class="row">
               <dt class="col-sm-3 col-lg-2 text-muted">
                 <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
@@ -488,7 +488,7 @@
                 <% end %>
               </dd>
             </dl>
-          <% end %>
+          <% end %> -->
           <!-- Gas Used by Transaction -->
           <dl class="row">
             <dt class="col-sm-3 col-lg-2 text-muted transaction-gas-used">

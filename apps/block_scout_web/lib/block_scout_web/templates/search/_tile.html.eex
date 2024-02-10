@@ -84,6 +84,8 @@
             <%= render BlockScoutWeb.EigendaBatchView,
             "_link_to_detail.html",
             da_hash: @result.tx_hash %>
+        <% "user_operation" -> %>
+            <%= "0x" <> Base.encode16(@result.user_operation_hash, case: :lower) %>
         <% "block" -> %>
             <%= link(
                 "0x" <> Base.encode16(@result.block_hash, case: :lower),
