@@ -57,7 +57,7 @@ $('.btn-refetch-icon').on('click', (e) => {
   };
 })
 
-const getParam = (key) => {
+export const getParam = (key) => {
   if (!key) return false
   const url = window.location
   const params = new URLSearchParams(url.search)
