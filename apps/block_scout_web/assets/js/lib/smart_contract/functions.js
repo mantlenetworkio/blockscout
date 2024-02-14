@@ -15,6 +15,7 @@ import {
   web3ModalInit
 } from './connect.js'
 import '../../pages/address'
+import { getParam } from '../../pages/layout.js'
 
 let walletInit = false
 const loadFunctions = (element, isCustomABI, from) => {
@@ -127,7 +128,8 @@ const readWriteFunction = (element) => {
         $errorContainer.text(exception)
         return
       }
-      const type = $('[data-smart-contract-functions]').data('type')
+      const isProxy = getParam('contract-tab') && getParam('contract-tab').includes('proxy')
+      const type = isProxy ? 'proxy' : $('[data-smart-contract-functions]').data('type')
       const isCustomABI = $form.data('custom-abi')
 
       walletEnabled().then((isWalletEnabled) =>
