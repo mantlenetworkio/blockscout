@@ -430,7 +430,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
       "confirmations" => transaction.block |> Chain.confirmations(block_height: block_height) |> format_confirmations(),
       "confirmation_duration" => processing_time_duration(transaction),
       "value" => transaction.value,
-      "fee" => transaction |> Chain.fee(:wei) |> format_fee(),
+      "fee" => get_total_fee(transaction),
       "gas_price" => transaction.gas_price,
       "type" => transaction.type,
       "gas_used" => transaction.gas_used,
@@ -453,7 +453,6 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
       "tx_types" => tx_types(transaction),
       "tx_tag" => GetTransactionTags.get_transaction_tags(transaction.hash, current_user(single_tx? && conn)),
       "has_error_in_internal_txs" => transaction.has_error_in_internal_txs,
-      "total_fee" => get_total_fee(transaction),
       "l2_fee" => get_l2_fee(transaction),
       "l1_fee" => transaction.l1_fee,
       "l1_gas_price" => transaction.l1_gas_price,
@@ -601,23 +600,39 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
   end
 
   defp get_total_fee(%Transaction{} = transaction) do
-    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-    da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
-    l1_and_da_fee = Wei.sum(l1_fee, da_fee)
-    {_, fee} = transaction |> Chain.fee(:wei)
-    total_fee = Wei.sum(Wei.from(fee, :wei), l1_and_da_fee)
+    if is_nil(transaction.da_fee) do
+      transaction |> Chain.fee(:wei) |> format_fee()
+    else
+      l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+      da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
+      l1_and_da_fee = Wei.sum(l1_fee, da_fee)
+
+      {type, fee} = transaction |> Chain.fee(:wei)
+      total_fee = Wei.sum(Wei.from(fee, :wei), l1_and_da_fee)
+
+      {type, total_fee} |> format_fee()
+    end
   end
 
   defp get_l2_fee(%Transaction{} = transaction) do
-    actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
-    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-    l2_fee = Wei.to(transaction.gas_price, :wei)
-    |> Decimal.mult(actual_gas)
-    |> Wei.from(:wei)
-    |> Wei.sub(l1_fee)
-    |> Wei.to(:wei)
+    if is_nil(transaction.da_fee) do
+      actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
+      l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+      l2_fee = Wei.to(transaction.gas_price, :wei)
+      |> Decimal.mult(actual_gas)
+      |> Wei.from(:wei)
+      |> Wei.sub(l1_fee)
+      |> Wei.to(:wei)
 
-    l2_fee
+      l2_fee
+    else
+      actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
+      l2_fee = Wei.to(transaction.gas_price, :wei)
+      |> Decimal.mult(actual_gas)
+      |> Wei.from(:wei)
+
+      l2_fee
+    end
   end
 
   def token_transfers(_, _conn, false), do: nil
