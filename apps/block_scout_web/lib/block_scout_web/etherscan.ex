@@ -1417,13 +1417,13 @@ defmodule BlockScoutWeb.Etherscan do
         getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
       },
       %{
-        key: "start_block",
+        key: "startblock",
         type: "integer",
         description: "A nonnegative integer that represents the starting block number.",
         getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
       },
       %{
-        key: "end_block",
+        key: "endblock",
         type: "integer",
         description: "A nonnegative integer that represents the ending block number.",
         getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
@@ -1520,14 +1520,14 @@ defmodule BlockScoutWeb.Etherscan do
         getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
       },
       %{
-        key: "start_block",
+        key: "startblock",
         type: "integer",
         description:
           "A nonnegative integer that represents the starting block number. WARNING: Only available if 'address' is provided.",
         getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
       },
       %{
-        key: "end_block",
+        key: "endblock",
         type: "integer",
         description:
           "A nonnegative integer that represents the ending block number. WARNING: Only available if 'address' is provided.",
@@ -1603,13 +1603,13 @@ defmodule BlockScoutWeb.Etherscan do
         getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
       },
       %{
-        key: "start_block",
+        key: "startblock",
         type: "integer",
         description: "A nonnegative integer that represents the starting block number.",
       getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
       },
       %{
-        key: "end_block",
+        key: "endblock",
         type: "integer",
         description: "A nonnegative integer that represents the ending block number.",
       getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,

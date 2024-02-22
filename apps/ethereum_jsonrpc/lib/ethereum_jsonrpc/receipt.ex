@@ -76,7 +76,14 @@ defmodule EthereumJSONRPC.Receipt do
         gas_used: 269607,
         status: :ok,
         transaction_hash: "0x3a3eb134e6792ce9403ea4188e5e79693de9e4c94e499db132be086400da79e6",
-        transaction_index: 0
+        transaction_index: 0,\
+  #{case Application.compile_env(:explorer, :chain_type) do
+    "ethereum" -> """
+            blob_gas_price: 0,\
+            blob_gas_used: 0\
+      """
+    _ -> ""
+  end}
       }
 
   Geth, when showing pre-[Byzantium](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-609.md) does not include
@@ -109,7 +116,14 @@ defmodule EthereumJSONRPC.Receipt do
         gas_used: 21001,
         status: nil,
         transaction_hash: "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
-        transaction_index: 0
+        transaction_index: 0,\
+  #{case Application.compile_env(:explorer, :chain_type) do
+    "ethereum" -> """
+            blob_gas_price: 0,\
+            blob_gas_used: 0\
+      """
+    _ -> ""
+  end}
       }
 
   """
@@ -255,6 +269,20 @@ defmodule EthereumJSONRPC.Receipt do
     }
   end
 
+  defp chain_type_fields(params, elixir) do
+    case Application.get_env(:explorer, :chain_type) do
+      "ethereum" ->
+        params
+        |> Map.merge(%{
+          blob_gas_price: Map.get(elixir, "blobGasPrice", 0),
+          blob_gas_used: Map.get(elixir, "blobGasUsed", 0)
+        })
+
+      _ ->
+        params
+    end
+  end
+
   @doc """
   Decodes the stringly typed numerical fields to `t:non_neg_integer/0`.
 
@@ -385,7 +413,7 @@ defmodule EthereumJSONRPC.Receipt do
   end
 
   defp entry_to_elixir({key, quantity})
-       when key in ~w(blockNumber cumulativeGasUsed gasUsed transactionIndex l1Fee l1GasPrice l1GasUsed) do
+       when key in ~w(blockNumber cumulativeGasUsed gasUsed transactionIndex blobGasUsed blobGasPrice l1Fee l1GasPrice l1GasUsed) do
     result =
       if is_nil(quantity) do
         nil
@@ -449,11 +477,6 @@ defmodule EthereumJSONRPC.Receipt do
 
   # Optimism specific transaction receipt fields
   defp entry_to_elixir({key, _}) when key in ~w(depositNonce depositReceiptVersion) do
-    :ignore
-  end
-
-  # EIP-4844 transaction receipt fields
-  defp entry_to_elixir({key, _}) when key in ~w(blobGasUsed blobGasPrice) do
     :ignore
   end
 

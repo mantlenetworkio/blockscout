@@ -149,6 +149,7 @@ defmodule BlockScoutWeb.TransactionView do
       amount: nil,
       amounts: [],
       token_ids: token_transfer.token_ids,
+      token_type: token_transfer.token_type,
       to_address_hash: token_transfer.to_address_hash,
       from_address_hash: token_transfer.from_address_hash
     }
@@ -163,6 +164,7 @@ defmodule BlockScoutWeb.TransactionView do
       amount: nil,
       amounts: amounts,
       token_ids: token_transfer.token_ids,
+      token_type: token_transfer.token_type,
       to_address_hash: token_transfer.to_address_hash,
       from_address_hash: token_transfer.from_address_hash
     }
@@ -176,6 +178,7 @@ defmodule BlockScoutWeb.TransactionView do
       amount: token_transfer.amount,
       amounts: [],
       token_ids: token_transfer.token_ids,
+      token_type: token_transfer.token_type,
       to_address_hash: token_transfer.to_address_hash,
       from_address_hash: token_transfer.from_address_hash
     }
@@ -311,7 +314,7 @@ defmodule BlockScoutWeb.TransactionView do
   def contract_creation?(_), do: false
 
   def fee(%Transaction{} = transaction) do
-    {_, value} = Chain.fee(transaction, :wei)
+    {_, value} = Transaction.fee(transaction, :wei)
     value
   end
 

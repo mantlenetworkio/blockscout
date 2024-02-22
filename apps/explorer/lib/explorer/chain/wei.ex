@@ -20,6 +20,7 @@ defmodule Explorer.Chain.Wei do
 
   """
 
+  require Decimal
   alias Explorer.Chain.Wei
 
   defstruct ~w(value)a
@@ -204,6 +205,29 @@ defmodule Explorer.Chain.Wei do
     |> Decimal.mult(multiplier)
     %Wei{value: value} = %__MODULE__{value: Decimal.div(p, @wei_per_bit)}
     value
+  end
+
+  @doc """
+  Divides Wei values by an `t:integer/0` or `t:Decimal.t/0`.
+
+  ## Example
+
+      iex> wei = %Explorer.Chain.Wei{value: Decimal.new(10)}
+      iex> divisor = 5
+      iex> Explorer.Chain.Wei.div(wei, divisor)
+      %Explorer.Chain.Wei{value: Decimal.new(2)}
+  """
+  @spec div(t(), pos_integer() | Decimal.t()) :: t()
+  def div(%Wei{value: value}, divisor) when is_integer(divisor) and divisor > 0 do
+    value
+    |> Decimal.div(divisor)
+    |> from(:wei)
+  end
+
+  def div(%Wei{value: value}, %Decimal{sign: 1} = divisor) do
+    value
+    |> Decimal.div(divisor)
+    |> from(:wei)
   end
 
   @doc """
