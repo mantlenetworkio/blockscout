@@ -608,15 +608,15 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
   defp get_total_fee(%Transaction{} = transaction) do
     if is_nil(transaction.da_fee) do
-      transaction |> Chain.fee(:wei) |> format_fee()
+      transaction |> Transaction.fee(:wei) |> format_fee()
     else
       l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
       da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
       l1_and_da_fee = Wei.sum(l1_fee, da_fee)
 
-      test = transaction |> Chain.fee(:wei)
+      test = transaction |> Transaction.fee(:wei)
 
-      {type, fee} = transaction |> Chain.fee(:wei)
+      {type, fee} = transaction |> Transaction.fee(:wei)
       total_fee = Wei.sum(Wei.from(fee, :wei), l1_and_da_fee)
 
       {type, total_fee} |> format_fee()

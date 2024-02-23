@@ -325,7 +325,7 @@ defmodule BlockScoutWeb.TransactionView do
   def formatted_fee(%Transaction{} = transaction, opts) do
     if is_nil(transaction.da_fee) do
       transaction
-      |> Chain.fee(:wei)
+      |> Transaction.fee(:wei)
       |> fee_to_denomination(opts)
       |> case do
         {:actual, value} -> value
@@ -336,7 +336,7 @@ defmodule BlockScoutWeb.TransactionView do
       da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
 
       transaction
-      |> Chain.fee(:wei)
+      |> Transaction.fee(:wei)
       |> fee_to_denomination(l1_fee, da_fee, opts)
       |> case do
         {:actual, value} -> value
@@ -599,7 +599,7 @@ defmodule BlockScoutWeb.TransactionView do
     real_time_price = transaction.real_time_price
 
     transaction
-    |> Chain.fee(:wei)
+    |> Transaction.fee(:wei)
     |> fee_to_denomination_with_no_unit(l1_fee, da_fee, opts, real_time_price)
   end
 
@@ -609,7 +609,7 @@ defmodule BlockScoutWeb.TransactionView do
     token_price_history = transaction.token_price_history
 
     transaction
-    |> Chain.fee(:wei)
+    |> Transaction.fee(:wei)
     |> fee_to_denomination_with_no_unit(l1_fee, da_fee, opts, token_price_history)
   end
 

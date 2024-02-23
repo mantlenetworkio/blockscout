@@ -312,7 +312,7 @@ defmodule BlockScoutWeb.StateBatchTransactionView do
     l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
     da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
     transaction
-    |> Chain.fee(:wei)
+    |> Transaction.fee(:wei)
     |> fee_to_denomination(l1_fee, da_fee, opts)
     |> case do
          {:actual, value} -> value
