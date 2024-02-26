@@ -1,0 +1,32 @@
+[
+  {
+    "author": "Mantle",
+    "id": "mantle-goerli-bridge",
+    "title": "Mantle Goerli Bridge",
+    "logo": "/static/apple-touch-icon.png",
+    "categories": [
+      "Bridges"
+    ],
+    "shortDescription": "Bridge tokens, and test your dApps deployed on Mantle Goerli.",
+    "site": "https://bridge.testnet.mantle.xyz/",
+    "description": "Bridge tokens, and test your dApps deployed on Mantle Goerli.",
+    "url": "https://bridge.testnet.mantle.xyz/",
+    "external": true,
+    "internalWallet": false
+  },
+  {
+    "author": "Mantle",
+    "id": "mantle-goerli-faucet",
+    "title": "Mantle Goerli Faucet",
+    "logo": "/static/apple-touch-icon.png",
+    "categories": [
+      "Faucets"
+    ],
+    "shortDescription": "Drip tokens from the faucet, and test your dApps deployed on Mantle Goerli.",
+    "site": "https://faucet.testnet.mantle.xyz/",
+    "description": "Drip tokens from the faucet, and test your dApps deployed on Mantle Goerli.",
+    "url": "https://faucet.testnet.mantle.xyz/",
+    "external": true,
+    "internalWallet": false
+  }
+]

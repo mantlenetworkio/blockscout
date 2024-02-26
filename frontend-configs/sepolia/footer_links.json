@@ -1,0 +1,73 @@
+[
+  {
+    "title": "Mantle",
+    "links": [
+      {
+        "text": "Home",
+        "url": "https://www.mantle.xyz/"
+      },
+      {
+        "text": "Governance",
+        "url": "https://snapshot.org/#/bitdao.eth"
+      },
+      {
+        "text": "Bridge",
+        "url": "https://bridge.sepolia.mantle.xyz/"
+      },
+      {
+        "text": "Ecosystem",
+        "url": "https://www.mantle.xyz/ecosystem?page=1"
+      },
+      {
+        "text": "Journey",
+        "url": "https://journey.mantle.xyz/en"
+      }
+    ]
+  },
+  {
+    "title": "Developers",
+    "links": [
+      {
+        "text": "Documentation",
+        "url": "https://docs.mantle.xyz/network/introduction/overview"
+      },
+      {
+        "text": "Grants",
+        "url": "https://www.mantle.xyz/grants"
+      },
+      {
+        "text": "Faucet",
+        "url": "https://faucet.sepolia.mantle.xyz/"
+      },
+      {
+        "text": "GitHub",
+        "url": "https://github.com/mantlenetworkio"
+      }
+    ]
+  },
+  {
+    "title": "Community",
+    "links": [
+      {
+        "text": "Discord",
+        "url": "https://discord.com/invite/0xMantle"
+      },
+      {
+        "text": "Twitter",
+        "url": "https://twitter.com/0xMantle"
+      },
+      {
+        "text": "Telegram",
+        "url": "https://t.me/mantlenetwork"
+      },
+      {
+        "text": "Blog",
+        "url": "https://www.mantle.xyz/blog"
+      },
+      {
+        "text": "Events",
+        "url": "https://www.mantle.xyz/events"
+      }
+    ]
+  }
+]

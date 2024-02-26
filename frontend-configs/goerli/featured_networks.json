@@ -1,0 +1,24 @@
+[
+	{
+		"title": "Mantle",
+		"url": "https://explorer.mantle.xyz/",
+		"group": "Mainnets",
+		"icon": "/static/mantle_icon.svg",
+		"invertIconInDarkMode": true
+	},
+	{
+		"title": "Mantle Sepolia",
+		"url": "https://explorer.sepolia.mantle.xyz/",
+		"group": "Testnets",
+		"icon": "/static/mantle_icon.svg",
+		"invertIconInDarkMode": true
+	},
+	{
+		"title": "Mantle Goerli",
+		"url": "https://explorer.testnet.mantle.xyz/",
+		"group": "Testnets",
+		"icon": "/static/mantle_icon.svg",
+		"invertIconInDarkMode": true,
+		"isActive": true
+	}
+]

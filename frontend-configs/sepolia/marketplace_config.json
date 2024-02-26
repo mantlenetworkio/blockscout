@@ -1,0 +1,32 @@
+[
+  {
+    "author": "Mantle",
+    "id": "mantle-sepolia-bridge",
+    "title": "Mantle Sepolia Bridge",
+    "logo": "/static/apple-touch-icon.png",
+    "categories": [
+      "Bridges"
+    ],
+    "shortDescription": "Bridge tokens, and test your dApps deployed on Mantle Sepolia.",
+    "site": "https://bridge.sepolia.mantle.xyz/",
+    "description": "Bridge tokens, and test your dApps deployed on Mantle Sepolia.",
+    "url": "https://bridge.sepolia.mantle.xyz/",
+    "external": true,
+    "internalWallet": false
+  },
+  {
+    "author": "Mantle",
+    "id": "mantle-sepolia-faucet",
+    "title": "Mantle Sepolia Faucet",
+    "logo": "/static/apple-touch-icon.png",
+    "categories": [
+      "Faucets"
+    ],
+    "shortDescription": "Drip tokens from the faucet, and test your dApps deployed on Mantle Sepolia.",
+    "site": "https://faucet.sepolia.mantle.xyz/",
+    "description": "Drip tokens from the faucet, and test your dApps deployed on Mantle Sepolia.",
+    "url": "https://faucet.sepolia.mantle.xyz/",
+    "external": true,
+    "internalWallet": false
+  }
+]
