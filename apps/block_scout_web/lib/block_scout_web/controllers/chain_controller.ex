@@ -70,19 +70,19 @@ defmodule BlockScoutWeb.ChainController do
   end
 
   def search(conn, %{"q" => query}) do
+    search_path =
+      conn
+      |> search_path(:search_results, q: query)
+      |> Controller.full_path()
+
     query
     |> String.trim()
     |> BlockScoutWeb.Chain.from_param()
     |> case do
       {:ok, item} ->
-        redirect_search_results(conn, item)
+        redirect_search_results(conn, item, search_path)
 
       {:error, :not_found} ->
-        search_path =
-          conn
-          |> search_path(:search_results, q: query)
-          |> Controller.full_path()
-
         redirect(conn, to: search_path)
     end
   end
@@ -159,7 +159,7 @@ defmodule BlockScoutWeb.ChainController do
     end
   end
 
-  defp redirect_search_results(conn, %Address{} = item) do
+  defp redirect_search_results(conn, %Address{} = item, _search_path) do
     address_path =
       conn
       |> address_path(:show, item)
@@ -168,7 +168,7 @@ defmodule BlockScoutWeb.ChainController do
     redirect(conn, to: address_path)
   end
 
-  defp redirect_search_results(conn, %Block{} = item) do
+  defp redirect_search_results(conn, %Block{} = item, _search_path) do
     block_path =
       conn
       |> block_path(:show, item)
@@ -177,7 +177,7 @@ defmodule BlockScoutWeb.ChainController do
     redirect(conn, to: block_path)
   end
 
-  defp redirect_search_results(conn, %Transaction{} = item) do
+  defp redirect_search_results(conn, %Transaction{} = item, _search_path) do
     transaction_path =
       conn
       |> transaction_path(:show, item)
@@ -187,5 +187,9 @@ defmodule BlockScoutWeb.ChainController do
 
   defp redirect_search_results(conn, %DaBatch{} = item) do
     redirect(conn, to: "/eigenda-batch/#{item.da_hash}")
+  end
+
+  defp redirect_search_results(conn, _item, search_path) do
+    redirect(conn, to: search_path)
   end
 end

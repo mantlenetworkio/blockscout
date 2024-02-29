@@ -329,7 +329,7 @@ defmodule BlockScoutWeb.L1ToL2TxnView do
 
   def formatted_fee(%Transaction{} = transaction, opts) do
     transaction
-    |> Chain.fee(:wei)
+    |> Transaction.fee(:wei)
     |> fee_to_denomination(opts)
     |> case do
          {:actual, value} -> value

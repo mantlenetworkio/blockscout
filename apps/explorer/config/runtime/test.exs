@@ -38,6 +38,9 @@ config :explorer, Explorer.TokenInstanceOwnerAddressMigration.Supervisor, enable
 config :explorer, Explorer.Migrator.TransactionsDenormalization, enabled: false
 config :explorer, Explorer.Migrator.AddressCurrentTokenBalanceTokenType, enabled: false
 config :explorer, Explorer.Migrator.AddressTokenBalanceTokenType, enabled: false
+config :explorer, Explorer.Migrator.SanitizeMissingBlockRanges, enabled: false
+config :explorer, Explorer.Migrator.SanitizeIncorrectNFTTokenTransfers, enabled: false
+config :explorer, Explorer.Migrator.TokenTransferTokenType, enabled: false
 
 config :explorer, Explorer.TokenInstanceOwnerAddressMigration.Supervisor, enabled: false
 

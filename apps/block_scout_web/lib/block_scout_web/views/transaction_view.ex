@@ -149,6 +149,7 @@ defmodule BlockScoutWeb.TransactionView do
       amount: nil,
       amounts: [],
       token_ids: token_transfer.token_ids,
+      token_type: token_transfer.token_type,
       to_address_hash: token_transfer.to_address_hash,
       from_address_hash: token_transfer.from_address_hash
     }
@@ -163,6 +164,7 @@ defmodule BlockScoutWeb.TransactionView do
       amount: nil,
       amounts: amounts,
       token_ids: token_transfer.token_ids,
+      token_type: token_transfer.token_type,
       to_address_hash: token_transfer.to_address_hash,
       from_address_hash: token_transfer.from_address_hash
     }
@@ -176,6 +178,7 @@ defmodule BlockScoutWeb.TransactionView do
       amount: token_transfer.amount,
       amounts: [],
       token_ids: token_transfer.token_ids,
+      token_type: token_transfer.token_type,
       to_address_hash: token_transfer.to_address_hash,
       from_address_hash: token_transfer.from_address_hash
     }
@@ -311,7 +314,7 @@ defmodule BlockScoutWeb.TransactionView do
   def contract_creation?(_), do: false
 
   def fee(%Transaction{} = transaction) do
-    {_, value} = Chain.fee(transaction, :wei)
+    {_, value} = Transaction.fee(transaction, :wei)
     value
   end
 
@@ -322,7 +325,7 @@ defmodule BlockScoutWeb.TransactionView do
   def formatted_fee(%Transaction{} = transaction, opts) do
     if is_nil(transaction.da_fee) do
       transaction
-      |> Chain.fee(:wei)
+      |> Transaction.fee(:wei)
       |> fee_to_denomination(opts)
       |> case do
         {:actual, value} -> value
@@ -333,7 +336,7 @@ defmodule BlockScoutWeb.TransactionView do
       da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
 
       transaction
-      |> Chain.fee(:wei)
+      |> Transaction.fee(:wei)
       |> fee_to_denomination(l1_fee, da_fee, opts)
       |> case do
         {:actual, value} -> value
@@ -596,7 +599,7 @@ defmodule BlockScoutWeb.TransactionView do
     real_time_price = transaction.real_time_price
 
     transaction
-    |> Chain.fee(:wei)
+    |> Transaction.fee(:wei)
     |> fee_to_denomination_with_no_unit(l1_fee, da_fee, opts, real_time_price)
   end
 
@@ -606,7 +609,7 @@ defmodule BlockScoutWeb.TransactionView do
     token_price_history = transaction.token_price_history
 
     transaction
-    |> Chain.fee(:wei)
+    |> Transaction.fee(:wei)
     |> fee_to_denomination_with_no_unit(l1_fee, da_fee, opts, token_price_history)
   end
 
