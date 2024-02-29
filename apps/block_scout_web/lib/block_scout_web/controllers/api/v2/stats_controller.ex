@@ -29,8 +29,6 @@ defmodule BlockScoutWeb.API.V2.StatsController do
 
     exchange_rate = Market.get_coin_exchange_rate()
 
-    exchange_rate_from_db = Market.get_native_coin_exchange_rate_from_db()
-
     transaction_stats = Helper.get_transaction_stats()
 
     gas_prices =
@@ -46,7 +44,7 @@ defmodule BlockScoutWeb.API.V2.StatsController do
       case Market.fetch_recent_history() do
         [today, yesterday | _] ->
           today.closing_price && yesterday.closing_price &&
-            exchange_rate.usd_value
+            today.closing_price
             |> Decimal.div(yesterday.closing_price)
             |> Decimal.sub(1)
             |> Decimal.mult(100)
@@ -58,7 +56,6 @@ defmodule BlockScoutWeb.API.V2.StatsController do
       end
 
     gas_price = Application.get_env(:block_scout_web, :gas_price)
-
 
     json(
       conn,
