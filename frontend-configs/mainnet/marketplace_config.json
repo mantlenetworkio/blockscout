@@ -1,0 +1,17 @@
+[
+  {
+    "author": "Mantle",
+    "id": "mantle-bridge",
+    "title": "Mantle Bridge",
+    "logo": "/static/apple-touch-icon.png",
+    "categories": [
+      "Bridges"
+    ],
+    "shortDescription": "Bridge tokens, and test your dApps deployed on Mantle.",
+    "site": "https://bridge.mantle.xyz/",
+    "description": "Bridge tokens, and test your dApps deployed on Mantle.",
+    "url": "https://bridge.mantle.xyz/",
+    "external": true,
+    "internalWallet": false
+  }
+]
