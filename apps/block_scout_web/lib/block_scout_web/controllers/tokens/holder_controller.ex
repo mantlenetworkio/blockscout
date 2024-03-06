@@ -28,7 +28,7 @@ defmodule BlockScoutWeb.Tokens.HolderController do
       addresses =
         params
         |> paging_options()
-        |> Chain.list_top_addresses()
+        |> Address.list_top_addresses()
 
       {addresses_page, next_page} = split_list_by_page(addresses)
 
