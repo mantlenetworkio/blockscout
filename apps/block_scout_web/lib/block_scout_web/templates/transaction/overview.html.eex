@@ -534,7 +534,7 @@
               <% end %>
             </dd>
           </dl>
-          <!-- Gas Price -->
+          <!-- L1/L2 Gas Price -->
           <dl class="row">
             <dt class="col-sm-3 col-lg-3 text-muted">
               <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
@@ -619,6 +619,41 @@
             <% gas_used_perc = gas_used_perc(@transaction) %>
             <dd class="col-sm-9 col-lg-9"> <%= gas_used(@transaction) %> <%= if gas_used_perc, do: "| #{gas_used_perc}%" %></dd>
           </dl>
+          <%= if Application.get_env(:explorer, :chain_type) == "optimism" do %>
+            <%= if @transaction.l1_gas_used do %>
+              <!-- L1 Gas Used by Transaction -->
+              <dl class="row">
+                <dt class="col-sm-3 col-lg-2 text-muted transaction-gas-used">
+                  <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
+                    text: gettext("L1 Gas Used by Transaction") %>
+                  <%= gettext "L1 Gas Used by Transaction" %>
+                </dt>
+                <dd class="col-sm-9 col-lg-10"> <%= l1_gas_used(@transaction) %></dd>
+              </dl>
+            <% end %>
+            <%= if @transaction.l1_gas_used do %>
+              <!-- L1 Gas Price -->
+              <dl class="row">
+                <dt class="col-sm-3 col-lg-2 text-muted">
+                  <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
+                    text: gettext("L1 Gas Price") %>
+                  <%= gettext "L1 Gas Price" %>
+                </dt>
+                <dd class="col-sm-9 col-lg-10"> <%= l1_gas_price(@transaction, :gwei) %> </dd>
+              </dl>
+            <% end %>
+            <%= if @transaction.l1_fee_scalar do %>
+              <!-- L1 Fee Scalar -->
+              <dl class="row">
+                <dt class="col-sm-3 col-lg-2 text-muted">
+                  <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
+                    text: gettext("L1 Fee Scalar") %>
+                  <%= gettext "L1 Fee Scalar" %>
+                </dt>
+                <dd class="col-sm-9 col-lg-10"> <%= @transaction.l1_fee_scalar %> </dd>
+              </dl>
+            <% end %>
+          <% end %>
           <!-- Nonce, Index in Block -->
           <dl class="row">
             <dt class="col-sm-3 col-lg-3 text-muted">

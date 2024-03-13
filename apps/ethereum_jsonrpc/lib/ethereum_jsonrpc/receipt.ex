@@ -82,6 +82,12 @@ defmodule EthereumJSONRPC.Receipt do
             blob_gas_price: 0,\
             blob_gas_used: 0\
       """
+    "optimism" -> """
+          l1_fee: 0,\
+          l1_fee_scalar: 0,\
+          l1_gas_price: 0,\
+          l1_gas_used: 0\
+      """
     _ -> ""
   end}
       }
@@ -121,6 +127,12 @@ defmodule EthereumJSONRPC.Receipt do
     "ethereum" -> """
             blob_gas_price: 0,\
             blob_gas_used: 0\
+      """
+    "optimism" -> """
+          l1_fee: 0,\
+          l1_fee_scalar: 0,\
+          l1_gas_price: 0,\
+          l1_gas_used: 0\
       """
     _ -> ""
   end}
@@ -276,6 +288,15 @@ defmodule EthereumJSONRPC.Receipt do
         |> Map.merge(%{
           blob_gas_price: Map.get(elixir, "blobGasPrice", 0),
           blob_gas_used: Map.get(elixir, "blobGasUsed", 0)
+        })
+
+      "optimism" ->
+        params
+        |> Map.merge(%{
+          l1_fee: Map.get(elixir, "l1Fee", 0),
+          l1_fee_scalar: Map.get(elixir, "l1FeeScalar", 0),
+          l1_gas_price: Map.get(elixir, "l1GasPrice", 0),
+          l1_gas_used: Map.get(elixir, "l1GasUsed", 0)
         })
 
       _ ->
