@@ -1804,43 +1804,38 @@ defmodule Explorer.Chain.Transaction do
 
   """
   @spec fee(Transaction.t(), :ether | :gwei | :wei) :: {:maximum, Decimal.t()} | {:actual, Decimal.t() | nil}
-  def fee(%Transaction{gas: _gas, gas_price: nil, gas_used: nil}, _unit), do: {:maximum, nil}
+  def fee(%Transaction{gas: gas, gas_price: nil, gas_used: nil} = transaction, unit) do
+    gas_price = effective_gas_price(transaction)
 
-  def fee(%Transaction{gas: gas, gas_price: gas_price, gas_used: nil} = tx, unit) do
-    {:maximum, fee(tx, gas_price, gas, unit)}
+    {:maximum, gas_price && gas_price |> Wei.to(unit) |> Decimal.mult(gas)}
+  end
+
+  def fee(%Transaction{gas: gas, gas_price: gas_price, gas_used: nil}, unit) do
+    fee =
+      gas_price
+      |> Wei.to(unit)
+      |> Decimal.mult(gas)
+
+    {:maximum, fee}
   end
 
   def fee(%Transaction{gas_price: nil, gas_used: gas_used} = transaction, unit) do
-    if Application.get_env(:explorer, :chain_type) == "optimism" do
-      {:actual, nil}
-    else
-      gas_price = effective_gas_price(transaction)
+    gas_price = effective_gas_price(transaction)
 
-      {:actual,
-       gas_price &&
-         gas_price
-         |> Wei.to(unit)
-         |> Decimal.mult(gas_used)}
-    end
+    {:actual,
+     gas_price &&
+       gas_price
+       |> Wei.to(unit)
+       |> Decimal.mult(gas_used)}
   end
 
-  def fee(%Transaction{gas_price: gas_price, gas_used: gas_used} = tx, unit) do
-    {:actual, fee(tx, gas_price, gas_used, unit)}
-  end
+  def fee(%Transaction{gas_price: gas_price, gas_used: gas_used}, unit) do
+    fee =
+      gas_price
+      |> Wei.to(unit)
+      |> Decimal.mult(gas_used)
 
-  defp fee(tx, gas_price, gas, unit) do
-    l1_fee =
-      case Map.get(tx, :l1_fee) do
-        nil -> Wei.from(Decimal.new(0), :wei)
-        value -> value
-      end
-
-    gas_price
-    |> Wei.to(unit)
-    |> Decimal.mult(gas)
-    |> Wei.from(unit)
-    |> Wei.sum(l1_fee)
-    |> Wei.to(unit)
+    {:actual, fee}
   end
 
   @doc """
