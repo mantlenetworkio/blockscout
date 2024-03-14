@@ -254,7 +254,10 @@ config :explorer, Explorer.Chain.Cache.GasPriceOracle,
   num_of_blocks: ConfigHelper.parse_integer_env_var("GAS_PRICE_ORACLE_NUM_OF_BLOCKS", 200),
   safelow_percentile: ConfigHelper.parse_integer_env_var("GAS_PRICE_ORACLE_SAFELOW_PERCENTILE", 35),
   average_percentile: ConfigHelper.parse_integer_env_var("GAS_PRICE_ORACLE_AVERAGE_PERCENTILE", 60),
-  fast_percentile: ConfigHelper.parse_integer_env_var("GAS_PRICE_ORACLE_FAST_PERCENTILE", 90)
+  fast_percentile: ConfigHelper.parse_integer_env_var("GAS_PRICE_ORACLE_FAST_PERCENTILE", 90),
+  safelow_time_coefficient: ConfigHelper.parse_float_env_var("GAS_PRICE_ORACLE_SAFELOW_TIME_COEFFICIENT", 5),
+  average_time_coefficient: ConfigHelper.parse_float_env_var("GAS_PRICE_ORACLE_AVERAGE_TIME_COEFFICIENT", 3),
+  fast_time_coefficient: ConfigHelper.parse_float_env_var("GAS_PRICE_ORACLE_FAST_TIME_COEFFICIENT", 1)
 
 config :explorer, Explorer.Chain.Cache.RootstockLockedBTC,
   enabled: System.get_env("ETHEREUM_JSONRPC_VARIANT") == "rsk",
@@ -752,6 +755,21 @@ config :indexer, Indexer.Fetcher.PolygonEdge.Withdrawal,
 config :indexer, Indexer.Fetcher.PolygonEdge.WithdrawalExit,
   start_block_l1: System.get_env("INDEXER_POLYGON_EDGE_L1_WITHDRAWALS_START_BLOCK"),
   exit_helper: System.get_env("INDEXER_POLYGON_EDGE_L1_EXIT_HELPER_CONTRACT")
+
+config :indexer, Indexer.Fetcher.ZkSync.TransactionBatch,
+  chunk_size: ConfigHelper.parse_integer_env_var("INDEXER_ZKSYNC_BATCHES_CHUNK_SIZE", 50),
+  batches_max_range: ConfigHelper.parse_integer_env_var("INDEXER_ZKSYNC_NEW_BATCHES_MAX_RANGE", 50),
+  recheck_interval: ConfigHelper.parse_integer_env_var("INDEXER_ZKSYNC_NEW_BATCHES_RECHECK_INTERVAL", 60)
+
+config :indexer, Indexer.Fetcher.ZkSync.TransactionBatch.Supervisor,
+  enabled: ConfigHelper.parse_bool_env_var("INDEXER_ZKSYNC_BATCHES_ENABLED")
+
+config :indexer, Indexer.Fetcher.ZkSync.BatchesStatusTracker,
+  zksync_l1_rpc: System.get_env("INDEXER_ZKSYNC_L1_RPC"),
+  recheck_interval: ConfigHelper.parse_integer_env_var("INDEXER_ZKSYNC_BATCHES_STATUS_RECHECK_INTERVAL", 60)
+
+config :indexer, Indexer.Fetcher.ZkSync.BatchesStatusTracker.Supervisor,
+  enabled: ConfigHelper.parse_bool_env_var("INDEXER_ZKSYNC_BATCHES_ENABLED")
 
 config :indexer, Indexer.Fetcher.RootstockData.Supervisor,
   disabled?:

@@ -311,22 +311,40 @@ defmodule Explorer.Chain.TokenTransfer do
     |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
   end
 
-  def token_transfers_by_address_hash(direction, address_hash, token_types) do
-    only_consensus_transfers_query()
-    |> filter_by_direction(direction, address_hash)
-    |> order_by(fragment("
-      block_number DESC, log_index DESC
-    "))
-    |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
-    |> preload([token: token], [{:token, token}])
-    |> filter_by_type(token_types)
+  def token_transfers_by_address_hash(direction, address_hash, token_types, paging_options) do
+    if direction == :to || direction == :from do
+      only_consensus_transfers_query()
+      |> filter_by_direction(direction, address_hash)
+      |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
+      |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
+      |> preload([token: token], [{:token, token}])
+      |> filter_by_type(token_types)
+      |> handle_paging_options(paging_options)
+    else
+      to_address_hash_query =
+        only_consensus_transfers_query()
+        |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
+        |> filter_by_direction(:to, address_hash)
+        |> filter_by_type(token_types)
+        |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
+        |> handle_paging_options(paging_options)
+        |> Chain.wrapped_union_subquery()
 
-    # only_consensus_transfers_query()
-    # |> filter_by_direction(direction, address_hash)
-    # |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
-    # |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
-    # |> preload([token: token], [{:token, token}])
-    # |> filter_by_type(token_types)
+      from_address_hash_query =
+        only_consensus_transfers_query()
+        |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
+        |> filter_by_direction(:from, address_hash)
+        |> filter_by_type(token_types)
+        |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
+        |> handle_paging_options(paging_options)
+        |> Chain.wrapped_union_subquery()
+
+      to_address_hash_query
+      |> union(^from_address_hash_query)
+      |> Chain.wrapped_union_subquery()
+      |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
+      |> limit(^paging_options.page_size)
+    end
   end
 
   def filter_by_direction(query, :to, address_hash) do
@@ -337,21 +355,6 @@ defmodule Explorer.Chain.TokenTransfer do
   def filter_by_direction(query, :from, address_hash) do
     query
     |> where([tt], tt.from_address_hash == ^address_hash)
-  end
-
-  def filter_by_direction(query, _, address_hash) do
-    to_query = query
-    |> where([tt], tt.to_address_hash == ^address_hash)
-
-    from_query = query
-    |> where([tt], tt.from_address_hash == ^address_hash)
-    |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
-    |> preload([token: token], [{:token, token}])
-
-    to_query |> union(^from_query)
-
-    # query
-    # |> where([tt], tt.from_address_hash == ^address_hash or tt.to_address_hash == ^address_hash)
   end
 
   def filter_by_type(query, []), do: query
@@ -418,5 +421,58 @@ defmodule Explorer.Chain.TokenTransfer do
     |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
     |> where([tt, token: token], token.type == "ERC-721")
     |> preload([tt, token: token], [{:token, token}])
+  end
+
+  @doc """
+  To be used in migrators
+  """
+  @spec encode_token_transfer_ids([{Hash.t(), Hash.t(), non_neg_integer()}]) :: binary()
+  def encode_token_transfer_ids(ids) do
+    encoded_values =
+      ids
+      |> Enum.reduce("", fn {t_hash, b_hash, log_index}, acc ->
+        acc <> "('#{hash_to_query_string(t_hash)}', '#{hash_to_query_string(b_hash)}', #{log_index}),"
+      end)
+      |> String.trim_trailing(",")
+
+    "(#{encoded_values})"
+  end
+
+  defp hash_to_query_string(hash) do
+    s_hash =
+      hash
+      |> to_string()
+      |> String.trim_leading("0")
+
+    "\\#{s_hash}"
+  end
+
+  @doc """
+  Fetches token transfers from logs.
+  """
+  @spec logs_to_token_transfers([Log.t()], Keyword.t()) :: [TokenTransfer.t()]
+  def logs_to_token_transfers(logs, options) do
+    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+
+    logs
+    |> logs_to_token_transfers_query()
+    |> limit(^Enum.count(logs))
+    |> Chain.join_associations(necessity_by_association)
+    |> Chain.select_repo(options).all()
+  end
+
+  defp logs_to_token_transfers_query(query \\ __MODULE__, logs)
+
+  defp logs_to_token_transfers_query(query, [log | tail]) do
+    query
+    |> or_where(
+      [tt],
+      tt.transaction_hash == ^log.transaction_hash and tt.block_hash == ^log.block_hash and tt.log_index == ^log.index
+    )
+    |> logs_to_token_transfers_query(tail)
+  end
+
+  defp logs_to_token_transfers_query(query, []) do
+    query
   end
 end
