@@ -266,11 +266,8 @@ defmodule EthereumJSONRPC.Transaction do
           "hash" => hash,
           "input" => input,
           "nonce" => nonce,
-          "r" => r,
-          "s" => s,
           "to" => to_address_hash,
           "transactionIndex" => index,
-          "v" => v,
           "value" => value,
           "type" => type,
           "maxPriorityFeePerGas" => max_priority_fee_per_gas,
@@ -287,10 +284,7 @@ defmodule EthereumJSONRPC.Transaction do
       index: index,
       input: input,
       nonce: nonce,
-      r: r,
-      s: s,
       to_address_hash: to_address_hash,
-      v: v,
       value: value,
       transaction_index: index,
       type: type,
@@ -300,7 +294,10 @@ defmodule EthereumJSONRPC.Transaction do
 
     put_if_present(transaction, result, [
       {"creates", :created_contract_address_hash},
-      {"block_timestamp", :block_timestamp}
+      {"block_timestamp", :block_timestamp},
+      {"r", :r},
+      {"s", :s},
+      {"v", :v}
     ])
   end
 
@@ -315,11 +312,8 @@ defmodule EthereumJSONRPC.Transaction do
           "hash" => hash,
           "input" => input,
           "nonce" => nonce,
-          "r" => r,
-          "s" => s,
           "to" => to_address_hash,
           "transactionIndex" => index,
-          "v" => v,
           "value" => value,
           "type" => type,
           "maxPriorityFeePerGas" => max_priority_fee_per_gas,
@@ -336,10 +330,7 @@ defmodule EthereumJSONRPC.Transaction do
       index: index,
       input: input,
       nonce: nonce,
-      r: r,
-      s: s,
       to_address_hash: to_address_hash,
-      v: v,
       value: value,
       transaction_index: index,
       type: type,
@@ -349,12 +340,14 @@ defmodule EthereumJSONRPC.Transaction do
 
     put_if_present(transaction, result, [
       {"creates", :created_contract_address_hash},
-      {"block_timestamp", :block_timestamp}
+      {"block_timestamp", :block_timestamp},
+      {"r", :r},
+      {"s", :s},
+      {"v", :v}
     ])
   end
 
-  # this is for Suave chain (handles `executionNode` and `requestRecord` fields without EIP-1559 fields)
-  def elixir_to_params(
+  def do_elixir_to_params(
         %{
           "blockHash" => block_hash,
           "blockNumber" => block_number,
@@ -364,154 +357,8 @@ defmodule EthereumJSONRPC.Transaction do
           "hash" => hash,
           "input" => input,
           "nonce" => nonce,
-          "r" => r,
-          "s" => s,
           "to" => to_address_hash,
           "transactionIndex" => index,
-          "v" => v,
-          "value" => value,
-          "type" => type,
-          "executionNode" => execution_node_hash,
-          "requestRecord" => wrapped
-        } = transaction
-      ) do
-    result = %{
-      block_hash: block_hash,
-      block_number: block_number,
-      from_address_hash: from_address_hash,
-      gas: gas,
-      gas_price: gas_price,
-      hash: hash,
-      index: index,
-      input: input,
-      nonce: nonce,
-      r: r,
-      s: s,
-      to_address_hash: to_address_hash,
-      v: v,
-      value: value,
-      transaction_index: index,
-      type: type
-    }
-
-    # credo:disable-for-next-line
-    result =
-      if Application.get_env(:explorer, :chain_type) == "suave" do
-        Map.merge(result, %{
-          execution_node_hash: execution_node_hash,
-          wrapped_type: quantity_to_integer(Map.get(wrapped, "type")),
-          wrapped_nonce: quantity_to_integer(Map.get(wrapped, "nonce")),
-          wrapped_to_address_hash: Map.get(wrapped, "to"),
-          wrapped_gas: quantity_to_integer(Map.get(wrapped, "gas")),
-          wrapped_gas_price: quantity_to_integer(Map.get(wrapped, "gasPrice")),
-          wrapped_max_priority_fee_per_gas: quantity_to_integer(Map.get(wrapped, "maxPriorityFeePerGas")),
-          wrapped_max_fee_per_gas: quantity_to_integer(Map.get(wrapped, "maxFeePerGas")),
-          wrapped_value: quantity_to_integer(Map.get(wrapped, "value")),
-          wrapped_input: Map.get(wrapped, "input"),
-          wrapped_v: quantity_to_integer(Map.get(wrapped, "v")),
-          wrapped_r: quantity_to_integer(Map.get(wrapped, "r")),
-          wrapped_s: quantity_to_integer(Map.get(wrapped, "s")),
-          wrapped_hash: Map.get(wrapped, "hash")
-        })
-      else
-        result
-      end
-
-    put_if_present(transaction, result, [
-      {"creates", :created_contract_address_hash},
-      {"block_timestamp", :block_timestamp}
-    ])
-  end
-
-  # this is for Suave chain (handles `executionNode` and `requestRecord` fields without EIP-1559 fields)
-  def elixir_to_params(
-        %{
-          "blockHash" => block_hash,
-          "blockNumber" => block_number,
-          "from" => from_address_hash,
-          "gas" => gas,
-          "gasPrice" => gas_price,
-          "hash" => hash,
-          "input" => input,
-          "nonce" => nonce,
-          "r" => r,
-          "s" => s,
-          "to" => to_address_hash,
-          "transactionIndex" => index,
-          "v" => v,
-          "value" => value,
-          "type" => type,
-          "executionNode" => execution_node_hash,
-          "requestRecord" => wrapped
-        } = transaction
-      ) do
-    result = %{
-      block_hash: block_hash,
-      block_number: block_number,
-      from_address_hash: from_address_hash,
-      gas: gas,
-      gas_price: gas_price,
-      hash: hash,
-      index: index,
-      input: input,
-      nonce: nonce,
-      r: r,
-      s: s,
-      to_address_hash: to_address_hash,
-      v: v,
-      value: value,
-      transaction_index: index,
-      type: type
-    }
-
-    # credo:disable-for-next-line
-    result =
-      if Application.get_env(:explorer, :chain_type) == "suave" do
-        Map.merge(result, %{
-          execution_node_hash: execution_node_hash,
-          wrapped_type: quantity_to_integer(Map.get(wrapped, "type")),
-          wrapped_nonce: quantity_to_integer(Map.get(wrapped, "nonce")),
-          wrapped_to_address_hash: Map.get(wrapped, "to"),
-          wrapped_gas: quantity_to_integer(Map.get(wrapped, "gas")),
-          wrapped_gas_price: quantity_to_integer(Map.get(wrapped, "gasPrice")),
-          wrapped_max_priority_fee_per_gas: quantity_to_integer(Map.get(wrapped, "maxPriorityFeePerGas")),
-          wrapped_max_fee_per_gas: quantity_to_integer(Map.get(wrapped, "maxFeePerGas")),
-          wrapped_value: quantity_to_integer(Map.get(wrapped, "value")),
-          wrapped_input: Map.get(wrapped, "input"),
-          wrapped_v: quantity_to_integer(Map.get(wrapped, "v")),
-          wrapped_r: quantity_to_integer(Map.get(wrapped, "r")),
-          wrapped_s: quantity_to_integer(Map.get(wrapped, "s")),
-          wrapped_hash: Map.get(wrapped, "hash")
-        })
-      else
-        result
-      end
-
-    if transaction["creates"] do
-      Map.put(result, :created_contract_address_hash, transaction["creates"])
-    else
-      result
-    end
-  end
-
-
-
-
-  def elixir_to_params(
-        %{
-          "blockHash" => block_hash,
-          "blockNumber" => block_number,
-          "from" => from_address_hash,
-          "gas" => gas,
-          "gasPrice" => gas_price,
-          "hash" => hash,
-          "input" => input,
-          "nonce" => nonce,
-          "r" => r,
-          "s" => s,
-          "to" => to_address_hash,
-          "transactionIndex" => index,
-          "v" => v,
           "value" => value,
           "type" => type
         } = transaction
@@ -526,10 +373,7 @@ defmodule EthereumJSONRPC.Transaction do
       index: index,
       input: input,
       nonce: nonce,
-      r: r,
-      s: s,
       to_address_hash: to_address_hash,
-      v: v,
       value: value,
       transaction_index: index,
       type: type
@@ -537,10 +381,14 @@ defmodule EthereumJSONRPC.Transaction do
 
     put_if_present(transaction, result, [
       {"creates", :created_contract_address_hash},
-      {"block_timestamp", :block_timestamp}
+      {"block_timestamp", :block_timestamp},
+      {"r", :r},
+      {"s", :s},
+      {"v", :v}
     ])
   end
 
+  # for legacy txs without type, maxPriorityFeePerGas and maxFeePerGas
   def do_elixir_to_params(
         %{
           "blockHash" => block_hash,
@@ -551,11 +399,8 @@ defmodule EthereumJSONRPC.Transaction do
           "hash" => hash,
           "input" => input,
           "nonce" => nonce,
-          "r" => r,
-          "s" => s,
           "to" => to_address_hash,
           "transactionIndex" => index,
-          "v" => v,
           "value" => value
         } = transaction
       ) do
@@ -569,20 +414,21 @@ defmodule EthereumJSONRPC.Transaction do
       index: index,
       input: input,
       nonce: nonce,
-      r: r,
-      s: s,
       to_address_hash: to_address_hash,
-      v: v,
       value: value,
       transaction_index: index
     }
 
     put_if_present(transaction, result, [
       {"creates", :created_contract_address_hash},
-      {"block_timestamp", :block_timestamp}
+      {"block_timestamp", :block_timestamp},
+      {"r", :r},
+      {"s", :s},
+      {"v", :v}
     ])
   end
 
+  # for txs without gasPrice, maxPriorityFeePerGas and maxFeePerGas
   def do_elixir_to_params(
         %{
           "blockHash" => block_hash,
@@ -592,12 +438,9 @@ defmodule EthereumJSONRPC.Transaction do
           "hash" => hash,
           "input" => input,
           "nonce" => nonce,
-          "r" => r,
-          "s" => s,
           "to" => to_address_hash,
           "transactionIndex" => index,
           "type" => type,
-          "v" => v,
           "value" => value
         } = transaction
       ) do
@@ -611,10 +454,7 @@ defmodule EthereumJSONRPC.Transaction do
       index: index,
       input: input,
       nonce: nonce,
-      r: r,
-      s: s,
       to_address_hash: to_address_hash,
-      v: v,
       value: value,
       transaction_index: index,
       type: type
@@ -622,7 +462,10 @@ defmodule EthereumJSONRPC.Transaction do
 
     put_if_present(transaction, result, [
       {"creates", :created_contract_address_hash},
-      {"block_timestamp", :block_timestamp}
+      {"block_timestamp", :block_timestamp},
+      {"r", :r},
+      {"s", :s},
+      {"v", :v}
     ])
   end
 
@@ -817,6 +660,11 @@ defmodule EthereumJSONRPC.Transaction do
       nil -> {key, chain_id}
       _ -> {key, quantity_to_integer(chain_id)}
     end
+  end
+
+  # ZkSync fields
+  defp entry_to_elixir({key, _}) when key in ~w(l1BatchNumber l1BatchTxIndex) do
+    {:ignore, :ignore}
   end
 
   defp entry_to_elixir(_) do

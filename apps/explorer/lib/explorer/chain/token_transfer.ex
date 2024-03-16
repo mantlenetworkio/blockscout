@@ -41,6 +41,8 @@ defmodule Explorer.Chain.TokenTransfer do
   @weth_withdrawal_signature "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65"
   @erc1155_single_transfer_signature "0xc3d58168c5ae7397731d063d5bbf3d657854427343f4c083240f7aacaa2d0f62"
   @erc1155_batch_transfer_signature "0x4a39dc06d4c0dbc64b70af90fd698a233a518aa5d07e595d983b8c0526c8f7fb"
+  @erc404_erc20_transfer_event "0xe59fdd36d0d223c0c7d996db7ad796880f45e1936cb0bb7ac102e7082e031487"
+  @erc404_erc721_transfer_event "0xe5f815dc84b8cecdfd4beedfc3f91ab5be7af100eca4e8fb11552b867995394f"
 
   @transfer_function_signature "0xa9059cbb"
 
@@ -142,6 +144,10 @@ defmodule Explorer.Chain.TokenTransfer do
   def erc1155_single_transfer_signature, do: @erc1155_single_transfer_signature
 
   def erc1155_batch_transfer_signature, do: @erc1155_batch_transfer_signature
+
+  def erc404_erc20_transfer_event, do: @erc404_erc20_transfer_event
+
+  def erc404_erc721_transfer_event, do: @erc404_erc721_transfer_event
 
   @doc """
   ERC 20's transfer(address,uint256) function signature
@@ -421,5 +427,58 @@ defmodule Explorer.Chain.TokenTransfer do
     |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
     |> where([tt, token: token], token.type == "ERC-721")
     |> preload([tt, token: token], [{:token, token}])
+  end
+
+  @doc """
+  To be used in migrators
+  """
+  @spec encode_token_transfer_ids([{Hash.t(), Hash.t(), non_neg_integer()}]) :: binary()
+  def encode_token_transfer_ids(ids) do
+    encoded_values =
+      ids
+      |> Enum.reduce("", fn {t_hash, b_hash, log_index}, acc ->
+        acc <> "('#{hash_to_query_string(t_hash)}', '#{hash_to_query_string(b_hash)}', #{log_index}),"
+      end)
+      |> String.trim_trailing(",")
+
+    "(#{encoded_values})"
+  end
+
+  defp hash_to_query_string(hash) do
+    s_hash =
+      hash
+      |> to_string()
+      |> String.trim_leading("0")
+
+    "\\#{s_hash}"
+  end
+
+  @doc """
+  Fetches token transfers from logs.
+  """
+  @spec logs_to_token_transfers([Log.t()], Keyword.t()) :: [TokenTransfer.t()]
+  def logs_to_token_transfers(logs, options) do
+    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+
+    logs
+    |> logs_to_token_transfers_query()
+    |> limit(^Enum.count(logs))
+    |> Chain.join_associations(necessity_by_association)
+    |> Chain.select_repo(options).all()
+  end
+
+  defp logs_to_token_transfers_query(query \\ __MODULE__, logs)
+
+  defp logs_to_token_transfers_query(query, [log | tail]) do
+    query
+    |> or_where(
+      [tt],
+      tt.transaction_hash == ^log.transaction_hash and tt.block_hash == ^log.block_hash and tt.log_index == ^log.index
+    )
+    |> logs_to_token_transfers_query(tail)
+  end
+
+  defp logs_to_token_transfers_query(query, []) do
+    query
   end
 end
