@@ -205,10 +205,10 @@ defmodule Indexer.Fetcher.TokenInstance.MetadataRetriever do
         {:error_code, code}
 
       {:error, %Error{reason: reason}} ->
-        Logger.warn(
-          ["Request to token uri failed: #{inspect(uri)}.", inspect(reason)],
-          fetcher: :token_instances
-        )
+        # Logger.warn(
+        #   ["Request to token uri failed: #{inspect(uri)}.", inspect(reason)],
+        #   fetcher: :token_instances
+        # )
 
         {:error, reason |> inspect() |> truncate_error()}
     end
