@@ -99,8 +99,11 @@ defmodule Explorer.SmartContract.Reader do
   end
 
   defp prepare_abi(nil, address_hash) do
-    address_hash
-    |> SmartContract.address_hash_to_smart_contract()
+    {smart_contract, _} =
+      address_hash
+      |> SmartContract.address_hash_to_smart_contract_with_bytecode_twin()
+
+    smart_contract
     |> Map.get(:abi)
   end
 
@@ -630,7 +633,7 @@ defmodule Explorer.SmartContract.Reader do
   end
 
   defp get_abi(contract_address_hash, type, options) do
-    contract = SmartContract.address_hash_to_smart_contract(contract_address_hash, options)
+    {contract, _} = SmartContract.address_hash_to_smart_contract_with_bytecode_twin(contract_address_hash, options)
 
     if type == :proxy do
       Proxy.get_implementation_abi_from_proxy(contract, options)
@@ -860,7 +863,15 @@ defmodule Explorer.SmartContract.Reader do
     value
   end
 
-  @spec zip_tuple_values_with_types(tuple, binary) :: [{binary, any}]
+  @spec zip_tuple_values_with_types(tuple, binary | tuple()) :: [{binary, any}]
+  def zip_tuple_values_with_types(value, {:tuple, tuple_types}) do
+    values_list =
+      value
+      |> Tuple.to_list()
+
+    Enum.zip(tuple_types, values_list)
+  end
+
   def zip_tuple_values_with_types(value, type) do
     types_string =
       type

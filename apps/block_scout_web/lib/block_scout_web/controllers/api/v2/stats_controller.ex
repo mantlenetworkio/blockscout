@@ -27,6 +27,7 @@ defmodule BlockScoutWeb.API.V2.StatsController do
       end
 
     exchange_rate = Market.get_coin_exchange_rate()
+    secondary_coin_exchange_rate = Market.get_secondary_coin_exchange_rate()
 
     transaction_stats = Helper.get_transaction_stats()
 
@@ -41,9 +42,9 @@ defmodule BlockScoutWeb.API.V2.StatsController do
 
     coin_price_change =
       case Market.fetch_recent_history() do
-        [today, yesterday | _] ->
-          today.closing_price && yesterday.closing_price &&
-            today.closing_price
+        [_today, yesterday | _] ->
+          exchange_rate.usd_value && yesterday.closing_price &&
+            exchange_rate.usd_value
             |> Decimal.div(yesterday.closing_price)
             |> Decimal.sub(1)
             |> Decimal.mult(100)
@@ -66,6 +67,7 @@ defmodule BlockScoutWeb.API.V2.StatsController do
         "coin_image" => exchange_rate.image_url,
         "coin_price" => exchange_rate.usd_value,
         "coin_price_change_percentage" => coin_price_change,
+        "secondary_coin_price" => secondary_coin_exchange_rate.usd_value,
         "total_gas_used" => GasUsage.total() |> to_string(),
         "transactions_today" => Enum.at(transaction_stats, 0).number_of_transactions |> to_string(),
         "gas_used_today" => Enum.at(transaction_stats, 0).gas_used,
@@ -174,7 +176,7 @@ defmodule BlockScoutWeb.API.V2.StatsController do
   end
 
   case Application.compile_env(:explorer, :chain_type) do
-    "rsk" ->
+    :rsk ->
       defp add_chain_type_fields(response) do
         alias Explorer.Chain.Cache.RootstockLockedBTC
 

@@ -16,6 +16,7 @@ defmodule Explorer.Chain.Search do
   import Explorer.Chain, only: [select_repo: 1]
   import Explorer.MicroserviceInterfaces.BENS, only: [ens_domain_name_lookup: 1]
   alias Explorer.{Chain, PagingOptions}
+  alias Explorer.Helper, as: ExplorerHelper
   alias Explorer.Tags.{AddressTag, AddressToTag}
 
   alias Explorer.Chain.{
@@ -50,6 +51,7 @@ defmodule Explorer.Chain.Search do
             from(items in subquery(query),
               order_by: [
                 desc: items.priority,
+                desc_nulls_last: items.certified,
                 desc_nulls_last: items.circulating_market_cap,
                 desc_nulls_last: items.exchange_rate,
                 desc_nulls_last: items.is_verified_via_admin_panel,
@@ -80,7 +82,7 @@ defmodule Explorer.Chain.Search do
 
     ens_result = (ens_task && await_ens_task(ens_task)) || []
 
-    result ++ ens_result
+    ens_result ++ result
   end
 
   def base_joint_query(string, term) do
@@ -121,7 +123,7 @@ defmodule Explorer.Chain.Search do
             tx_block_query
           end
 
-        if Application.get_env(:explorer, :chain_type) == "ethereum" do
+        if Application.get_env(:explorer, :chain_type) == :ethereum do
           blob_query = search_blob_query(string)
 
           tx_block_op_query
@@ -207,7 +209,7 @@ defmodule Explorer.Chain.Search do
           end
 
         blob_result =
-          if valid_full_hash?(search_query) && Application.get_env(:explorer, :chain_type) == "ethereum" do
+          if valid_full_hash?(search_query) && Application.get_env(:explorer, :chain_type) == :ethereum do
             search_query
             |> search_blob_query()
             |> select_repo(options).all()
@@ -246,7 +248,7 @@ defmodule Explorer.Chain.Search do
             blocks_result,
             ens_result
           ]
-          |> Enum.filter(fn list -> Enum.count(list) > 0 end)
+          |> Enum.filter(fn list -> not Enum.empty?(list) end)
           |> Enum.sort_by(fn list -> Enum.count(list) end, :asc)
 
         to_take =
@@ -261,6 +263,7 @@ defmodule Explorer.Chain.Search do
           |> compose_result_checksummed_address_hash()
           |> format_timestamp()
         end)
+        |> Enum.sort_by(fn item -> item.priority end, :desc)
 
       _ ->
         []
@@ -328,6 +331,7 @@ defmodule Explorer.Chain.Search do
       |> Map.put(:icon_url, dynamic([token, _], token.icon_url))
       |> Map.put(:token_type, dynamic([token, _], token.type))
       |> Map.put(:verified, dynamic([_, smart_contract], not is_nil(smart_contract)))
+      |> Map.put(:certified, dynamic([_, smart_contract], smart_contract.certified))
       |> Map.put(:exchange_rate, dynamic([token, _], token.fiat_value))
       |> Map.put(:total_supply, dynamic([token, _], token.total_supply))
       |> Map.put(:circulating_market_cap, dynamic([token, _], token.circulating_market_cap))
@@ -364,6 +368,7 @@ defmodule Explorer.Chain.Search do
       |> Map.put(:type, "contract")
       |> Map.put(:name, dynamic([smart_contract, _], smart_contract.name))
       |> Map.put(:inserted_at, dynamic([_, address], address.inserted_at))
+      |> Map.put(:certified, dynamic([smart_contract, _], smart_contract.certified))
       |> Map.put(:verified, true)
       |> Map.put(:is_verified, true)
       |> Map.put(:is_not_contract_address, false)
@@ -381,13 +386,14 @@ defmodule Explorer.Chain.Search do
       {:ok, address_hash} ->
         address_search_fields =
           search_fields()
-          |> Map.put(:address_hash, dynamic([address, _], address.hash))
+          |> Map.put(:address_hash, dynamic([address, _, _], address.hash))
           |> Map.put(:type, "address")
           |> Map.put(:name, dynamic([_, address_name], address_name.name))
           |> Map.put(:inserted_at, dynamic([_, address_name], address_name.inserted_at))
           |> Map.put(:verified, dynamic([address, _], address.verified))
           |> Map.put(:is_verified, dynamic([address, _], address.verified))
           |> Map.put(:is_not_contract_address, dynamic([address, _], is_nil(address.contract_code)))
+          |> Map.put(:certified, dynamic([_, _, smart_contract], smart_contract.certified))
 
         {:ok, token_contract_address_hash_to_remove} = Chain.string_to_address_hash("0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000")
 
@@ -402,6 +408,8 @@ defmodule Explorer.Chain.Search do
               )
             ),
           on: address.hash == address_name.address_hash,
+          left_join: smart_contract in SmartContract,
+          on: address.hash == smart_contract.address_hash,
           where: address.hash != ^token_contract_address_hash_to_remove,
           where: address.hash == ^address_hash,
           select: ^address_search_fields
@@ -501,8 +509,8 @@ defmodule Explorer.Chain.Search do
         )
 
       _ ->
-        case Integer.parse(term) do
-          {block_number, ""} ->
+        case ExplorerHelper.safe_parse_non_negative_integer(term) do
+          {:ok, block_number} ->
             from(block in Block,
               where: block.number == ^block_number,
               select: ^block_search_fields
@@ -645,10 +653,7 @@ defmodule Explorer.Chain.Search do
   end
 
   defp search_ens_name(search_query, options) do
-    trimmed_query = String.trim(search_query)
-
-    with true <- Regex.match?(~r/\w+\.\w+/, trimmed_query),
-         result when is_map(result) <- ens_domain_name_lookup(search_query) do
+    if result = search_ens_name_in_bens(search_query) do
       [
         result[:address_hash]
         |> search_address_query()
@@ -656,21 +661,42 @@ defmodule Explorer.Chain.Search do
         |> merge_address_search_result_with_ens_info(result)
       ]
     else
+      []
+    end
+  end
+
+  @doc """
+  Try to resolve ENS domain via BENS
+  """
+  @spec search_ens_name_in_bens(binary()) ::
+          nil | %{address_hash: binary(), expiry_date: any(), name: any(), names_count: non_neg_integer()}
+  def search_ens_name_in_bens(search_query) do
+    trimmed_query = String.trim(search_query)
+
+    with true <- Regex.match?(~r/\w+\.\w+/, trimmed_query),
+         %{address_hash: _address_hash} = result <- ens_domain_name_lookup(search_query) do
+      result
+    else
       _ ->
-        []
+        nil
     end
   end
 
   defp merge_address_search_result_with_ens_info([], ens_info) do
     search_fields()
     |> Map.put(:address_hash, ens_info[:address_hash])
-    |> Map.put(:type, "address")
+    |> Map.put(:type, "ens_domain")
     |> Map.put(:ens_info, ens_info)
     |> Map.put(:timestamp, nil)
+    |> Map.put(:priority, 2)
   end
 
   defp merge_address_search_result_with_ens_info([address], ens_info) do
-    Map.put(address |> compose_result_checksummed_address_hash(), :ens_info, ens_info)
+    address
+    |> compose_result_checksummed_address_hash()
+    |> Map.put(:type, "ens_domain")
+    |> Map.put(:ens_info, ens_info)
+    |> Map.put(:priority, 2)
   end
 
   defp search_fields do
@@ -690,6 +716,7 @@ defmodule Explorer.Chain.Search do
       token_type: nil,
       timestamp: dynamic([_, _], type(^nil, :utc_datetime_usec)),
       verified: nil,
+      certified: nil,
       exchange_rate: nil,
       total_supply: nil,
       circulating_market_cap: nil,

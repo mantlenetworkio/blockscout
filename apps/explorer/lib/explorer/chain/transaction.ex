@@ -19,7 +19,7 @@ defmodule Explorer.Chain.Transaction.Schema do
   alias Explorer.Chain.ZkSync.BatchTransaction, as: ZkSyncBatchTransaction
 
   @chain_type_fields (case Application.compile_env(:explorer, :chain_type) do
-                        "ethereum" ->
+                        :ethereum ->
                           # elem(quote do ... end, 2) doesn't work with a single has_one instruction
                           quote do
                             [
@@ -27,7 +27,7 @@ defmodule Explorer.Chain.Transaction.Schema do
                             ]
                           end
 
-                        "optimism" ->
+                        :optimism ->
                           elem(
                             quote do
                               field(:l1_fee, Wei)
@@ -40,7 +40,7 @@ defmodule Explorer.Chain.Transaction.Schema do
                             2
                           )
 
-                        "suave" ->
+                        :suave ->
                           elem(
                             quote do
                               belongs_to(
@@ -75,7 +75,7 @@ defmodule Explorer.Chain.Transaction.Schema do
                             2
                           )
 
-                        "polygon_zkevm" ->
+                        :polygon_zkevm ->
                           elem(
                             quote do
                               has_one(:zkevm_batch_transaction, ZkevmBatchTransaction,
@@ -98,7 +98,7 @@ defmodule Explorer.Chain.Transaction.Schema do
                             2
                           )
 
-                        "zksync" ->
+                        :zksync ->
                           elem(
                             quote do
                               has_one(:zksync_batch_transaction, ZkSyncBatchTransaction,
@@ -141,6 +141,7 @@ defmodule Explorer.Chain.Transaction.Schema do
         field(:status, Status)
         field(:v, :decimal)
         field(:value, Wei)
+        # TODO change to Data.t(), convert current hex-string values, prune all non-hex ones
         field(:revert_reason, :string)
         field(:max_priority_fee_per_gas, Wei)
         field(:max_fee_per_gas, Wei)
@@ -585,8 +586,8 @@ defmodule Explorer.Chain.Transaction do
 
   defp custom_optional_attrs do
     case Application.get_env(:explorer, :chain_type) do
-      "suave" -> @suave_optional_attrs
-      "optimism" -> @optimism_optional_attrs
+      :suave -> @suave_optional_attrs
+      :optimism -> @optimism_optional_attrs
       _ -> @empty_attrs
     end
   end
@@ -623,22 +624,52 @@ defmodule Explorer.Chain.Transaction do
     process_hex_revert_reason(hex, transaction, options)
   end
 
+  @default_error_abi [
+    %{
+      "inputs" => [
+        %{
+          "name" => "reason",
+          "type" => "string"
+        }
+      ],
+      "name" => "Error",
+      "type" => "error"
+    },
+    %{
+      "inputs" => [
+        %{
+          "name" => "errorCode",
+          "type" => "uint256"
+        }
+      ],
+      "name" => "Panic",
+      "type" => "error"
+    }
+  ]
+
   defp process_hex_revert_reason(hex_revert_reason, %__MODULE__{to_address: smart_contract, hash: hash}, options) do
-    case Integer.parse(hex_revert_reason, 16) do
-      {number, ""} ->
-        binary_revert_reason = :binary.encode_unsigned(number)
+    case Base.decode16(hex_revert_reason, case: :mixed) do
+      {:ok, binary_revert_reason} ->
+        case find_and_decode(@default_error_abi, binary_revert_reason, hash) do
+          {:ok, {selector, values}} ->
+            {:ok, mapping} = selector_mapping(selector, values, hash)
+            identifier = Base.encode16(selector.method_id, case: :lower)
+            text = function_call(selector.function, mapping)
+            {:ok, identifier, text, mapping}
 
-        {result, _, _} =
-          decoded_input_data(
-            %Transaction{
-              to_address: smart_contract,
-              hash: hash,
-              input: %Data{bytes: binary_revert_reason}
-            },
-            options
-          )
+          _ ->
+            {result, _, _} =
+              decoded_input_data(
+                %Transaction{
+                  to_address: smart_contract,
+                  hash: hash,
+                  input: %Data{bytes: binary_revert_reason}
+                },
+                options
+              )
 
-        result
+            result
+        end
 
       _ ->
         hex_revert_reason
@@ -1404,9 +1435,14 @@ defmodule Explorer.Chain.Transaction do
     from_block = Chain.from_block(options)
     to_block = Chain.to_block(options)
 
-    options
-    |> Keyword.get(:paging_options, Chain.default_paging_options())
-    |> fetch_transactions(from_block, to_block, !only_mined?)
+    paging_options =
+      options
+      |> Keyword.get(:paging_options, Chain.default_paging_options())
+
+    case paging_options do
+      %PagingOptions{key: {0, 0}, is_index_in_asc_order: false} -> []
+      _ -> fetch_transactions(paging_options, from_block, to_block, !only_mined?)
+    end
   end
 
   def address_to_transactions_tasks_query(options, _only_mined?, false) do
@@ -1572,12 +1608,32 @@ defmodule Explorer.Chain.Transaction do
   def page_transaction(query, %PagingOptions{is_pending_tx: true} = options),
     do: page_pending_transaction(query, options)
 
+  def page_transaction(query, %PagingOptions{key: {0, index}, is_index_in_asc_order: true}) do
+    where(
+      query,
+      [transaction],
+      transaction.block_number == 0 and transaction.index > ^index
+    )
+  end
+
   def page_transaction(query, %PagingOptions{key: {block_number, index}, is_index_in_asc_order: true}) do
     where(
       query,
       [transaction],
       transaction.block_number < ^block_number or
         (transaction.block_number == ^block_number and transaction.index > ^index)
+    )
+  end
+
+  def page_transaction(query, %PagingOptions{key: {0, 0}}) do
+    query
+  end
+
+  def page_transaction(query, %PagingOptions{key: {block_number, 0}}) do
+    where(
+      query,
+      [transaction],
+      transaction.block_number < ^block_number
     )
   end
 
@@ -1588,6 +1644,10 @@ defmodule Explorer.Chain.Transaction do
       transaction.block_number < ^block_number or
         (transaction.block_number == ^block_number and transaction.index < ^index)
     )
+  end
+
+  def page_transaction(query, %PagingOptions{key: {0}}) do
+    query
   end
 
   def page_transaction(query, %PagingOptions{key: {index}}) do
@@ -1703,14 +1763,19 @@ defmodule Explorer.Chain.Transaction do
   end
 
   def fee(%Transaction{gas_price: nil, gas_used: gas_used} = transaction, unit) do
-    gas_price = effective_gas_price(transaction)
+    if Application.get_env(:explorer, :chain_type) == :optimism do
+      {:actual, nil}
+    else
+      gas_price = effective_gas_price(transaction)
 
     {:actual,
      gas_price &&
        gas_price
        |> Wei.to(unit)
        |> Decimal.mult(gas_used)}
+    end
   end
+
 
   def fee(%Transaction{gas_price: gas_price, gas_used: gas_used}, unit) do
     fee =
@@ -1755,5 +1820,23 @@ defmodule Explorer.Chain.Transaction do
         |> Wei.to(:wei)
         |> Decimal.min(max_fee_per_gas |> Wei.sub(base_fee_per_gas) |> Wei.to(:wei))
         |> Wei.from(:wei)
+  end
+
+  @doc """
+  Dynamically adds to/from for `transactions` query based on whether the target address EOA or smart-contract
+  todo: pay attention to [EIP-5003](https://eips.ethereum.org/EIPS/eip-5003): if it will be included, this logic should be rolled back.
+  """
+  @spec where_transactions_to_from(Hash.Address.t()) :: any()
+  def where_transactions_to_from(address_hash) do
+    with {:ok, address} <- Chain.hash_to_address(address_hash),
+         true <- Chain.contract?(address) do
+      dynamic([transaction], transaction.to_address_hash == ^address_hash)
+    else
+      _ ->
+        dynamic(
+          [transaction],
+          transaction.from_address_hash == ^address_hash or transaction.to_address_hash == ^address_hash
+        )
+    end
   end
 end

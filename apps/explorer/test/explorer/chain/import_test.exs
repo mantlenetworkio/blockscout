@@ -165,6 +165,7 @@ defmodule Explorer.Chain.ImportTest do
             to_address_hash: "0x515c09c5bba1ed566b02a5b0599ec5d5d0aee73d",
             token_contract_address_hash: "0x8bf38d4764929064f2d4d3a56520a76ab3df415b",
             token_type: "ERC-20",
+            token: %{type: "ERC-20"},
             transaction_hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5"
           }
         ],
@@ -370,7 +371,7 @@ defmodule Explorer.Chain.ImportTest do
               }} = Import.all(@import_data)
     end
 
-    test "block consensus removed if there was an exception in further steps" do
+    test "refetch_needed is set if there was an exception in further steps" do
       not_existing_block_hash = "0xf6b4b8c88df3ebd252ec476328334dc026cf66606a84fb769b3d3cbccc8471db"
 
       incorrect_data =
@@ -380,7 +381,7 @@ defmodule Explorer.Chain.ImportTest do
 
       assert_raise(Postgrex.Error, fn -> Import.all(incorrect_data) end)
       assert [] = Repo.all(Transaction)
-      assert %{consensus: false} = Repo.one(Block)
+      assert %{consensus: true, refetch_needed: true} = Repo.one(Block)
     end
 
     test "inserts a token_balance" do

@@ -10,7 +10,7 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
   alias Ecto.{Changeset, Multi, Repo}
   alias Explorer.Chain.Address.CurrentTokenBalance
   alias Explorer.Chain.{Hash, Import}
-  alias Explorer.Chain.Import.Runner.Tokens
+  alias Explorer.Chain.Import.Runner.{Address.TokenBalances, Tokens}
   alias Explorer.Prometheus.Instrumenter
 
   @behaviour Import.Runner
@@ -108,6 +108,14 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
       |> Map.put(:timestamps, timestamps)
 
     multi
+    |> Multi.run(:filter_placeholders, fn _, _ ->
+      Instrumenter.block_import_stage_runner(
+        fn -> TokenBalances.filter_placeholders(changes_list) end,
+        :block_following,
+        :current_token_balances,
+        :filter_placeholders
+      )
+    end)
     |> Multi.run(:address_current_token_balances, fn repo, _ ->
       Instrumenter.block_import_stage_runner(
         fn -> insert(repo, changes_list, insert_options) end,
@@ -241,7 +249,9 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
       |> Enum.sort_by(&{&1.token_contract_address_hash, &1.token_id, &1.address_hash})
 
     {:ok, inserted_changes_list} =
-      if Enum.count(ordered_changes_list) > 0 do
+      if Enum.empty?(ordered_changes_list) do
+        {:ok, []}
+      else
         Import.insert_changes_list(
           repo,
           ordered_changes_list,
@@ -252,8 +262,6 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
           timeout: timeout,
           timestamps: timestamps
         )
-      else
-        {:ok, []}
       end
 
     inserted_changes_list

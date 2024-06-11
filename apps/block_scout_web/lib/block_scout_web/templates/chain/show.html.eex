@@ -119,6 +119,7 @@
                   </div>
                 </div>
                 <div class="dashboard-banner-network-stats-item dashboard-banner-network-stats-item-4">
+
                   <span class="dashboard-banner-network-stats-label">
                     <%= gettext "Wallet addresses" %>
                   </span>

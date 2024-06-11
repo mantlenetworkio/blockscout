@@ -8,7 +8,7 @@ defmodule BlockScoutWeb.AddressWriteProxyView do
   alias Explorer.{Chain, Market}
   alias Explorer.Chain.Address
   alias Explorer.ExchangeRates.Token
-  alias Indexer.Fetcher.CoinBalanceOnDemand
+  alias Indexer.Fetcher.OnDemand.CoinBalance, as: CoinBalanceOnDemand
 
   def initial_data(conn, address_hash_string) do
     address_options = [

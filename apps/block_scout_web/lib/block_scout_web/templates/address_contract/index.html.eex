@@ -1,3 +1,4 @@
+
 <section class="container">
   <% is_proxy = BlockScoutWeb.AddressView.smart_contract_is_proxy?(@address) %>
 
@@ -45,6 +46,7 @@
                   </li>
               <% end %>
           </ul>
+
 
         </div>
 

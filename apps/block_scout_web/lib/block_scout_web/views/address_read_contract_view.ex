@@ -8,9 +8,8 @@ defmodule BlockScoutWeb.AddressReadContractView do
   alias BlockScoutWeb.AddressView
   alias Explorer.{Chain, Market}
   alias Explorer.Chain.Address
-  alias Explorer.ExchangeRates.Token
   alias Explorer.SmartContract.Reader
-  alias Indexer.Fetcher.CoinBalanceOnDemand
+  alias Indexer.Fetcher.OnDemand.CoinBalance, as: CoinBalanceOnDemand
 
   def initial_data(conn, address_hash_string) do
     address_options = [

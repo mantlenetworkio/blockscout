@@ -5,7 +5,7 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
 
   alias ABI.{TypeDecoder, TypeEncoder}
   alias BlockScoutWeb.Models.UserFromAuth
-  alias Explorer.{Chain, Repo}
+  alias Explorer.{Chain, Repo, TestHelper}
   alias Explorer.Chain.Address.Counters
 
   alias Explorer.Chain.{
@@ -24,6 +24,7 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
 
   alias Explorer.Account.WatchlistAddress
   alias Explorer.Chain.Address.CurrentTokenBalance
+  alias Plug.Conn
 
   import Explorer.Chain, only: [hash_to_lower_case_string: 1]
   import Mox
@@ -71,15 +72,11 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
         "token" => nil,
         "coin_balance" => nil,
         "exchange_rate" => nil,
+        # todo: added for backward compatibility, remove when frontend unbound from these props
         "implementation_name" => nil,
         "implementation_address" => nil,
+        "implementations" => [],
         "block_number_balance_updated_at" => nil,
-        "has_custom_methods_read" => false,
-        "has_custom_methods_write" => false,
-        "has_methods_read" => false,
-        "has_methods_write" => false,
-        "has_methods_read_proxy" => false,
-        "has_methods_write_proxy" => false,
         "has_decompiled_code" => false,
         "has_validated_blocks" => false,
         "has_logs" => false,
@@ -87,7 +84,8 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
         "has_token_transfers" => false,
         "watchlist_address_id" => nil,
         "has_beacon_chain_withdrawals" => false,
-        "ens_domain_name" => nil
+        "ens_domain_name" => nil,
+        "metadata" => nil
       }
 
       request = get(conn, "/api/v2/addresses/#{Address.checksum(address.hash)}")
@@ -120,7 +118,9 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
       tx_hash = to_string(tx.hash)
       address_hash = Address.checksum(smart_contract.address_hash)
 
-      get_eip1967_implementation_non_zero_address()
+      implementation_address = insert(:address)
+      implementation_address_hash_string = to_string(Address.checksum(implementation_address.hash))
+      TestHelper.get_eip1967_implementation_non_zero_address(implementation_address_hash_string)
 
       request = get(conn, "/api/v2/addresses/#{Address.checksum(smart_contract.address_hash)}")
 
@@ -134,7 +134,8 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
                "watchlist_names" => [],
                "creator_address_hash" => ^from,
                "creation_tx_hash" => ^tx_hash,
-               "implementation_address" => "0x0000000000000000000000000000000000000001"
+               "implementation_address" => ^implementation_address_hash_string,
+               "implementations" => [%{"address" => ^implementation_address_hash_string, "name" => nil}]
              } = json_response(request, 200)
     end
 
@@ -1683,11 +1684,14 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
 
       response = json_response(request, 200)
 
-      assert [
-               %{"date" => _, "value" => "2000"},
-               %{"date" => _, "value" => "1000"},
-               %{"date" => _, "value" => "1000"}
-             ] = response
+      assert %{
+               "days" => 10,
+               "items" => [
+                 %{"date" => _, "value" => "2000"},
+                 %{"date" => _, "value" => "1000"},
+                 %{"date" => _, "value" => "1000"}
+               ]
+             } = response
     end
   end
 
@@ -1757,6 +1761,84 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
       request_2nd_page = get(conn, "/api/v2/addresses/#{address.hash}/logs", response["next_page_params"])
       assert response_2nd_page = json_response(request_2nd_page, 200)
       check_paginated_response(response, response_2nd_page, logs)
+    end
+
+    # https://github.com/blockscout/blockscout/issues/9926
+    test "regression test for 9926", %{conn: conn} do
+      address = insert(:address, hash: "0x036cec1a199234fC02f72d29e596a09440825f1C")
+
+      tx =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      log =
+        insert(:log,
+          transaction: tx,
+          index: 1,
+          block: tx.block,
+          block_number: tx.block_number,
+          address: address
+        )
+
+      bypass = Bypass.open()
+
+      old_chain_id = Application.get_env(:block_scout_web, :chain_id)
+      chain_id = 1
+      Application.put_env(:block_scout_web, :chain_id, chain_id)
+
+      old_env_bens = Application.get_env(:explorer, Explorer.MicroserviceInterfaces.BENS)
+
+      Application.put_env(:explorer, Explorer.MicroserviceInterfaces.BENS,
+        service_url: "http://localhost:#{bypass.port}",
+        enabled: true
+      )
+
+      old_env_metadata = Application.get_env(:explorer, Explorer.MicroserviceInterfaces.Metadata)
+
+      Application.put_env(:explorer, Explorer.MicroserviceInterfaces.Metadata,
+        service_url: "http://localhost:#{bypass.port}",
+        enabled: true
+      )
+
+      Bypass.expect_once(bypass, "POST", "api/v1/#{chain_id}/addresses:batch_resolve_names", fn conn ->
+        Conn.resp(
+          conn,
+          200,
+          Jason.encode!(%{
+            "names" => %{
+              to_string(address) => "test.eth"
+            }
+          })
+        )
+      end)
+
+      Bypass.expect_once(bypass, "GET", "api/v1/metadata", fn conn ->
+        Conn.resp(
+          conn,
+          200,
+          Jason.encode!(%{
+            "addresses" => %{
+              to_string(address) => %{"tags" => [%{"slug" => "tag", "meta" => "{\"styles\":\"danger_high\"}"}]}
+            }
+          })
+        )
+      end)
+
+      request = get(conn, "/api/v2/addresses/#{address.hash}/logs")
+
+      assert response = json_response(request, 200)
+      assert Enum.count(response["items"]) == 1
+      assert response["next_page_params"] == nil
+      compare_item(log, Enum.at(response["items"], 0))
+      log = Enum.at(response["items"], 0)
+      assert log["address"]["ens_domain_name"] == "test.eth"
+      assert log["address"]["metadata"] == %{"tags" => [%{"slug" => "tag", "meta" => %{"styles" => "danger_high"}}]}
+
+      Application.put_env(:block_scout_web, :chain_id, old_chain_id)
+      Application.put_env(:explorer, Explorer.MicroserviceInterfaces.BENS, old_env_bens)
+      Application.put_env(:explorer, Explorer.MicroserviceInterfaces.Metadata, old_env_metadata)
+      Bypass.down(bypass)
     end
 
     test "logs can be filtered by topic", %{conn: conn} do
@@ -1885,24 +1967,24 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
     end
   end
 
-  describe "checks TokenBalanceOnDemand" do
+  describe "checks Indexer.Fetcher.OnDemand.TokenBalance" do
     setup do
       Supervisor.terminate_child(Explorer.Supervisor, Explorer.Chain.Cache.BlockNumber.child_id())
       Supervisor.restart_child(Explorer.Supervisor, Explorer.Chain.Cache.BlockNumber.child_id())
-      old_env = Application.get_env(:indexer, Indexer.Fetcher.TokenBalanceOnDemand)
+      old_env = Application.get_env(:indexer, Indexer.Fetcher.OnDemand.TokenBalance)
 
       Application.put_env(
         :indexer,
-        Indexer.Fetcher.TokenBalanceOnDemand,
+        Indexer.Fetcher.OnDemand.TokenBalance,
         Keyword.put(old_env, :fallback_threshold_in_blocks, 0)
       )
 
       on_exit(fn ->
-        Application.put_env(:indexer, Indexer.Fetcher.TokenBalanceOnDemand, old_env)
+        Application.put_env(:indexer, Indexer.Fetcher.OnDemand.TokenBalance, old_env)
       end)
     end
 
-    test "Indexer.Fetcher.TokenBalanceOnDemand broadcasts only updated balances", %{conn: conn} do
+    test "Indexer.Fetcher.OnDemand.TokenBalance broadcasts only updated balances", %{conn: conn} do
       address = insert(:address)
 
       ctbs_erc_20 =
@@ -3225,43 +3307,4 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
   end
 
   def check_total(_, _, _), do: true
-
-  def get_eip1967_implementation_non_zero_address do
-    expect(EthereumJSONRPC.Mox, :json_rpc, fn %{
-                                                id: 0,
-                                                method: "eth_getStorageAt",
-                                                params: [
-                                                  _,
-                                                  "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
-                                                  "latest"
-                                                ]
-                                              },
-                                              _options ->
-      {:ok, "0x0000000000000000000000000000000000000000000000000000000000000000"}
-    end)
-    |> expect(:json_rpc, fn %{
-                              id: 0,
-                              method: "eth_getStorageAt",
-                              params: [
-                                _,
-                                "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50",
-                                "latest"
-                              ]
-                            },
-                            _options ->
-      {:ok, "0x0000000000000000000000000000000000000000000000000000000000000000"}
-    end)
-    |> expect(:json_rpc, fn %{
-                              id: 0,
-                              method: "eth_getStorageAt",
-                              params: [
-                                _,
-                                "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3",
-                                "latest"
-                              ]
-                            },
-                            _options ->
-      {:ok, "0x0000000000000000000000000000000000000000000000000000000000000001"}
-    end)
-  end
 end

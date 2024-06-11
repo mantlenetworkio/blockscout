@@ -44,7 +44,7 @@ See the [project documentation](https://docs.blockscout.com/) for instructions:
 
 ## Acknowledgements
 
-We would like to thank the [EthPrize foundation](http://ethprize.io/) for their funding support.
+We would like to thank the EthPrize foundation for their funding support.
 
 ## Contributing
 

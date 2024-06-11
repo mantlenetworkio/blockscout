@@ -136,6 +136,8 @@ config :explorer, Explorer.Integrations.EctoLogger, query_time_ms_threshold: :ti
 
 config :explorer, Explorer.Tags.AddressTag.Cataloger, enabled: true
 
+config :explorer, Explorer.SmartContract.CertifiedSmartContractCataloger, enabled: true
+
 config :explorer, Explorer.Repo, migration_timestamps: [type: :utc_datetime_usec]
 
 config :explorer, Explorer.Tracer,
@@ -149,6 +151,8 @@ config :explorer,
 config :explorer, :http_adapter, HTTPoison
 
 config :explorer, Explorer.Chain.BridgedToken, enabled: ConfigHelper.parse_bool_env_var("BRIDGED_TOKENS_ENABLED")
+
+config :explorer, Explorer.Chain.Mud, enabled: ConfigHelper.parse_bool_env_var("MUD_INDEXER_ENABLED")
 
 config :logger, :explorer,
   # keep synced with `config/config.exs`

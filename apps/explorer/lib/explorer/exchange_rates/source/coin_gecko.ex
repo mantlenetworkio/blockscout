@@ -170,7 +170,13 @@ defmodule Explorer.ExchangeRates.Source.CoinGecko do
   @impl Source
   def headers do
     if api_key() do
-      [{"X-Cg-Pro-Api-Key", "#{api_key()}"}]
+      case base_pro_url() do
+        "https://api.coingecko.com" <> _ ->
+          [{"X-Cg-Demo-Api-Key", "#{api_key()}"}]
+
+        _ ->
+          [{"X-Cg-Pro-Api-Key", "#{api_key()}"}]
+      end
     else
       []
     end
@@ -257,7 +263,7 @@ defmodule Explorer.ExchangeRates.Source.CoinGecko do
   defp get_coin_image(image_data) do
     image_url_raw =
       if image_data do
-        image_data["thumb"] || image_data["small"]
+        image_data["small"] || image_data["thumb"]
       else
         nil
       end

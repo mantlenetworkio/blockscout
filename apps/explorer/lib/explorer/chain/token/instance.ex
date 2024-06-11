@@ -16,6 +16,8 @@ defmodule Explorer.Chain.Token.Instance do
   * `token_contract_address_hash` - Address hash foreign key
   * `metadata` - Token instance metadata
   * `error` - error fetching token instance
+  * `refetch_after` - when to refetch the token instance
+  * `retries_count` - number of times the token instance has been retried
   """
   @primary_key false
   typed_schema "token_instances" do
@@ -26,6 +28,8 @@ defmodule Explorer.Chain.Token.Instance do
     field(:owner_updated_at_log_index, :integer)
     field(:current_token_balance, :any, virtual: true)
     field(:is_unique, :boolean, virtual: true)
+    field(:refetch_after, :utc_datetime_usec)
+    field(:retries_count, :integer)
 
     belongs_to(:owner, Address, foreign_key: :owner_address_hash, references: :hash, type: Hash.Address)
 
@@ -51,7 +55,9 @@ defmodule Explorer.Chain.Token.Instance do
       :error,
       :owner_address_hash,
       :owner_updated_at_block,
-      :owner_updated_at_log_index
+      :owner_updated_at_log_index,
+      :refetch_after,
+      :retries_count
     ])
     |> validate_required([:token_id, :token_contract_address_hash])
     |> foreign_key_constraint(:token_contract_address_hash)
@@ -147,15 +153,22 @@ defmodule Explorer.Chain.Token.Instance do
   @spec erc_721_token_instances_by_owner_address_hash(binary() | Hash.Address.t(), keyword) :: [Instance.t()]
   def erc_721_token_instances_by_owner_address_hash(address_hash, options \\ []) do
     paging_options = Keyword.get(options, :paging_options, Chain.default_paging_options())
-    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
 
-    __MODULE__
-    |> where([ti], ti.owner_address_hash == ^address_hash)
-    |> order_by([ti], asc: ti.token_contract_address_hash, desc: ti.token_id)
-    |> limit(^paging_options.page_size)
-    |> page_erc_721_token_instances(paging_options)
-    |> Chain.join_associations(necessity_by_association)
-    |> Chain.select_repo(options).all()
+    case paging_options do
+      %PagingOptions{key: {0}, asc_order: false} ->
+        []
+
+      _ ->
+        necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+
+        __MODULE__
+        |> where([ti], ti.owner_address_hash == ^address_hash)
+        |> order_by([ti], asc: ti.token_contract_address_hash, desc: ti.token_id)
+        |> limit(^paging_options.page_size)
+        |> page_erc_721_token_instances(paging_options)
+        |> Chain.join_associations(necessity_by_association)
+        |> Chain.select_repo(options).all()
+    end
   end
 
   defp page_erc_721_token_instances(query, %PagingOptions{key: {contract_address_hash, token_id, "ERC-721"}}) do
@@ -167,22 +180,29 @@ defmodule Explorer.Chain.Token.Instance do
   @spec erc_1155_token_instances_by_address_hash(binary() | Hash.Address.t(), keyword) :: [Instance.t()]
   def erc_1155_token_instances_by_address_hash(address_hash, options \\ []) do
     paging_options = Keyword.get(options, :paging_options, Chain.default_paging_options())
-    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
 
-    __MODULE__
-    |> join(:inner, [ti], ctb in CurrentTokenBalance,
-      as: :ctb,
-      on:
-        ctb.token_contract_address_hash == ti.token_contract_address_hash and ctb.token_id == ti.token_id and
-          ctb.address_hash == ^address_hash
-    )
-    |> where([ctb: ctb], ctb.value > 0 and ctb.token_type == "ERC-1155")
-    |> order_by([ti], asc: ti.token_contract_address_hash, desc: ti.token_id)
-    |> limit(^paging_options.page_size)
-    |> page_erc_1155_token_instances(paging_options)
-    |> select_merge([ctb: ctb], %{current_token_balance: ctb})
-    |> Chain.join_associations(necessity_by_association)
-    |> Chain.select_repo(options).all()
+    case paging_options do
+      %PagingOptions{key: {0}, asc_order: false} ->
+        []
+
+      _ ->
+        necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+
+        __MODULE__
+        |> join(:inner, [ti], ctb in CurrentTokenBalance,
+          as: :ctb,
+          on:
+            ctb.token_contract_address_hash == ti.token_contract_address_hash and ctb.token_id == ti.token_id and
+              ctb.address_hash == ^address_hash
+        )
+        |> where([ctb: ctb], ctb.value > 0 and ctb.token_type == "ERC-1155")
+        |> order_by([ti], asc: ti.token_contract_address_hash, desc: ti.token_id)
+        |> limit(^paging_options.page_size)
+        |> page_erc_1155_token_instances(paging_options)
+        |> select_merge([ctb: ctb], %{current_token_balance: ctb})
+        |> Chain.join_associations(necessity_by_association)
+        |> Chain.select_repo(options).all()
+    end
   end
 
   defp page_erc_1155_token_instances(query, %PagingOptions{key: {contract_address_hash, token_id, "ERC-1155"}}) do
@@ -194,22 +214,29 @@ defmodule Explorer.Chain.Token.Instance do
   @spec erc_404_token_instances_by_address_hash(binary() | Hash.Address.t(), keyword) :: [Instance.t()]
   def erc_404_token_instances_by_address_hash(address_hash, options \\ []) do
     paging_options = Keyword.get(options, :paging_options, Chain.default_paging_options())
-    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
 
-    __MODULE__
-    |> join(:inner, [ti], ctb in CurrentTokenBalance,
-      as: :ctb,
-      on:
-        ctb.token_contract_address_hash == ti.token_contract_address_hash and ctb.token_id == ti.token_id and
-          ctb.address_hash == ^address_hash
-    )
-    |> where([ctb: ctb], ctb.value > 0 and ctb.token_type == "ERC-404")
-    |> order_by([ti], asc: ti.token_contract_address_hash, desc: ti.token_id)
-    |> limit(^paging_options.page_size)
-    |> page_erc_404_token_instances(paging_options)
-    |> select_merge([ctb: ctb], %{current_token_balance: ctb})
-    |> Chain.join_associations(necessity_by_association)
-    |> Chain.select_repo(options).all()
+    case paging_options do
+      %PagingOptions{key: {0}, asc_order: false} ->
+        []
+
+      _ ->
+        necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+
+        __MODULE__
+        |> join(:inner, [ti], ctb in CurrentTokenBalance,
+          as: :ctb,
+          on:
+            ctb.token_contract_address_hash == ti.token_contract_address_hash and ctb.token_id == ti.token_id and
+              ctb.address_hash == ^address_hash
+        )
+        |> where([ctb: ctb], ctb.value > 0 and ctb.token_type == "ERC-404")
+        |> order_by([ti], asc: ti.token_contract_address_hash, desc: ti.token_id)
+        |> limit(^paging_options.page_size)
+        |> page_erc_404_token_instances(paging_options)
+        |> select_merge([ctb: ctb], %{current_token_balance: ctb})
+        |> Chain.join_associations(necessity_by_association)
+        |> Chain.select_repo(options).all()
+    end
   end
 
   defp page_erc_404_token_instances(query, %PagingOptions{key: {contract_address_hash, token_id, "ERC-404"}}) do
@@ -353,7 +380,7 @@ defmodule Explorer.Chain.Token.Instance do
     paging_options = Keyword.get(options, :paging_options, Chain.default_paging_options())
 
     CurrentTokenBalance
-    |> where([ctb], ctb.address_hash == ^address_hash and ctb.value > 0 and ctb.token_type == "ERC-404")
+    |> where([ctb], ctb.address_hash == ^address_hash and not is_nil(ctb.token_id) and ctb.token_type == "ERC-404")
     |> group_by([ctb], ctb.token_contract_address_hash)
     |> order_by([ctb], asc: ctb.token_contract_address_hash)
     |> select([ctb], %{
@@ -447,33 +474,45 @@ defmodule Explorer.Chain.Token.Instance do
   def token_instances_by_holder_address_hash(%Token{type: "ERC-721"} = token, holder_address_hash, options) do
     paging_options = Keyword.get(options, :paging_options, Chain.default_paging_options())
 
-    token.contract_address_hash
-    |> address_to_unique_token_instances()
-    |> where([ti], ti.owner_address_hash == ^holder_address_hash)
-    |> limit(^paging_options.page_size)
-    |> page_token_instance(paging_options)
-    |> Chain.select_repo(options).all()
-    |> Enum.map(&put_is_unique(&1, token, options))
+    case paging_options do
+      %PagingOptions{key: {0}, asc_order: false} ->
+        []
+
+      _ ->
+        token.contract_address_hash
+        |> address_to_unique_token_instances()
+        |> where([ti], ti.owner_address_hash == ^holder_address_hash)
+        |> limit(^paging_options.page_size)
+        |> page_token_instance(paging_options)
+        |> Chain.select_repo(options).all()
+        |> Enum.map(&put_is_unique(&1, token, options))
+    end
   end
 
   def token_instances_by_holder_address_hash(%Token{} = token, holder_address_hash, options) do
     paging_options = Keyword.get(options, :paging_options, Chain.default_paging_options())
 
-    __MODULE__
-    |> where([ti], ti.token_contract_address_hash == ^token.contract_address_hash)
-    |> join(:inner, [ti], ctb in CurrentTokenBalance,
-      as: :ctb,
-      on:
-        ctb.token_contract_address_hash == ti.token_contract_address_hash and ctb.token_id == ti.token_id and
-          ctb.address_hash == ^holder_address_hash
-    )
-    |> where([ctb: ctb], ctb.value > 0)
-    |> order_by([ti], desc: ti.token_id)
-    |> limit(^paging_options.page_size)
-    |> page_token_instance(paging_options)
-    |> select_merge([ctb: ctb], %{current_token_balance: ctb})
-    |> Chain.select_repo(options).all()
-    |> Enum.map(&put_is_unique(&1, token, options))
+    case paging_options do
+      %PagingOptions{key: {0}, asc_order: false} ->
+        []
+
+      _ ->
+        __MODULE__
+        |> where([ti], ti.token_contract_address_hash == ^token.contract_address_hash)
+        |> join(:inner, [ti], ctb in CurrentTokenBalance,
+          as: :ctb,
+          on:
+            ctb.token_contract_address_hash == ti.token_contract_address_hash and ctb.token_id == ti.token_id and
+              ctb.address_hash == ^holder_address_hash
+        )
+        |> where([ctb: ctb], ctb.value > 0)
+        |> order_by([ti], desc: ti.token_id)
+        |> limit(^paging_options.page_size)
+        |> page_token_instance(paging_options)
+        |> select_merge([ctb: ctb], %{current_token_balance: ctb})
+        |> Chain.select_repo(options).all()
+        |> Enum.map(&put_is_unique(&1, token, options))
+    end
   end
 
   @doc """
