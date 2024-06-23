@@ -10,6 +10,7 @@ defmodule BlockScoutWeb.UserSocket do
   # Prevent socket push temporary
   channel("transactions:*", BlockScoutWeb.TransactionChannel)
   channel("tokens:*", BlockScoutWeb.TokenChannel)
+  channel("token_instances:*", BlockScoutWeb.TokenInstanceChannel)
 
   channel("mantle_deposits:*", BlockScoutWeb.MantleDepositChannel)
 

@@ -26,6 +26,7 @@ defmodule Explorer.Chain.Address do
   }
 
   alias Explorer.Chain.Cache.{Accounts, NetVersion}
+  alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
 
   @optional_attrs ~w(contract_code fetched_coin_balance fetched_coin_balance_block_number nonce decompiled verified gas_used transactions_count token_transfers_count)a
   @required_attrs ~w(hash)a
@@ -96,6 +97,7 @@ defmodule Explorer.Chain.Address do
 
     has_one(:smart_contract, SmartContract, references: :hash)
     has_one(:token, Token, foreign_key: :contract_address_hash, references: :hash)
+    has_one(:proxy_implementations, Implementation, foreign_key: :proxy_address_hash, references: :hash)
 
     has_one(
       :contracts_creation_internal_transaction,
@@ -138,6 +140,17 @@ defmodule Explorer.Chain.Address do
     changeset
     |> validate_required(@required_attrs)
     |> unique_constraint(:hash)
+  end
+
+  @spec get(Hash.Address.t(), [Chain.necessity_by_association_option() | Chain.api?()]) :: t() | nil
+  def get(hash, options) do
+    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+
+    query = from(address in Address, where: address.hash == ^hash)
+
+    query
+    |> Chain.join_associations(necessity_by_association)
+    |> Chain.select_repo(options).one()
   end
 
   def checksum(address_or_hash, iodata? \\ false)
@@ -359,7 +372,7 @@ defmodule Explorer.Chain.Address do
           from(a in Address,
             where: a.fetched_coin_balance > ^0,
             order_by: [desc: a.fetched_coin_balance, asc: a.hash],
-            preload: [:names, :smart_contract],
+            preload: [:names, :smart_contract, :proxy_implementations],
             select: {a, a.transactions_count}
           )
 

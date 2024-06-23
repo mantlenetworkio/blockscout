@@ -13,6 +13,50 @@ defmodule Explorer.Prometheus.Instrumenter do
     help: "Block import stage, runner and step in runner processing time"
   ]
 
+  @gauge [
+    name: :weekly_success_transactions_number,
+    help: "Number of successful transactions in the last 7 days",
+    registry: :public
+  ]
+
+  @gauge [
+    name: :weekly_deployed_smart_contracts_number,
+    help: "Number of deployed smart-contracts in the last 7 days",
+    registry: :public
+  ]
+
+  @gauge [
+    name: :weekly_verified_smart_contracts_number,
+    help: "Number of verified smart-contracts in the last 7 days",
+    registry: :public
+  ]
+
+  @gauge [
+    name: :weekly_new_addresses_number,
+    help: "Number of new wallet addresses in the last 7 days",
+    registry: :public
+  ]
+
+  @gauge [
+    name: :weekly_new_tokens_number,
+    help: "Number of new tokens detected in the last 7 days",
+    registry: :public
+  ]
+
+  @gauge [
+    name: :weekly_new_token_transfers_number,
+    help: "Number of new token transfers detected in the last 7 days",
+    registry: :public
+  ]
+
+  # todo; this metric causes increasing of AccessShareLocks
+  # which increases DB loading. Disabling this metric for now.
+  # @gauge [
+  #   name: :weekly_active_addresses_number,
+  #   help: "Number of active EOA addresses (participated in transactions in to/from) in the last 7 days",
+  #   registry: :public
+  # ]
+
   def block_import_stage_runner(function, stage, runner, step) do
     {time, result} = :timer.tc(function)
 
@@ -20,4 +64,34 @@ defmodule Explorer.Prometheus.Instrumenter do
 
     result
   end
+
+  def weekly_success_transactions_number(number) do
+    Gauge.set([name: :weekly_success_transactions_number, registry: :public], number)
+  end
+
+  def weekly_deployed_smart_contracts_number(number) do
+    Gauge.set([name: :weekly_deployed_smart_contracts_number, registry: :public], number)
+  end
+
+  def weekly_verified_smart_contracts_number(number) do
+    Gauge.set([name: :weekly_verified_smart_contracts_number, registry: :public], number)
+  end
+
+  def weekly_new_addresses_number(number) do
+    Gauge.set([name: :weekly_new_addresses_number, registry: :public], number)
+  end
+
+  def weekly_new_tokens_number(number) do
+    Gauge.set([name: :weekly_new_tokens_number, registry: :public], number)
+  end
+
+  def weekly_new_token_transfers_number(number) do
+    Gauge.set([name: :weekly_new_token_transfers_number, registry: :public], number)
+  end
+
+  # todo; this metric causes increasing of AccessShareLocks
+  # which increases DB loading. Disabling this metric for now.
+  # def weekly_active_addresses_number(number) do
+  #   Gauge.set([name: :weekly_active_addresses_number, registry: :public], number)
+  # end
 end
