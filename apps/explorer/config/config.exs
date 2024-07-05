@@ -124,8 +124,6 @@ config :explorer, Explorer.Migrator.SanitizeIncorrectNFTTokenTransfers, enabled:
 config :explorer, Explorer.Migrator.TokenTransferTokenType, enabled: true
 config :explorer, Explorer.Migrator.SanitizeIncorrectWETHTokenTransfers, enabled: true
 
-config :explorer, Explorer.TokenInstanceOwnerAddressMigration.Supervisor, enabled: true
-
 config :explorer, Explorer.Chain.Fetcher.CheckBytecodeMatchingOnDemand, enabled: true
 
 config :explorer, Explorer.Chain.Fetcher.FetchValidatorInfoOnDemand, enabled: true

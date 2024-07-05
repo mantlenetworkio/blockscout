@@ -46,8 +46,6 @@ config :explorer, Explorer.Migrator.SanitizeIncorrectNFTTokenTransfers, enabled:
 config :explorer, Explorer.Migrator.TokenTransferTokenType, enabled: false
 config :explorer, Explorer.Migrator.SanitizeIncorrectWETHTokenTransfers, enabled: false
 
-config :explorer, Explorer.TokenInstanceOwnerAddressMigration.Supervisor, enabled: false
-
 config :explorer,
   realtime_events_sender: Explorer.Chain.Events.SimpleSender
 

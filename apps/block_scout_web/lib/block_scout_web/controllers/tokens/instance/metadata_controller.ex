@@ -4,10 +4,6 @@ defmodule BlockScoutWeb.Tokens.Instance.MetadataController do
   alias BlockScoutWeb.Tokens.Instance.Helper
   alias Explorer.Chain
 
-  alias Indexer.Fetcher.TokenInstance
-
-  require Logger
-
   def index(conn, %{"token_id" => token_address_hash, "instance_id" => token_id_string}) do
     options = [necessity_by_association: %{[contract_address: :smart_contract] => :optional}]
 

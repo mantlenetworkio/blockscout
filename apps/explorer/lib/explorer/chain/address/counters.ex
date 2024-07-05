@@ -493,7 +493,7 @@ defmodule Explorer.Chain.Address.Counters do
             Map.put(acc, type, counter)
 
           {:exit, reason} ->
-            Logger.warn(fn ->
+            Logger.warning(fn ->
               [
                 "Query fetching address counters for #{address_hash} terminated: #{inspect(reason)}"
               ]
@@ -502,7 +502,7 @@ defmodule Explorer.Chain.Address.Counters do
             acc
 
           nil ->
-            Logger.warn(fn ->
+            Logger.warning(fn ->
               [
                 "Query fetching address counters for #{address_hash} timed out."
               ]

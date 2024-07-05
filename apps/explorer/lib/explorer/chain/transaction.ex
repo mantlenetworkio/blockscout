@@ -291,8 +291,13 @@ defmodule Explorer.Chain.Transaction do
 
   alias Explorer.SmartContract.SigProviderInterface
 
-  @optional_attrs ~w(max_priority_fee_per_gas max_fee_per_gas block_hash block_number block_consensus block_timestamp created_contract_address_hash cumulative_gas_used earliest_processing_start
-                     error gas_price gas_used index created_contract_code_indexed_at status to_address_hash revert_reason type has_error_in_internal_txs l1_gas_price l1_gas_used l1_fee l1_fee_scalar l1_origin_tx_hash da_fee da_gas_price da_gas_used r s v)a
+  @optional_attrs ~w(max_priority_fee_per_gas max_fee_per_gas block_hash block_number
+                     block_consensus block_timestamp created_contract_address_hash
+                     cumulative_gas_used earliest_processing_start error gas_price
+                     gas_used index created_contract_code_indexed_at status
+                     to_address_hash revert_reason type has_error_in_internal_txs
+                     l1_gas_price l1_gas_used l1_fee l1_fee_scalar l1_origin_tx_hash da_fee da_gas_price da_gas_used
+                     r s v)a
 
   @chain_type_optional_attrs (case Application.compile_env(:explorer, :chain_type) do
                                 :optimism ->
@@ -997,7 +1002,7 @@ defmodule Explorer.Chain.Transaction do
     end
   rescue
     e ->
-      Logger.warn(fn ->
+      Logger.warning(fn ->
         [
           "Could not decode input data for transaction: ",
           Hash.to_iodata(hash),
@@ -1027,7 +1032,7 @@ defmodule Explorer.Chain.Transaction do
     {:ok, mapping}
   rescue
     e ->
-      Logger.warn(fn ->
+      Logger.warning(fn ->
         [
           "Could not decode input data for transaction: ",
           Hash.to_iodata(hash),
