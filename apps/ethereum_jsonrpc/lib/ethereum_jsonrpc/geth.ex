@@ -448,6 +448,57 @@ defmodule EthereumJSONRPC.Geth do
     end
   end
 
+  defp parse_call_tracer_calls({%{"type" => upcase_type} = call, index}, [%{"from" => from_address,"to"=>to_address,"value"=>value} | _rest] = acc, trace_address, inner?) do
+
+    case String.downcase(upcase_type) do
+      type when type in ~w(call callcode delegatecall staticcall create create2 selfdestruct revert stop invalid) ->
+        new_trace_address = [index | trace_address]
+
+        formatted_call =
+          %{
+            "type" => if(type in ~w(call callcode delegatecall staticcall), do: "call", else: type),
+            "callType" => type,
+            "from" => from_address,
+            "to" => to_address,
+            "createdContractAddressHash" => Map.get(call, "to", "0x"),
+            "value" => value,
+            "gas" => Map.get(call, "gas", "0x0"),
+            "gasUsed" => Map.get(call, "gasUsed", "0x0"),
+            "input" => Map.get(call, "input", "0x"),
+            "init" => Map.get(call, "input", "0x"),
+            "createdContractCode" => Map.get(call, "output", "0x"),
+            "traceAddress" => if(inner?, do: Enum.reverse(new_trace_address), else: []),
+            "error" => call["error"]
+          }
+          |> case do
+            %{"error" => nil} = ok_call ->
+              ok_call
+              |> Map.delete("error")
+              # to handle staticcall, all other cases handled by EthereumJSONRPC.Geth.Call.elixir_to_internal_transaction_params/1
+              |> Map.put("output", Map.get(call, "output", "0x"))
+
+            error_call ->
+              error_call
+          end
+
+        parse_call_tracer_calls(
+          Map.get(call, "calls", []),
+          [formatted_call | acc],
+          if(inner?, do: new_trace_address, else: [])
+        )
+
+      "" ->
+        unless allow_empty_traces?(), do: log_unknown_type(call)
+        acc
+
+      _unknown_type ->
+        log_unknown_type(call)
+        acc
+    end
+  end
+
+
+
   defp parse_call_tracer_calls(calls, acc, trace_address, _inner) when is_list(calls) do
     calls
     |> Stream.with_index()
