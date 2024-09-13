@@ -448,7 +448,7 @@ defmodule EthereumJSONRPC.Geth do
     end
   end
 
-  defp parse_call_tracer_calls({%{"type" => upcase_type} = call, index}, [%{"from" => from_address,"to"=>to_address,"value"=>value} | _rest] = acc, trace_address, inner?) do
+  defp parse_call_tracer_calls({%{"type" => upcase_type} = call, index}, [%{"from" => from_address,"to"=>to_address} | _rest] = acc, trace_address, inner?) do
 
     case String.downcase(upcase_type) do
       type when type in ~w(call callcode delegatecall staticcall create create2 selfdestruct revert stop invalid) ->
@@ -461,7 +461,7 @@ defmodule EthereumJSONRPC.Geth do
             "from" => from_address,
             "to" => to_address,
             "createdContractAddressHash" => Map.get(call, "to", "0x"),
-            "value" => value,
+            "value" =>  Map.get(call, "value", "0x0"),
             "gas" => Map.get(call, "gas", "0x0"),
             "gasUsed" => Map.get(call, "gasUsed", "0x0"),
             "input" => Map.get(call, "input", "0x"),

@@ -512,13 +512,35 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
   defp get_total_fee(%Transaction{} = transaction) do
     if is_nil(transaction.da_fee) do
-      transaction |> Transaction.fee(:wei) |> format_fee()
+
+
+      actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
+      l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+      l2_fee = Wei.to(transaction.gas_price, :wei)
+      |> Decimal.mult(actual_gas)
+      |> Wei.from(:wei)
+      |> Wei.sub(l1_fee)
+      |> Wei.to(:wei)
+
+
+      total_fee = if Decimal.compare(l2_fee, Decimal.new(0)) == :lt do
+        l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+        da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
+        l1_and_da_fee = Wei.sum(l1_fee, da_fee)
+
+        {type, fee} = transaction |> Transaction.fee(:wei)
+        total_fee = Wei.sum(Wei.from(fee, :wei), l1_and_da_fee)
+
+        {type, total_fee} |> format_fee()
+      else
+        transaction |> Transaction.fee(:wei) |> format_fee()
+      end
+
+      total_fee
     else
       l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
       da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
       l1_and_da_fee = Wei.sum(l1_fee, da_fee)
-
-      test = transaction |> Transaction.fee(:wei)
 
       {type, fee} = transaction |> Transaction.fee(:wei)
       total_fee = Wei.sum(Wei.from(fee, :wei), l1_and_da_fee)
@@ -529,6 +551,7 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
   defp get_l2_fee(%Transaction{} = transaction) do
     if is_nil(transaction.da_fee) do
+
       actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
       l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
       l2_fee = Wei.to(transaction.gas_price, :wei)
@@ -536,6 +559,15 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
       |> Wei.from(:wei)
       |> Wei.sub(l1_fee)
       |> Wei.to(:wei)
+
+
+      l2_fee = if Decimal.compare(l2_fee, Decimal.new(0)) == :lt do
+        Wei.to(transaction.gas_price, :wei)
+        |> Decimal.mult(actual_gas)
+        |> Wei.from(:wei)
+      else
+        l2_fee
+      end
 
       l2_fee
     else
