@@ -1,608 +1,53 @@
 [
   {
-    "author": "Mantle",
-    "id": "mantle-bridge",
-    "title": "Mantle Bridge",
-    "logo": "/static/apple-touch-icon.png",
+    "id": "mantle-native-bridge-v2",
+    "title": "Mantle Native Bridge V2",
+    "shortDescription": "Bridge tokens for your mainnet wallet, and test your dApps deployed on Mantle Mainnet.",
+    "description": "Bridge tokens for your mainnet wallet, and test your dApps deployed on Mantle Mainnet.",
+    "author": "Mantle Native Bridge V2",
     "categories": [
-      "Bridges"
+      "Bridge"
     ],
-    "shortDescription": "Bridge tokens, and test your dApps deployed on Mantle.",
-    "site": "https://bridge.mantle.xyz/",
-    "description": "Bridge tokens, and test your dApps deployed on Mantle.",
-    "url": "https://bridge.mantle.xyz/",
+    "logo": "https://cms.mantle.xyz/assets/81f34c7e-374b-41ef-a80e-54ddab4a8680/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://app.mantle.xyz/bridge/",
+    "site": "https://app.mantle.xyz/bridge/",
+    "external": false,
+    "internalWallet": true,
+    "twitter": "https://twitter.com/0xMantle",
+    "priority": 2
+  },
+  {
+    "id": "revoke-cash",
+    "title": "Revoke.cash",
+    "external": false,
+    "internalWallet": true,
+    "logo": "https://blockscout-content.s3.amazonaws.com/revokecash.png",
+    "shortDescription": "Manage and revoke your token allowances with Revoke.cash",
+    "categories": [
+      "Dev toolings"
+    ],
+    "author": "RevokeCash",
+    "url": "https://revoke.cash/",
+    "description": "Manage and revoke your token allowances with Revoke.cash",
+    "site": "https://revoke.cash/",
+    "twitter": "https://twitter.com/RevokeCash",
+    "github": "https://github.com/RevokeCash",
+    "priority": 1
+  },
+  {
+    "author": "Mantle",
+    "id": "mantle-rewards-station",
+    "title": "Mantle Rewards Station",
+    "logo": "https://cms.mantle.xyz/assets/81f34c7e-374b-41ef-a80e-54ddab4a8680/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "categories": [
+      "DeFi"
+    ],
+    "shortDescription": "Lock, Allocate & Receive Rewards.",
+    "site": "https://rewards.mantle.xyz/",
+    "description": "The Mantle Rewards Station incentivizes MNT holders by offering them exclusive rewards from Mantle Ecosystem, where participants can get easy access to a diverse range of rewards all on one platform.",
+    "url": "https://rewards.mantle.xyz/",
     "external": true,
     "internalWallet": false
-  },
-  {
-    "id": "38",
-    "title": "Pyth Network",
-    "shortDescription": "Pyth connects high-fidelity market data from the largest professional traders & exchanges to any smart contract.",
-    "description": "Pyth connects high-fidelity market data from the largest professional traders & exchanges to any smart contract.",
-    "author": "Pyth Network",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/00278598-f311-467d-a071-068aea7f9578?width=180&height=180&fit=contain&quality=75",
-    "url": "https://pyth.network/?utm_source=Mantle-Website&utm_medium=Ecosystem-Page&utm_campaign=dApp-Explorer-Listing",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/PythNetwork",
-    "telegram": "https://t.me/Pyth_Network",
-    "github": "https://github.com/pyth-network"
-  },
-  {
-    "id": "83",
-    "title": "LayerZero",
-    "shortDescription": "An omnichain interoperability protocol. LayerZero enables the realization of cross-chain applications with a low level communication primitive.",
-    "description": "An omnichain interoperability protocol. LayerZero enables the realization of cross-chain applications with a low level communication primitive.",
-    "author": "LayerZero",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/c400e8d0-f4ae-4326-aec2-0cfc6556863a?width=180&height=180&fit=contain&quality=75",
-    "url": "https://layerzero.network/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/LayerZero_Labs",
-    "telegram": "https://t.me/joinchat/VcqxYkStIDsyN2Rh"
-  },
-  {
-    "id": "67",
-    "title": "Ankr",
-    "shortDescription": "A Decentralized Node Marketplace",
-    "description": "A Decentralized Node Marketplace",
-    "author": "Ankr",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/d42b9a6a-801d-4e13-b1aa-033fd04f2004?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.ankr.com/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/ankr",
-    "telegram": "https://t.me/ankrnetwork",
-    "github": "https://github.com/Ankr-network"
-  },
-  {
-    "id": "79",
-    "title": "thirdweb",
-    "shortDescription": "thirdweb is a complete Web3 development framework that provides everything you need to build, launch, and manage Web3 apps",
-    "description": "thirdweb is a complete Web3 development framework that provides everything you need to build, launch, and manage Web3 apps",
-    "author": "thirdweb",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/de309f35-6404-47ff-9012-be8c73f79d1b?width=180&height=180&fit=contain&quality=75",
-    "url": "https://thirdweb.com/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/thirdweb",
-    "github": "https://github.com/thirdweb-dev"
-  },
-  {
-    "id": "3",
-    "title": "Covalent",
-    "shortDescription": "Covalent API brings visibility to billions of web3 data points. Build wallets, NFT galleries, investor tools and more.",
-    "description": "Covalent API brings visibility to billions of web3 data points. Build wallets, NFT galleries, investor tools and more.",
-    "author": "Covalent",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/b6f30224-f611-4245-a823-ba3c9996dca7?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.covalenthq.com/?utm_source=Mantle-Website&utm_medium=Ecosystem-Page&utm_campaign=dApp-Explorer-Listing",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/covalent_hq",
-    "telegram": "https://t.me/CovalentHQ",
-    "github": "https://github.com/covalenthq"
-  },
-  {
-    "id": "136",
-    "title": "Range Protocol",
-    "shortDescription": "Range Protocol is building the Universal On-chain Asset Management Platform ",
-    "description": "Range Protocol is building the Universal On-chain Asset Management Platform ",
-    "author": "Range Protocol",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/077a46c0-4cac-4c79-9b1f-2b23d8a2b7ee?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.rangeprotocol.com/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/Range_Protocol",
-    "github": "https://github.com/Range-Protocol"
-  },
-  {
-    "id": "145",
-    "title": "TsunamiX",
-    "shortDescription": "TsunamiX is a gamified spot and margin trading protocol that enables traders to trade crypto-assets. ",
-    "description": "TsunamiX is a gamified spot and margin trading protocol that enables traders to trade crypto-assets. ",
-    "author": "TsunamiX",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/88261e68-8859-4556-a020-71bd42c426c6?width=180&height=180&fit=contain&quality=75",
-    "url": "https://tsunami.finance/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/TsunamiFinance_",
-    "telegram": "https://t.me/tsunamifi"
-  },
-  {
-    "id": "186",
-    "title": "Butter.xyz",
-    "shortDescription": "All-in-one exchange redefining the trading experience.",
-    "description": "All-in-one exchange redefining the trading experience.",
-    "author": "Butter.xyz",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/efe1d4d8-c28e-4583-a80d-ee651be6be39?width=180&height=180&fit=contain&quality=75",
-    "url": "https://butter.xyz",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/butterexchange",
-    "github": "https://docs.butter.xyz"
-  },
-  {
-    "id": "194",
-    "title": "Merchant Moe",
-    "shortDescription": "Merchant Moe is the cornerstone DEX for Mantle Network. A trader's oasis, Moe offers seamless trading, discretized liquidity, and real yield all within his intuitive and easy-to-navigate platform.",
-    "description": "Merchant Moe is the cornerstone DEX for Mantle Network. A trader's oasis, Moe offers seamless trading, discretized liquidity, and real yield all within his intuitive and easy-to-navigate platform.",
-    "author": "Merchant Moe",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/f00a472c-2754-4a5f-8b09-aaa4dad2ae4e?width=180&height=180&fit=contain&quality=75",
-    "url": "https://merchantmoe.com/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/MerchantMoe_xyz"
-  },
-  {
-    "id": "195",
-    "title": "INIT Capital",
-    "shortDescription": "The Liquidity Hook Money Market – Lend, Borrow, and Access Yield Strategies with Liquidity Hook",
-    "description": "The Liquidity Hook Money Market – Lend, Borrow, and Access Yield Strategies with Liquidity Hook",
-    "author": "INIT Capital",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/3c934883-4344-4eb6-b3bb-0180284d83fe?width=180&height=180&fit=contain&quality=75",
-    "url": "https://init.capital/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/InitCapital_"
-  },
-  {
-    "id": "146",
-    "title": "ONDO",
-    "shortDescription": "Institutional-Grade Finance. On-Chain. For Everyone.",
-    "description": "Institutional-Grade Finance. On-Chain. For Everyone.",
-    "author": "ONDO",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/819e8026-85bb-4fd5-b2b4-6dcb6a93a0e6?width=180&height=180&fit=contain&quality=75",
-    "url": "https://ondo.finance/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/OndoFinance",
-    "telegram": "https://t.me/ondofinance",
-    "github": "https://github.com/ondoprotocol"
-  },
-  {
-    "id": "155",
-    "title": "Mintle",
-    "shortDescription": "Mintle is an NFT marketplace on the Mantle network where you can mint, buy and sell NFTs! Powered by Rarible.",
-    "description": "Mintle is an NFT marketplace on the Mantle network where you can mint, buy and sell NFTs! Powered by Rarible.",
-    "author": "Mintle",
-    "categories": [
-      "NFT"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/bf73cf32-cb65-40c1-94ae-954fa378758c?width=180&height=180&fit=contain&quality=75",
-    "url": "https://mintle.app/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/mintleapp"
-  },
-  {
-    "id": "214",
-    "title": "Chronicle Protocol",
-    "shortDescription": "Chronicle Protocol offers scalable, cost-efficient, verifiable Oracles. Powering MakerDAO, Spark & more.",
-    "description": "Chronicle Protocol offers scalable, cost-efficient, verifiable Oracles. Powering MakerDAO, Spark & more.",
-    "author": "Chronicle Protocol",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/38a2cc28-428f-454a-af1e-71dad35c8326?width=180&height=180&fit=contain&quality=75",
-    "url": "https://chroniclelabs.org/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/ChronicleLabs",
-    "github": "https://github.com/chronicleprotocol"
-  },
-  {
-    "id": "191",
-    "title": "Ethena",
-    "shortDescription": "Infrastructure to unlock the  potential of staked Ethereum.",
-    "description": "Infrastructure to unlock the  potential of staked Ethereum.",
-    "author": "Ethena",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/d8e880a5-fdcd-497e-a4c6-63f8b05348c6?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.ethena.fi/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/ethena_labs",
-    "telegram": "https://t.me/ethena_labs",
-    "github": "https://github.com/ethena-labs"
-  },
-  {
-    "id": "4",
-    "title": "iZUMi Finance",
-    "shortDescription": "iZUMi Finance is a multi-chain DeFi protocol providing one-stop Liquidity-as-a-Service (LaaS).",
-    "description": "iZUMi Finance is a multi-chain DeFi protocol providing one-stop Liquidity-as-a-Service (LaaS).",
-    "author": "iZUMi Finance",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/7eb15c67-bcf5-4499-9e69-4e1db357a1b0?width=180&height=180&fit=contain&quality=75",
-    "url": "https://izumi.finance/home?utm_source=Mantle-Website&utm_medium=Ecosystem-Page&utm_campaign=dApp-Explorer-Listing",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/izumi_Finance",
-    "telegram": "https://t.me/izumifinance",
-    "github": "https://github.com/IzumiFinance/"
-  },
-  {
-    "id": "1",
-    "title": "FusionX",
-    "shortDescription": "FusionX creates composable DeFi built to support and nurture the Mantle ecosystem.",
-    "description": "FusionX creates composable DeFi built to support and nurture the Mantle ecosystem.",
-    "author": "FusionX",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/05f5622b-9b31-4499-964a-8cd3413cced8?width=180&height=180&fit=contain&quality=75",
-    "url": "https://fusionx.finance/?utm_source=Mantle-Website&utm_medium=Ecosystem-Page&utm_campaign=dApp-Explorer-Listing",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/fusionx_finance",
-    "telegram": "https://t.me/fusionx_finance",
-    "github": "https://github.com/fusionx-finance"
-  },
-  {
-    "id": "166",
-    "title": "MUFEX",
-    "shortDescription": "Smart Money, Social Interaction, Exciting Entertainment - A Whole New Decentralized Trading Experience!",
-    "description": "Smart Money, Social Interaction, Exciting Entertainment - A Whole New Decentralized Trading Experience!",
-    "author": "MUFEX",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/37465e1f-88f0-4db8-9073-a2c544c45703?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.mufex.finance",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/Mufex_Official",
-    "telegram": "https://t.me/MUFEX",
-    "github": "https://github.com/orgs/MUFEX-Exchange/repositories"
-  },
-  {
-    "id": "147",
-    "title": "Astra:OmniRise",
-    "shortDescription": "Astra: OmniRise is a lightly MMORPG Web3 game, the game set in the background of human organization's escape from the control of a corrupt empire ",
-    "description": "Astra: OmniRise is a lightly MMORPG Web3 game, the game set in the background of human organization's escape from the control of a corrupt empire ",
-    "author": "Astra:OmniRise",
-    "categories": [
-      "Gaming"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/8987d1a1-d5a6-421a-9bd6-1dc53e22277e?width=180&height=180&fit=contain&quality=75",
-    "url": "https://aor.games/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/AORuniverse",
-    "telegram": "https://t.me/astrarise",
-    "github": "https://github.com/Astrauniverse"
-  },
-  {
-    "id": "130",
-    "title": "MetaMask",
-    "shortDescription": "MetaMask is a global community of developers and designers dedicated to making the world a better place with blockchain technology. ",
-    "description": "MetaMask is a global community of developers and designers dedicated to making the world a better place with blockchain technology. ",
-    "author": "MetaMask",
-    "categories": [
-      "Wallet"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/0d838159-4667-4abc-8945-030d2c489c83?width=180&height=180&fit=contain&quality=75",
-    "url": "https://metamask.io/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/MetaMask",
-    "github": "https://github.com/MetaMask"
-  },
-  {
-    "id": "135",
-    "title": "QuestN",
-    "shortDescription": "QuestN is a one-stop tool offering comprehensive solutions for Marketing, Growth, and Analysis in Web3. ",
-    "description": "QuestN is a one-stop tool offering comprehensive solutions for Marketing, Growth, and Analysis in Web3. ",
-    "author": "QuestN",
-    "categories": [
-      "Social"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/48a44923-ca25-4709-9406-85e9156117f6?width=180&height=180&fit=contain&quality=75",
-    "url": "https://app.questn.com/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/QuestN_com",
-    "telegram": "https://t.me/QuestN_Announcement",
-    "github": "https://github.com/quest3"
-  },
-  {
-    "id": "122",
-    "title": "Battledogs Arena",
-    "shortDescription": "A Peer2Peer #NFT #MPG full #OCA Battle Card Game developed by @OxSorcerers for the multichain omniverse. Accelerating #GameFi on Mantle.",
-    "description": "A Peer2Peer #NFT #MPG full #OCA Battle Card Game developed by @OxSorcerers for the multichain omniverse. Accelerating #GameFi on Mantle.",
-    "author": "Battledogs Arena",
-    "categories": [
-      "Gaming"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/4fef9c47-ce35-4bee-9313-00e16ddeacdd?width=180&height=180&fit=contain&quality=75",
-    "url": "https://mantledogs.fun",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/battledogsarena",
-    "telegram": "https://t.me/battledogsarena",
-    "github": "https://github.com/Battledog-Games"
-  },
-  {
-    "id": "45",
-    "title": "Sakaba",
-    "shortDescription": "Infrastructure for loyalty and distribution for web3 games.",
-    "description": "Infrastructure for loyalty and distribution for web3 games.",
-    "author": "Sakaba",
-    "categories": [
-      "Gaming"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/e2f80db5-c922-47f9-87e5-f5225230b2e9?width=180&height=180&fit=contain&quality=75",
-    "url": "https://sakaba.xyz/solution?utm_source=Mantle-Website&utm_medium=Ecosystem-Page&utm_campaign=dApp-Explorer-Listing",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/SAKABA_xyz",
-    "telegram": "https://t.me/sakaba_xyz",
-    "github": "https://github.com/0xSakaba"
-  },
-  {
-    "id": "14",
-    "title": "Space Falcon DEX",
-    "shortDescription": "Game hub scaling the web3 gaming experience and revolutionizing virtual adventures through DeFi features.",
-    "description": "Game hub scaling the web3 gaming experience and revolutionizing virtual adventures through DeFi features.",
-    "author": "Space Falcon DEX",
-    "categories": [
-      "Gaming"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/3cf3f669-a298-4ddf-b132-318c2302f447?width=180&height=180&fit=contain&quality=75",
-    "url": "https://spacefalcon.io/?utm_source=Mantle-Website&utm_medium=Ecosystem-Page&utm_campaign=dApp-Explorer-Listing",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/SpaceFalconIO",
-    "telegram": "https://t.me/spacefalconIO"
-  },
-  {
-    "id": "15",
-    "title": "The Lost Donkeys",
-    "shortDescription": "The Lost Donkeys is an NFT & GameFi project where donkeys need to build their lost long home.",
-    "description": "The Lost Donkeys is an NFT & GameFi project where donkeys need to build their lost long home.",
-    "author": "The Lost Donkeys",
-    "categories": [
-      "Gaming"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/ff8d744a-2df9-455f-a67d-c2594bd2722f?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.thelostdonkeys.com/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/TheLostDonkeys"
-  },
-  {
-    "id": "65",
-    "title": "Symbiosis",
-    "shortDescription": "Symbiosis is a cross-chain AMM DEX that pools together liquidity from different networks: L1s and L2s, EVM and non-EVM. ",
-    "description": "Symbiosis is a cross-chain AMM DEX that pools together liquidity from different networks: L1s and L2s, EVM and non-EVM. ",
-    "author": "Symbiosis",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/46adf26a-ee12-4521-883c-ec447125b795?width=180&height=180&fit=contain&quality=75",
-    "url": "https://symbiosis.finance/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/symbiosis_fi",
-    "telegram": "https://t.me/symbiosis_finance",
-    "github": "https://github.com/symbiosis-finance"
-  },
-  {
-    "id": "43",
-    "title": "LYNC",
-    "shortDescription": "LYNC - Build and launch scalable Web3 game in minutes than months",
-    "description": "LYNC - Build and launch scalable Web3 game in minutes than months",
-    "author": "LYNC",
-    "categories": [
-      "Gaming"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/eb60b194-b6a7-4c5b-a170-758917efec09?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.lync.world/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/Lyncworld",
-    "github": "https://github.com/LYNC-WORLD"
-  },
-  {
-    "id": "91",
-    "title": "AGNI",
-    "shortDescription": "Agni is a high-capital efficiency, AMM-based decentralized exchange (DEX) and launchpad built to support the Mantle Network ecosystem.",
-    "description": "Agni is a high-capital efficiency, AMM-based decentralized exchange (DEX) and launchpad built to support the Mantle Network ecosystem.",
-    "author": "AGNI",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/383d1c11-d756-4dc1-b74e-0484c91c5f08?width=180&height=180&fit=contain&quality=75",
-    "url": "https://agni.finance/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/Agnidex",
-    "telegram": "https://t.me/AgniDEXCommunity",
-    "github": "https://github.com/agni-protocol/contracts"
-  },
-  {
-    "id": "196",
-    "title": "Cleopatra (Cleo) Exchange",
-    "shortDescription": "Cleopatra is The Next Generation of Concentrated Liquidity. Ve3.3 Dex",
-    "description": "Cleopatra is The Next Generation of Concentrated Liquidity. Ve3.3 Dex",
-    "author": "Cleopatra (Cleo) Exchange",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/fbcf2108-9c11-4ffe-8a80-2958a7e9b6e8?width=180&height=180&fit=contain&quality=75",
-    "url": "https://cleo.exchange/swap",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/CleopatraDEX",
-    "github": "https://github.com/RamsesExchange"
-  },
-  {
-    "id": "134",
-    "title": "Solv Protocol",
-    "shortDescription": " Solv V3 is an on-chain fund platform that offers a secure, transparent space for global investors to explore diverse crypto investments. ",
-    "description": " Solv V3 is an on-chain fund platform that offers a secure, transparent space for global investors to explore diverse crypto investments. ",
-    "author": "Solv Protocol",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/e41fe288-65ea-4e8b-8bf7-ebc8b8700724?width=180&height=180&fit=contain&quality=75",
-    "url": "https://app.solv.finance/earn",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/SolvProtocol",
-    "telegram": "https://t.me/+dq0cJrSNtzQ4NTNl",
-    "github": "https://github.com/solv-finance"
-  },
-  {
-    "id": "69",
-    "title": "Unmarshal",
-    "shortDescription": "Unmarshal is a pioneering multi-chain Web 3.0 data network revolutionizing blockchain data accessibility. ",
-    "description": "Unmarshal is a pioneering multi-chain Web 3.0 data network revolutionizing blockchain data accessibility. ",
-    "author": "Unmarshal",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/21b279c7-fd21-4000-a883-68282e94bb59?width=180&height=180&fit=contain&quality=75",
-    "url": "https://unmarshal.io/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/unmarshal",
-    "telegram": "https://t.me/Unmarshal_Chat",
-    "github": "https://github.com/eucrypt"
-  },
-  {
-    "id": "104",
-    "title": "Polyhedra Network",
-    "shortDescription": "The first trustless, efficient, and secure cross-chain interoperability protocol with zero-knowledge proofs.",
-    "description": "The first trustless, efficient, and secure cross-chain interoperability protocol with zero-knowledge proofs.",
-    "author": "Polyhedra Network",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/d196cdf9-a34b-447e-b959-caa929242141?width=180&height=180&fit=contain&quality=75",
-    "url": "https://zkbridge.com/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/PolyhedraZK"
-  },
-  {
-    "id": "89",
-    "title": "Timeswap",
-    "shortDescription": "Timeswap is the first oracle-less and permissionless AMM-based lending/borrowing market.",
-    "description": "Timeswap is the first oracle-less and permissionless AMM-based lending/borrowing market.",
-    "author": "Timeswap",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/b9f1f51d-2872-4cd9-aad6-ac5f2945d677?width=180&height=180&fit=contain&quality=75",
-    "url": "https://app.timeswap.io/#markets",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/TimeswapLabs",
-    "telegram": "https://t.me/timeswap",
-    "github": "https://github.com/Timeswap-Labs"
-  },
-  {
-    "id": "53",
-    "title": "Reax",
-    "shortDescription": "Synthetics Protocol with Slippage Free DEX, Perps, Lending, Vaults and Launchpad on 200+ Assets on Mantle.",
-    "description": "Synthetics Protocol with Slippage Free DEX, Perps, Lending, Vaults and Launchpad on 200+ Assets on Mantle.",
-    "author": "Reax",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/46dd17db-8543-4496-a3ca-0512dc3c8985?width=180&height=180&fit=contain&quality=75",
-    "url": "https://reax.one/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/reaxfinance",
-    "github": "https://github.com/Reax-Finance"
-  },
-  {
-    "id": "96",
-    "title": "Coin98 Super App",
-    "shortDescription": "Coin98 is the #1 crypto super app, offering a trusted ecosystem of essential services for Web3",
-    "description": "Coin98 is the #1 crypto super app, offering a trusted ecosystem of essential services for Web3",
-    "author": "Coin98 Super App",
-    "categories": [
-      "Wallet"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/d9974513-f37e-4d46-992f-090e60ea3900?width=180&height=180&fit=contain&quality=75",
-    "url": "https://coin98.com/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/coin98_wallet",
-    "telegram": "https://t.me/coin98_wallet",
-    "github": "https://github.com/coin98"
-  },
-  {
-    "id": "207",
-    "title": "Slash",
-    "shortDescription": "［／］Slash supports any token payments as the next generation of decentralized payment instruments,created by SlashVisionLabs.",
-    "description": "［／］Slash supports any token payments as the next generation of decentralized payment instruments,created by SlashVisionLabs.",
-    "author": "Slash",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/8a5d9f5b-74bd-41d3-900b-85ad8f6f9c78?width=180&height=180&fit=contain&quality=75",
-    "url": "https://slash.fi/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/SlashWeb3",
-    "github": "https://slash-fi.gitbook.io/docs/whitepaper/slash-vision-labs-white-paper"
-  },
-  {
-    "id": "58",
-    "title": "Demex Exchange",
-    "shortDescription": "Demex (or Decentralized Mercantile Exchange) is the cross-chain derivatives orderbook DEX powered by Carbon.",
-    "description": "Demex (or Decentralized Mercantile Exchange) is the cross-chain derivatives orderbook DEX powered by Carbon.",
-    "author": "Demex Exchange",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/efdb3446-f577-4fba-84ee-cf7e927c2ad9?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.dem.exchange",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/demexchange",
-    "telegram": "https://t.me/carbon_ecosystem",
-    "github": "https://github.com/Switcheo/demex-website"
   },
   {
     "id": "2",
@@ -611,10 +56,11 @@
     "description": "Pulsar is a TWAMM implementation that combines AMM, instant swap, and term swap.",
     "author": "Pulsar Protocol",
     "categories": [
-      "DeFi"
+      "DEX"
     ],
-    "logo": "https://cms.mantle.xyz/assets/990f2472-bc49-470a-9ce6-04da6a2ba1d0?width=180&height=180&fit=contain&quality=75",
-    "url": "https://pulsarswap.com?utm_source=Mantle-Website&utm_medium=Ecosystem-Page&utm_campaign=dApp-Explorer-Listing",
+    "logo": "https://cms.mantle.xyz/assets/e1631238-b1c3-4235-aef3-c71acd7b12e6/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://pulsarswap.com",
+    "site": "https://pulsarswap.com",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/PulsarSwap",
@@ -622,32 +68,330 @@
     "github": "https://github.com/PulsarSwap"
   },
   {
-    "id": "70",
-    "title": "Lendle",
-    "shortDescription": "Lendle is a decentralized, non-custodial liquidity market inspired by Geist and Aave.",
-    "description": "Lendle is a decentralized, non-custodial liquidity market inspired by Geist and Aave.",
-    "author": "Lendle",
+    "id": "9",
+    "title": "Butter.xyz",
+    "shortDescription": "All-in-one exchange redefining the trading experience.",
+    "description": "All-in-one exchange redefining the trading experience.",
+    "author": "Butter.xyz",
     "categories": [
-      "DeFi"
+      "DEX"
     ],
-    "logo": "https://cms.mantle.xyz/assets/e8b6d509-9179-42f4-9f5b-f92dcbc3d12d?width=180&height=180&fit=contain&quality=75",
-    "url": "https://lendle.xyz/",
+    "logo": "https://cms.mantle.xyz/assets/31a5e7e5-96b2-4db0-9d75-608ff711cc7f/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://butter.xyz",
+    "site": "https://butter.xyz",
+    "external": false,
+    "internalWallet": true,
+    "twitter": "https://twitter.com/butterexchange",
+    "telegram": "https://t.me/butterexchange",
+    "github": "https://docs.butter.xyz",
+    "priority": 2
+  },
+  {
+    "id": "10",
+    "title": "INIT Capital",
+    "shortDescription": "The Liquidity Hook Money Market – Lend, Borrow, and Access Yield Strategies with Liquidity Hook",
+    "description": "The Liquidity Hook Money Market – Lend, Borrow, and Access Yield Strategies with Liquidity Hook",
+    "author": "INIT Capital",
+    "categories": [
+      "Money Market"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/3c934883-4344-4eb6-b3bb-0180284d83fe/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://init.capital/",
+    "site": "https://init.capital/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/lendlexyz",
-    "github": "https://github.com/lendle-xyz"
+    "twitter": "https://twitter.com/InitCapital_",
+    "github": "https://docs.init.capital/protocol-overview/introduction"
+  },
+  {
+    "id": "16",
+    "title": "IntentX",
+    "shortDescription": "An intent-based decentralised derivatives exchange offering perpetual futures trading",
+    "description": "An intent-based decentralised derivatives exchange offering perpetual futures trading",
+    "author": "IntentX",
+    "categories": [
+      "RFQ/Intents"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/313f947c-b1d6-4cd0-88fa-42cdde2bc4c6/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://intentx.io/",
+    "site": "https://intentx.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/IntentX_",
+    "github": "https://docs.intentx.io/"
+  },
+  {
+    "id": "12",
+    "title": "MetaCene",
+    "shortDescription": "Next-gen blockchain MMORPG homeland.",
+    "description": "Next-gen blockchain MMORPG homeland.",
+    "author": "MetaCene",
+    "categories": [
+      "Games"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/4f9c8846-b0df-4bdc-937f-307a735a4123/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://metacene.io/",
+    "site": "https://metacene.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/MetaCeneGame",
+    "telegram": "https://t.me/MetaCeneAnnouncement"
+  },
+  {
+    "id": "8",
+    "title": "MUFEX",
+    "shortDescription": "Smart Money, Social Interaction, Exciting Entertainment - A Whole New Decentralized Trading Experience!",
+    "description": "Smart Money, Social Interaction, Exciting Entertainment - A Whole New Decentralized Trading Experience!",
+    "author": "MUFEX",
+    "categories": [
+      "Perpetual Futures"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/a35ac710-dbfc-426a-9014-f5c67de22a91/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.mufex.finance",
+    "site": "https://www.mufex.finance",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/Mufex_Official",
+    "telegram": "https://t.me/MUFEX",
+    "github": "https://github.com/orgs/MUFEX-Exchange/repositories"
+  },
+  {
+    "id": "1",
+    "title": "FusionX",
+    "shortDescription": "FusionX creates composable DeFi built to support and nurture the Mantle ecosystem.",
+    "description": "FusionX creates composable DeFi built to support and nurture the Mantle ecosystem.",
+    "author": "FusionX",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/772b8d19-c93c-43f7-b0e2-a6f20356302e/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://fusionx.finance/swap",
+    "site": "https://fusionx.finance/",
+    "external": false,
+    "internalWallet": true,
+    "twitter": "https://twitter.com/fusionx_finance",
+    "telegram": "https://t.me/fusionx_finance",
+    "github": "https://github.com/fusionx-finance",
+    "priority": 2
+  },
+  {
+    "id": "4",
+    "title": "iZUMi Finance",
+    "shortDescription": "iZUMi Finance is a multi-chain DeFi protocol providing one-stop Liquidity-as-a-Service (LaaS).",
+    "description": "iZUMi Finance is a multi-chain DeFi protocol providing one-stop Liquidity-as-a-Service (LaaS).",
+    "author": "iZUMi Finance",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/897a3c29-7dcf-4ee8-a002-6238129ba71e/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://izumi.finance/home",
+    "site": "https://izumi.finance/home",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/izumi_Finance",
+    "telegram": "https://t.me/izumifinance",
+    "github": "https://github.com/IzumiFinance/"
+  },
+  {
+    "id": "7",
+    "title": "TsunamiX",
+    "shortDescription": "TsunamiX is a gamified spot and margin trading protocol that enables traders to trade crypto-assets. ",
+    "description": "TsunamiX is a gamified spot and margin trading protocol that enables traders to trade crypto-assets. ",
+    "author": "TsunamiX",
+    "categories": [
+      "Perpetual Futures"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/e9d946db-cbc3-43f5-86bc-4a9287c2ca9e/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://tsunami.finance/",
+    "site": "https://tsunami.finance/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/TsunamiFinance_",
+    "telegram": "https://t.me/tsunamifi",
+    "github": "https://docs.tsunami.finance/"
+  },
+  {
+    "id": "17",
+    "title": "Co-Museum",
+    "shortDescription": "A community-driven cultural collective dedicated to pioneering communal-ownership of the most significant artworks and artifacts, both digital and physical",
+    "description": "A community-driven cultural collective dedicated to pioneering communal-ownership of the most significant artworks and artifacts, both digital and physical",
+    "author": "Co-Museum",
+    "categories": [
+      "NFT Tool"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/2f1fc792-b58c-4d63-b414-0f00bbf02910/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://co-museum.com/",
+    "site": "https://co-museum.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/co_museum"
+  },
+  {
+    "id": "18",
+    "title": "DreamOS",
+    "shortDescription": "A new web3-native operating system that aims to improve the complex user experience within crypto",
+    "description": "A new web3-native operating system that aims to improve the complex user experience within crypto",
+    "author": "DreamOS",
+    "categories": [
+      "Wallet/Custody"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/65257bab-30c1-42ca-8f02-7c09f20a995a/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.dreamos.app/",
+    "site": "https://www.dreamos.app/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/theDreamOS"
+  },
+  {
+    "id": "3",
+    "title": "Covalent",
+    "shortDescription": "Covalent API brings visibility to billions of web3 data points. Build wallets, NFT galleries, investor tools and more.",
+    "description": "Covalent API brings visibility to billions of web3 data points. Build wallets, NFT galleries, investor tools and more.",
+    "author": "Covalent",
+    "categories": [
+      "Dev Tool"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/c4a562f2-64a8-46d2-a1df-578470be79c1/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.covalenthq.com/",
+    "site": "https://www.covalenthq.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/covalent_hq",
+    "telegram": "https://t.me/CovalentHQ",
+    "github": "https://github.com/covalenthq"
+  },
+  {
+    "id": "6",
+    "title": "Range Protocol",
+    "shortDescription": "Range Protocol is building the Universal On-chain Asset Management Platform ",
+    "description": "Range Protocol is building the Universal On-chain Asset Management Platform ",
+    "author": "Range Protocol",
+    "categories": [
+      "Vault"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/077a46c0-4cac-4c79-9b1f-2b23d8a2b7ee/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.rangeprotocol.com/",
+    "site": "https://www.rangeprotocol.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/Range_Protocol",
+    "github": "https://github.com/Range-Protocol"
+  },
+  {
+    "id": "37",
+    "title": "Clique ",
+    "shortDescription": "Clique builds identity oracles that verify the provenance of off-chain user behaviour data.",
+    "description": "Clique builds identity oracles that verify the provenance of off-chain user behaviour data.",
+    "author": "Clique ",
+    "categories": [
+      "Dev Tool"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/7176ab18-91d4-499a-af5d-6a134b270994/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://clique.social",
+    "site": "https://clique.social",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/Clique2046",
+    "github": "https://github.com/CliqueOfficial"
+  },
+  {
+    "id": "32",
+    "title": "CryptoDo",
+    "shortDescription": "No-code builder of web3 solutions for businesses. Launch a web3 application in 5 minutes without programming.",
+    "description": "No-code builder of web3 solutions for businesses. Launch a web3 application in 5 minutes without programming.",
+    "author": "CryptoDo",
+    "categories": [
+      "Dev Tool"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/d9f0cb18-7eae-4ff1-bd34-ccc23bd89fd7/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://cryptodo.app/",
+    "site": "https://cryptodo.app/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/CryptoDo_app",
+    "github": "https://gitlab.defilab.space/cryptodo-main/cryptodo-lab"
+  },
+  {
+    "id": "43",
+    "title": "Pyth ",
+    "shortDescription": "Pyth connects high-fidelity market data from the largest professional traders & exchanges to any smart contract.",
+    "description": "Pyth connects high-fidelity market data from the largest professional traders & exchanges to any smart contract.",
+    "author": "Pyth ",
+    "categories": [
+      "Oracle"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/351957ed-b813-4b2e-9832-abc7045de3e9/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://pyth.network/",
+    "site": "https://pyth.network/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/PythNetwork",
+    "telegram": "https://t.me/Pyth_Network",
+    "github": "https://github.com/pyth-network"
+  },
+  {
+    "id": "54",
+    "title": "Banxa",
+    "shortDescription": "Banxa is the leading global Web3 on-and-off ramp solution.",
+    "description": "Banxa is the leading global Web3 on-and-off ramp solution.",
+    "author": "Banxa",
+    "categories": [
+      "Fiat-On-Ramp"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/1855bba5-0d0f-40e2-ac42-3c98895c5f2d/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://banxa.com/",
+    "site": "https://banxa.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/BanxaOfficial"
+  },
+  {
+    "id": "62",
+    "title": "Demex",
+    "shortDescription": "Demex (or Decentralized Mercantile Exchange) is the cross-chain derivatives orderbook DEX powered by Carbon.",
+    "description": "Demex (or Decentralized Mercantile Exchange) is the cross-chain derivatives orderbook DEX powered by Carbon.",
+    "author": "Demex",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/2901e531-dba7-41c0-a669-b53d7b7f5fdd/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.dem.exchange",
+    "site": "https://www.dem.exchange",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/demexchange",
+    "telegram": "https://t.me/carbon_ecosystem",
+    "github": "https://github.com/Switcheo/demex-website"
   },
   {
     "id": "64",
+    "title": "Rivera Money",
+    "shortDescription": "Liquidity infrastructure to enable risk-shared market-making on Mantle.",
+    "description": "Liquidity infrastructure to enable risk-shared market-making on Mantle.",
+    "author": "Rivera Money",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/dcb22683-8c9c-4527-bf55-f8c88b658371/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://rivera.money/",
+    "site": "https://rivera.money/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/Rivera_Money_",
+    "github": "https://github.com/RiveraMoney"
+  },
+  {
+    "id": "68",
     "title": "Galador",
     "shortDescription": "Galador is building the DeFi powerhouse on Mantle to support builders & generate real yield",
     "description": "Galador is building the DeFi powerhouse on Mantle to support builders & generate real yield",
     "author": "Galador",
     "categories": [
-      "DeFi"
+      "DEX"
     ],
-    "logo": "https://cms.mantle.xyz/assets/9bc8f970-f565-44d1-a584-c995e0c07675?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/d8476e3d-0a84-4c03-8b11-5cd4d932920e/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://galador.io",
+    "site": "https://galador.io",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/galadorfi",
@@ -655,147 +399,155 @@
     "github": "https://github.com/galadorfi"
   },
   {
-    "id": "84",
-    "title": "OpenBlock Wallet",
-    "shortDescription": "MPC wallet for consumer and enterprise users with multi-sig functions and much more. ",
-    "description": "MPC wallet for consumer and enterprise users with multi-sig functions and much more. ",
-    "author": "OpenBlock Wallet",
+    "id": "71",
+    "title": "Ankr",
+    "shortDescription": "A Decentralized Node Marketplace",
+    "description": "A Decentralized Node Marketplace",
+    "author": "Ankr",
     "categories": [
-      "Wallet"
+      "Node Provider"
     ],
-    "logo": "https://cms.mantle.xyz/assets/11fffeac-dbcf-4382-abb2-2642f8cb3b4c?width=180&height=180&fit=contain&quality=75",
-    "url": "https://openblock.com/#/",
+    "logo": "https://cms.mantle.xyz/assets/e9145825-a51a-4b11-8bc2-2cc10dbb26ac/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.ankr.com/",
+    "site": "https://www.ankr.com/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/OpenBlockWallet"
+    "twitter": "https://twitter.com/ankr",
+    "telegram": "https://t.me/ankrnetwork",
+    "github": "https://github.com/Ankr-network"
   },
   {
-    "id": "75",
+    "id": "72",
+    "title": "Biconomy",
+    "shortDescription": "The ultimate toolkit to leverage smart contract wallets & build custom transaction journeys.",
+    "description": "The ultimate toolkit to leverage smart contract wallets & build custom transaction journeys.",
+    "author": "Biconomy",
+    "categories": [
+      "Dev Tool"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/8365a464-d4e4-49b3-9a08-bd8a377d4578/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.biconomy.io/",
+    "site": "https://www.biconomy.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/biconomy",
+    "telegram": "https://t.me/biconomy"
+  },
+  {
+    "id": "73",
+    "title": "Unmarshal ",
+    "shortDescription": "Unmarshal is a pioneering multi-chain Web 3.0 data network revolutionizing blockchain data accessibility. ",
+    "description": "Unmarshal is a pioneering multi-chain Web 3.0 data network revolutionizing blockchain data accessibility. ",
+    "author": "Unmarshal ",
+    "categories": [
+      "Other Infra"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/9b0ef5b6-9e3f-4d2e-9106-ab287421a9ae/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://unmarshal.io/",
+    "site": "https://unmarshal.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/unmarshal",
+    "telegram": "https://t.me/Unmarshal_Chat",
+    "github": "https://github.com/eucrypt"
+  },
+  {
+    "id": "66",
+    "title": "zkMe ",
+    "shortDescription": "zkMe is a decentralized web3 credential network that leverages the power of zero-knowledge proofs to enable secure and private credential issuance and verification.",
+    "description": "zkMe is a decentralized web3 credential network that leverages the power of zero-knowledge proofs to enable secure and private credential issuance and verification.",
+    "author": "zkMe ",
+    "categories": [
+      "Other Infra"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/05e79011-501b-4ad9-aaa9-f29930cd86cf/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://zk.me",
+    "site": "https://zk.me",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/zkme_"
+  },
+  {
+    "id": "69",
+    "title": "Symbiosis",
+    "shortDescription": "Symbiosis is a cross-chain AMM DEX that pools together liquidity from different networks: L1s and L2s, EVM and non-EVM. ",
+    "description": "Symbiosis is a cross-chain AMM DEX that pools together liquidity from different networks: L1s and L2s, EVM and non-EVM. ",
+    "author": "Symbiosis",
+    "categories": [
+      "Bridge"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/b7032f1b-3b6e-4bb2-aea7-6687d2f91cb3/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://symbiosis.finance/",
+    "site": "https://symbiosis.finance/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/symbiosis_fi",
+    "telegram": "https://t.me/symbiosis_finance",
+    "github": "https://github.com/symbiosis-finance"
+  },
+  {
+    "id": "79",
     "title": "Holograph",
     "shortDescription": "Holograph is all about enabling atomic multi-chain composability and broadly speaking are building a permissionless, open source, agnostic protocol.",
     "description": "Holograph is all about enabling atomic multi-chain composability and broadly speaking are building a permissionless, open source, agnostic protocol.",
     "author": "Holograph",
     "categories": [
-      "Infrastructure"
+      "Other Infra"
     ],
-    "logo": "https://cms.mantle.xyz/assets/32faa870-7e14-443b-a410-248dae7a1953?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/6b0bd43a-dcb1-4a7c-b03d-4d3811219415/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://www.holograph.xyz/",
+    "site": "https://www.holograph.xyz/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/holographxyz",
     "github": "https://github.com/holographxyz"
   },
   {
-    "id": "60",
-    "title": "Rivera Money",
-    "shortDescription": "Liquidity infrastructure to enable risk-shared market-making on Mantle.",
-    "description": "Liquidity infrastructure to enable risk-shared market-making on Mantle.",
-    "author": "Rivera Money",
+    "id": "83",
+    "title": "Thirdweb ",
+    "shortDescription": "Thirdweb is a complete Web3 development framework that provides everything you need to build, launch, and manage Web3 apps",
+    "description": "Thirdweb is a complete Web3 development framework that provides everything you need to build, launch, and manage Web3 apps",
+    "author": "Thirdweb ",
     "categories": [
-      "DeFi"
+      "Dev Tool"
     ],
-    "logo": "https://cms.mantle.xyz/assets/ab1ee906-c0fc-4ec1-af28-b9c28cae4cf2?width=180&height=180&fit=contain&quality=75",
-    "url": "https://rivera.money/",
+    "logo": "https://cms.mantle.xyz/assets/313e2083-5b5b-4948-a3da-9466e1d1d5b2/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://thirdweb.com/",
+    "site": "https://thirdweb.com/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/Rivera_Money_",
-    "github": "https://github.com/RiveraMoney"
+    "twitter": "https://twitter.com/thirdweb",
+    "github": "https://github.com/thirdweb-dev"
   },
   {
-    "id": "78",
-    "title": "Blast API",
-    "shortDescription": "Blast API solves Web3 reliability and performance issues ",
-    "description": "Blast API solves Web3 reliability and performance issues ",
-    "author": "Blast API",
+    "id": "86",
+    "title": "Rarible",
+    "shortDescription": "NFT Marketplace platform",
+    "description": "NFT Marketplace platform",
+    "author": "Rarible",
     "categories": [
-      "Infrastructure"
+      "NFT Marketplace"
     ],
-    "logo": "https://cms.mantle.xyz/assets/9e8efb70-b8e2-4bfb-addc-b80b9d90bcb2?width=180&height=180&fit=contain&quality=75",
-    "url": "https://blastapi.io/",
+    "logo": "https://cms.mantle.xyz/assets/f112b390-a790-444e-b1fb-24813e001799/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://rarible.com/",
+    "site": "https://rarible.com/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/BlastAPI",
-    "telegram": "https://t.me/bwareLabs",
-    "github": "https://github.com/bwarelabs"
+    "twitter": "https://twitter.com/rarible",
+    "github": "https://github.com/rarible"
   },
   {
-    "id": "81",
-    "title": "Nexter Finance",
-    "shortDescription": "Nexter is a multi-chain no-loss prediction protocol that allows users to predict crypto and commodity prices as well as real-world event outcomes. ",
-    "description": "Nexter is a multi-chain no-loss prediction protocol that allows users to predict crypto and commodity prices as well as real-world event outcomes. ",
-    "author": "Nexter Finance",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/0774d90b-d755-4470-b623-1ef6edc973a2?width=180&height=180&fit=contain&quality=75",
-    "url": "https://nexter.fi",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/NexterDotFi",
-    "telegram": "https://t.me/Bhavishchat",
-    "github": "https://github.com/Bhavish-finance"
-  },
-  {
-    "id": "76",
-    "title": "Stratum Exchange",
-    "shortDescription": "The liquidity hub for Mantle Network",
-    "description": "The liquidity hub for Mantle Network",
-    "author": "Stratum Exchange",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/19cb5652-56f0-4d91-a519-b2b21c6506a4?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.stratumexchange.com",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/stratumexchange",
-    "github": "https://github.com/stratum-exchange/v1"
-  },
-  {
-    "id": "113",
-    "title": "KTX.Finance",
-    "shortDescription": "KTX.Finance is an on-chain decentralized derivatives trading protocol that utilizes a unique multi-asset liquidity pool.",
-    "description": "KTX.Finance is an on-chain decentralized derivatives trading protocol that utilizes a unique multi-asset liquidity pool.",
-    "author": "KTX.Finance",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/1d621f57-37f5-44cb-9d05-a69101463cbb?width=180&height=180&fit=contain&quality=75",
-    "url": "https://ktx.finance/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/KTX_finance",
-    "telegram": "https://t.me/KTX_officials",
-    "github": "https://github.com/KTX-finance/KTX-core"
-  },
-  {
-    "id": "94",
-    "title": "WalletScan",
-    "shortDescription": "WalletScan is the ultimate tool for tracking crypto assets from different networks and wallets.",
-    "description": "WalletScan is the ultimate tool for tracking crypto assets from different networks and wallets.",
-    "author": "WalletScan",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/aca4c0f2-59c0-47ee-9f97-e4e90cfd6c53?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.walletscan.co",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/Walletscanco",
-    "telegram": "https://t.me/WalletScanco",
-    "github": "https://github.com/walletscan/walletscan"
-  },
-  {
-    "id": "95",
-    "title": "RedStone Oracles",
+    "id": "98",
+    "title": "RedStone",
     "shortDescription": "RedStone is revolutionizing the Oracles industry by implementing novel modular design and 3 tailor-made data consumption models.",
     "description": "RedStone is revolutionizing the Oracles industry by implementing novel modular design and 3 tailor-made data consumption models.",
-    "author": "RedStone Oracles",
+    "author": "RedStone",
     "categories": [
-      "Infrastructure"
+      "Oracle"
     ],
-    "logo": "https://cms.mantle.xyz/assets/5ca8cdbb-e05b-437e-b17a-99c082dbac76?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/696df275-95ed-457b-8fec-f6419bae874c/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://redstone.finance/",
+    "site": "https://redstone.finance/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/redstone_defi",
@@ -803,67 +555,122 @@
     "github": "https://github.com/redstone-finance"
   },
   {
-    "id": "102",
-    "title": "NFTs2Me",
-    "shortDescription": "NFTs2Me is a user-friendly platform to create, deploy and manage your NFT collection, 100% free!",
-    "description": "NFTs2Me is a user-friendly platform to create, deploy and manage your NFT collection, 100% free!",
-    "author": "NFTs2Me",
-    "categories": [
-      "NFT"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/a37c17f9-4568-42a0-987a-03c3ce570db4?width=180&height=180&fit=contain&quality=75",
-    "url": "http://nfts2me.com/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/nfts2me",
-    "telegram": "https://t.me/nfts2me",
-    "github": "https://github.com/nfts2me"
-  },
-  {
-    "id": "48",
-    "title": "OmniKingdoms",
-    "shortDescription": "OmniKingdoms is a multi-chain gaming ecosystem that aims to push on-chain game development.",
-    "description": "OmniKingdoms is a multi-chain gaming ecosystem that aims to push on-chain game development.",
-    "author": "OmniKingdoms",
-    "categories": [
-      "Gaming"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/abbf1470-fbdc-4701-974f-0d079ff229c6?width=180&height=180&fit=contain&quality=75",
-    "url": "https://omnikingdoms.io/?utm_source=Mantle-Website&utm_medium=Ecosystem-Page&utm_campaign=dApp-Explorer-Listing",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/OmniKingdoms",
-    "telegram": "https://t.me/+_MFmpZhOAWM4Yjcx",
-    "github": "https://github.com/orgs/Omni-Kingdoms/repositories"
-  },
-  {
     "id": "99",
-    "title": "MYSO Finance",
-    "shortDescription": "MYSO is a lending platform enabling scalable and cost-efficient credit markets without liquidations",
-    "description": "MYSO is a lending platform enabling scalable and cost-efficient credit markets without liquidations",
-    "author": "MYSO Finance",
+    "title": "Coin98",
+    "shortDescription": "Coin98 is the #1 crypto super app, offering a trusted ecosystem of essential services for Web3",
+    "description": "Coin98 is the #1 crypto super app, offering a trusted ecosystem of essential services for Web3",
+    "author": "Coin98",
+    "categories": [
+      "Wallet/Custody"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/1750f2f0-2277-4581-8ac7-98c4c46214c4/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://coin98.com/",
+    "site": "https://coin98.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/coin98_wallet"
+  },
+  {
+    "id": "87",
+    "title": "LayerZero",
+    "shortDescription": "An omnichain interoperability protocol. LayerZero enables the realization of cross-chain applications with a low level communication primitive.",
+    "description": "An omnichain interoperability protocol. LayerZero enables the realization of cross-chain applications with a low level communication primitive.",
+    "author": "LayerZero",
+    "categories": [
+      "Bridge"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/1e73d0bb-ff4b-4ac5-8d84-7f4c48b40a92/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://layerzero.network/",
+    "site": "https://layerzero.network/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/LayerZero_Labs",
+    "telegram": "https://t.me/joinchat/VcqxYkStIDsyN2Rh"
+  },
+  {
+    "id": "94",
+    "title": "AGNI",
+    "shortDescription": "Agni is a high-capital efficiency, AMM-based decentralized exchange (DEX) and launchpad built to support the Mantle Network ecosystem.",
+    "description": "Agni is a high-capital efficiency, AMM-based decentralized exchange (DEX) and launchpad built to support the Mantle Network ecosystem.",
+    "author": "AGNI",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/6d132f3e-70b0-4f78-95ec-8c0d3c2f1e4a/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://agni.finance/",
+    "site": "https://agni.finance/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/Agnidex",
+    "telegram": "https://t.me/AgniDEXCommunity",
+    "github": "https://github.com/agni-protocol/contracts"
+  },
+  {
+    "id": "89",
+    "title": "Pendle",
+    "shortDescription": "Pendle is a protocol to tokenize and trade DeFi yield. ",
+    "description": "Pendle is a protocol to tokenize and trade DeFi yield. ",
+    "author": "Pendle",
     "categories": [
       "DeFi"
     ],
-    "logo": "https://cms.mantle.xyz/assets/f0a1c492-f617-4718-bcbc-19333d64f372?width=180&height=180&fit=contain&quality=75",
-    "url": "https://myso.finance/",
+    "logo": "https://cms.mantle.xyz/assets/5b4e386d-6588-48f3-8e8c-c50b6c27dda4/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://pendle.finance/",
+    "site": "https://pendle.finance/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/MysoFinance",
-    "telegram": "https://t.me/MysoFinance",
-    "github": "https://github.com/mysofinance/v2"
+    "twitter": "https://twitter.com/pendle_fi",
+    "telegram": "https://t.me/pendlefinance",
+    "github": "https://github.com/pendle-finance/pendle-core-v2-public"
   },
   {
     "id": "101",
+    "title": "DefiLlama",
+    "shortDescription": "DefiLlama is the largest TVL aggregator for DeFi (Decentralized Finance). Our focus is on accurate data and transparent methodology.",
+    "description": "DefiLlama is the largest TVL aggregator for DeFi (Decentralized Finance). Our focus is on accurate data and transparent methodology.",
+    "author": "DefiLlama",
+    "categories": [
+      "Aggregator"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/bc48c5d6-8149-4873-b124-1480c37e2b15/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://defillama.com/",
+    "site": "https://defillama.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/DefiLlama",
+    "telegram": "https://t.me/defillama_tg",
+    "github": "https://github.com/DefiLlama"
+  },
+  {
+    "id": "103",
+    "title": "MC² Finance",
+    "shortDescription": "MC² Finance pioneers decentralized wealth management, enabling both retail users and institutional capital to access standardized token strategies across chains. ",
+    "description": "MC² Finance pioneers decentralized wealth management, enabling both retail users and institutional capital to access standardized token strategies across chains. ",
+    "author": "MC² Finance",
+    "categories": [
+      "Money Market"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/e66b89cd-3816-498d-9924-939560b0d2c8/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://mc2.fi/",
+    "site": "https://mc2.fi/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/mcsquaredfi",
+    "telegram": "https://t.me/mcsquaredfi",
+    "github": "https://github.com/mcsquaredfi"
+  },
+  {
+    "id": "104",
     "title": "Mintpad",
     "shortDescription": "Mintpad is a user-friendly platform to create, deploy and manage your NFT collections and digital art 100% free!",
     "description": "Mintpad is a user-friendly platform to create, deploy and manage your NFT collections and digital art 100% free!",
     "author": "Mintpad",
     "categories": [
-      "NFT"
+      "NFT Tool"
     ],
-    "logo": "https://cms.mantle.xyz/assets/e8de01fd-e6d0-49a7-aed4-5f860801a089?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/efd0c049-c3e4-4d14-b439-9dc36d4b3a1d/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://mintpad.co/",
+    "site": "https://mintpad.co/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/mintpadco",
@@ -871,15 +678,50 @@
   },
   {
     "id": "105",
+    "title": "NFTs2Me",
+    "shortDescription": "NFTs2Me is a user-friendly platform to create, deploy and manage your NFT collection, 100% free!",
+    "description": "NFTs2Me is a user-friendly platform to create, deploy and manage your NFT collection, 100% free!",
+    "author": "NFTs2Me",
+    "categories": [
+      "NFT Tool"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/93d61063-a2b4-4d47-a5a8-d7eb92cb7888/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "http://nfts2me.com/",
+    "site": "http://nfts2me.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/nfts2me",
+    "telegram": "https://t.me/nfts2me",
+    "github": "https://github.com/nfts2me"
+  },
+  {
+    "id": "107",
+    "title": "Polyhedra Network",
+    "shortDescription": "The first trustless, efficient, and secure cross-chain interoperability protocol with zero-knowledge proofs.",
+    "description": "The first trustless, efficient, and secure cross-chain interoperability protocol with zero-knowledge proofs.",
+    "author": "Polyhedra Network",
+    "categories": [
+      "Bridge"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/60766192-1590-4096-8675-8960660f681e/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://zkbridge.com/",
+    "site": "https://zkbridge.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/PolyhedraZK"
+  },
+  {
+    "id": "108",
     "title": "Lootex",
     "shortDescription": "A One-Stop Shop to Gear Up for the Metaverse. We are devoted to providing the best NFT marketplace & trading experience. ",
     "description": "A One-Stop Shop to Gear Up for the Metaverse. We are devoted to providing the best NFT marketplace & trading experience. ",
     "author": "Lootex",
     "categories": [
-      "NFT"
+      "NFT Marketplace"
     ],
-    "logo": "https://cms.mantle.xyz/assets/73c164cd-c5a3-4dfc-b69f-3c7a56d2da7e?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/6f7f592d-4d33-4545-a992-5d50187a89c4/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://go.lootex.io/55j55d",
+    "site": "https://go.lootex.io/55j55d",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/LootexIO",
@@ -887,31 +729,33 @@
     "github": "https://github.com/lootex-io"
   },
   {
-    "id": "107",
+    "id": "109",
     "title": "Crust Finance",
     "shortDescription": "Decentralized exchange and Launchpad with ve(3,3) mechanics built on mantle.",
     "description": "Decentralized exchange and Launchpad with ve(3,3) mechanics built on mantle.",
     "author": "Crust Finance",
     "categories": [
-      "DeFi"
+      "DEX"
     ],
-    "logo": "https://cms.mantle.xyz/assets/84365790-497c-466d-b6f2-0b16d08e5cec?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/bc192752-01d0-4b18-89b2-18cb9f119811/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://www.crust.finance/",
+    "site": "https://www.crust.finance/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/CrustFinance"
   },
   {
-    "id": "108",
+    "id": "110",
     "title": "Bitget Wallet",
     "shortDescription": "Formerly known as BitKeep, Bitget Wallet stands as Asia's largest and a global frontrunner among all-in-one Web3 multi-chain wallets.",
     "description": "Formerly known as BitKeep, Bitget Wallet stands as Asia's largest and a global frontrunner among all-in-one Web3 multi-chain wallets.",
     "author": "Bitget Wallet",
     "categories": [
-      "Wallet"
+      "Wallet/Custody"
     ],
-    "logo": "https://cms.mantle.xyz/assets/3a190f12-7b54-4b98-98b6-75fa51a6f8be?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/6627eac8-f49e-460d-a200-cc803c063c45/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://web3.bitget.com/en",
+    "site": "https://web3.bitget.com/en",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/BitgetWallet",
@@ -919,50 +763,34 @@
     "github": "https://github.com/bitkeepwallet"
   },
   {
-    "id": "109",
-    "title": "iMe Messenger & Crypto Wallet",
-    "shortDescription": "iMe is the app combining Telegram and a full-fledged, multichain, self-custodial crypto wallet.",
-    "description": "iMe is the app combining Telegram and a full-fledged, multichain, self-custodial crypto wallet.",
-    "author": "iMe Messenger & Crypto Wallet",
+    "id": "115",
+    "title": "OctoMarket",
+    "shortDescription": "Trade 100+ assets on OctoMarket, a synthetic omnichain perps DEX.",
+    "description": "Trade 100+ assets on OctoMarket, a synthetic omnichain perps DEX.",
+    "author": "OctoMarket",
     "categories": [
-      "Wallet"
+      "DEX"
     ],
-    "logo": "https://cms.mantle.xyz/assets/516f5af9-2e0b-4921-a2b1-59c9080bf49a?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.imem.app/",
+    "logo": "https://cms.mantle.xyz/assets/72f3fe71-f00d-4132-af7f-f25ccd9c8ef0/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://octomarket.org/",
+    "site": "https://octomarket.org/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/iMePlatform",
-    "telegram": "https://t.me/iMeLime",
-    "github": "https://github.com/imemessenger"
+    "twitter": "https://twitter.com/OctoMarketDao",
+    "github": "https://github.com/octomarketdao"
   },
   {
-    "id": "123",
-    "title": "Etherspot",
-    "shortDescription": "Etherspot is an account abstraction SDK, delivering frictionless Web3 user experience",
-    "description": "Etherspot is an account abstraction SDK, delivering frictionless Web3 user experience",
-    "author": "Etherspot",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/c6193752-aa9c-4bf6-a716-7157c98b8e74?width=180&height=180&fit=contain&quality=75",
-    "url": "https://etherspot.io/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/etherspot",
-    "telegram": "https://t.me/etherspot",
-    "github": "https://github.com/etherspot/"
-  },
-  {
-    "id": "117",
-    "title": "motoDEX",
+    "id": "118",
+    "title": "MotoDEX",
     "shortDescription": "MotoDEX is a Blockchain Game, in which users participate in motorcycle races, develop their riders and improve high-speed tracks.",
     "description": "MotoDEX is a Blockchain Game, in which users participate in motorcycle races, develop their riders and improve high-speed tracks.",
-    "author": "motoDEX",
+    "author": "MotoDEX",
     "categories": [
-      "Gaming"
+      "Games"
     ],
-    "logo": "https://cms.mantle.xyz/assets/eebf484b-edc8-45f2-953e-106abf9fed07?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/3e7e14f4-1f3a-4dad-856f-804e9127dbb0/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://openbisea.io/motodex",
+    "site": "https://openbisea.io/motodex",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/openbisea",
@@ -970,49 +798,107 @@
     "github": "https://github.com/oleksiivinogradov/"
   },
   {
-    "id": "141",
-    "title": "Axelar",
-    "shortDescription": "Axelar is the full-stack interoperability layer for Web3 - integrating diverse networks into a seamless “Internet of blockchains.”",
-    "description": "Axelar is the full-stack interoperability layer for Web3 - integrating diverse networks into a seamless “Internet of blockchains.”",
-    "author": "Axelar",
+    "id": "114",
+    "title": "KTX.Finance",
+    "shortDescription": "KTX.Finance is an on-chain decentralized derivatives trading protocol that utilizes a unique multi-asset liquidity pool.",
+    "description": "KTX.Finance is an on-chain decentralized derivatives trading protocol that utilizes a unique multi-asset liquidity pool.",
+    "author": "KTX.Finance",
     "categories": [
-      "Infrastructure"
+      "Money Market"
     ],
-    "logo": "https://cms.mantle.xyz/assets/49532cb4-5169-4fb9-ba2a-bc294b37b5eb?width=180&height=180&fit=contain&quality=75",
-    "url": "https://axelar.network",
+    "logo": "https://cms.mantle.xyz/assets/8e68a291-6c84-4d78-9380-fb3d022970b7/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://ktx.finance/",
+    "site": "https://ktx.finance/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/axelarcore",
-    "telegram": "https://t.me/+MkC9iW8L31JiOGUx",
-    "github": "https://github.com/axelarnetwork"
+    "twitter": "https://twitter.com/KTX_finance",
+    "telegram": "https://t.me/KTX_officials",
+    "github": "https://github.com/KTX-finance/KTX-core"
   },
   {
-    "id": "127",
+    "id": "111",
+    "title": "iMe Messenger",
+    "shortDescription": "iMe is the app combining Telegram and a full-fledged, multichain, self-custodial crypto wallet.",
+    "description": "iMe is the app combining Telegram and a full-fledged, multichain, self-custodial crypto wallet.",
+    "author": "iMe Messenger",
+    "categories": [
+      "Wallet/Custody"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/b6ebf263-5f81-42a5-b95e-fd65e114eb33/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.imem.app/",
+    "site": "https://www.imem.app/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/iMePlatform",
+    "telegram": "https://t.me/iMeLime",
+    "github": "https://github.com/imemessenger"
+  },
+  {
+    "id": "119",
+    "title": "Algebra Protocol",
+    "shortDescription": "Empowering DEXes with Concentrated Liquidity, Dynamic Fees, Built-in Farming & more for increased capital efficiency.",
+    "description": "Empowering DEXes with Concentrated Liquidity, Dynamic Fees, Built-in Farming & more for increased capital efficiency.",
+    "author": "Algebra Protocol",
+    "categories": [
+      "RFQ/Intents"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/b9f377cb-b183-4d80-91bd-d867fa4516f4/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://algebra.finance/",
+    "site": "https://algebra.finance/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/CryptoAlgebra",
+    "telegram": "https://t.me/cryptoalgebra_chat",
+    "github": "https://github.com/cryptoalgebra"
+  },
+  {
+    "id": "122",
+    "title": "Safle",
+    "shortDescription": "Safle is the need of a community governed holistic infrastructure tool stack for an interoperable web3 for managing identity, accounts, data both on and off chain",
+    "description": "Safle is the need of a community governed holistic infrastructure tool stack for an interoperable web3 for managing identity, accounts, data both on and off chain",
+    "author": "Safle",
+    "categories": [
+      "Dev Tool"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/6b33e85b-9ee9-4b93-b6ef-58cb58826e5e/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://safle.com/",
+    "site": "https://safle.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/GetSafle",
+    "telegram": "http://t.me/safleann",
+    "github": "https://github.com/getsafle"
+  },
+  {
+    "id": "124",
+    "title": "Etherspot",
+    "shortDescription": "Etherspot is an account abstraction SDK, delivering frictionless Web3 user experience",
+    "description": "Etherspot is an account abstraction SDK, delivering frictionless Web3 user experience",
+    "author": "Etherspot",
+    "categories": [
+      "Other Infra"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/8e22c9fc-b58f-4c5d-8256-055e5e1c2b6c/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://etherspot.io/",
+    "site": "https://etherspot.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/etherspot",
+    "telegram": "https://t.me/etherspot",
+    "github": "https://github.com/etherspot/"
+  },
+  {
+    "id": "128",
     "title": "OKX Wallet",
     "shortDescription": "OKX Wallet stands as a versatile, all-encompassing crypto wallet designed for multiple platforms. It grants users effortless access to the expansive Web3 ecosystem",
     "description": "OKX Wallet stands as a versatile, all-encompassing crypto wallet designed for multiple platforms. It grants users effortless access to the expansive Web3 ecosystem",
     "author": "OKX Wallet",
     "categories": [
-      "Wallet"
+      "Wallet/Custody"
     ],
-    "logo": "https://cms.mantle.xyz/assets/47dd5910-4a31-4634-be3f-01543f749579?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/4ad143d9-1292-4b5a-a7de-8a4bf75041e9/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://www.okx.com/web3",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/okxweb3",
-    "github": "https://github.com/okx/go-wallet-sdk"
-  },
-  {
-    "id": "132",
-    "title": "OKX DEX",
-    "shortDescription": "OKX DEX expertly caters to market demands for cross-chain token transfers",
-    "description": "OKX DEX expertly caters to market demands for cross-chain token transfers",
-    "author": "OKX DEX",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/b4a55303-9fdf-493e-8d98-d1795898bc15?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.okx.com/web3/dex-swap",
+    "site": "https://www.okx.com/web3",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/okxweb3",
@@ -1025,10 +911,11 @@
     "description": "Rubic is a Cross-Chain Tech Aggregator for users and dApps.",
     "author": "Rubic",
     "categories": [
-      "DeFi"
+      "Aggregator"
     ],
-    "logo": "https://cms.mantle.xyz/assets/87a1319a-78b6-4980-95bf-fea2c257ac87?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/04be5153-645a-4113-bfd2-9fd3adac8653/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://rubic.exchange/",
+    "site": "https://rubic.exchange/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/CryptoRubic",
@@ -1036,99 +923,139 @@
     "github": "https://github.com/Cryptorubic"
   },
   {
-    "id": "149",
-    "title": "Gamma Strategies",
-    "shortDescription": "A protocol for active liquidity management and market making strategies.",
-    "description": "A protocol for active liquidity management and market making strategies.",
-    "author": "Gamma Strategies",
+    "id": "135",
+    "title": "QuestN",
+    "shortDescription": "QuestN is a one-stop tool offering comprehensive solutions for Marketing, Growth, and Analysis in Web3. ",
+    "description": "QuestN is a one-stop tool offering comprehensive solutions for Marketing, Growth, and Analysis in Web3. ",
+    "author": "QuestN",
     "categories": [
-      "DeFi"
+      "Other Social"
     ],
-    "logo": "https://cms.mantle.xyz/assets/53f5ee34-204c-4dad-8ff5-b4fd2af732fe?width=180&height=180&fit=contain&quality=75",
-    "url": "https://app.gamma.xyz/",
+    "logo": "https://cms.mantle.xyz/assets/48fb4cd9-320a-42d4-8e96-3714b2388b11/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://app.questn.com/",
+    "site": "https://app.questn.com/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/GammaStrategies",
-    "telegram": "https://github.com/GammaStrategies",
-    "github": "https://github.com/GammaStrategies"
+    "twitter": "https://twitter.com/QuestN_com",
+    "telegram": "https://t.me/QuestN_Announcement",
+    "github": "https://github.com/quest3"
   },
   {
-    "id": "137",
+    "id": "136",
     "title": "Owlto Finance",
     "shortDescription": "Owlto Finance is a decentralized cross-rollup bridge focused on L2, providing cheaper and faster service. ",
     "description": "Owlto Finance is a decentralized cross-rollup bridge focused on L2, providing cheaper and faster service. ",
     "author": "Owlto Finance",
     "categories": [
-      "Infrastructure"
+      "Bridge"
     ],
-    "logo": "https://cms.mantle.xyz/assets/aeb745c6-33b0-47a2-8bc3-ff88519edb2d?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/8f1e70ba-22c9-473a-9bcb-8722fd5048f9/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://owlto.finance",
+    "site": "https://owlto.finance",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/Owlto_Finance",
     "github": "https://github.com/owlto-finance/"
   },
   {
-    "id": "205",
-    "title": "Mantscription",
-    "shortDescription": "Mantscription is the first community-driven inscription ecosystem built on Mantle, and aims to develop a user-friendly inscription marketplace and launchpad.",
-    "description": "Mantscription is the first community-driven inscription ecosystem built on Mantle, and aims to develop a user-friendly inscription marketplace and launchpad.",
-    "author": "Mantscription",
+    "id": "131",
+    "title": "MetaMask",
+    "shortDescription": "MetaMask is a global community of developers and designers dedicated to making the world a better place with blockchain technology. ",
+    "description": "MetaMask is a global community of developers and designers dedicated to making the world a better place with blockchain technology. ",
+    "author": "MetaMask",
     "categories": [
-      "Infrastructure"
+      "Wallet/Custody"
     ],
-    "logo": "https://cms.mantle.xyz/assets/bb85d667-39e7-40be-952b-46d52ca31fe9?width=180&height=180&fit=contain&quality=75",
-    "url": "https://mantscription.market/",
+    "logo": "https://cms.mantle.xyz/assets/2b13b14f-9d3d-42db-be9d-2036d82cae49/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://metamask.io/",
+    "site": "https://metamask.io/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/mantscription",
-    "telegram": "https://t.me/mantscription",
-    "github": "https://github.com/Mantscription"
+    "twitter": "https://twitter.com/MetaMask",
+    "github": "https://github.com/MetaMask"
+  },
+  {
+    "id": "129",
+    "title": " OKX DEX",
+    "shortDescription": "For Swap products, OKX Wallet has seamlessly integrated with OKX DEX, a leading swap aggregator, to offer users free trading by connecting with a vast liquidity pool spanning over 30 chains.",
+    "description": "For Swap products, OKX Wallet has seamlessly integrated with OKX DEX, a leading swap aggregator, to offer users free trading by connecting with a vast liquidity pool spanning over 30 chains.",
+    "author": " OKX DEX",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/1b9a6110-f3ca-46ff-a3da-5d79b6659a0d/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.okx.com/web3/dex-swap",
+    "site": "https://www.okx.com/web3/dex-swap",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/okxweb3",
+    "github": "https://github.com/okx/go-wallet-sdk"
+  },
+  {
+    "id": "123",
+    "title": "Battledogs Arena",
+    "shortDescription": "A Peer2Peer #NFT #MPG full #OCA Battle Card Game developed by @OxSorcerers for the multichain omniverse. Accelerating #GameFi on Mantle.",
+    "description": "A Peer2Peer #NFT #MPG full #OCA Battle Card Game developed by @OxSorcerers for the multichain omniverse. Accelerating #GameFi on Mantle.",
+    "author": "Battledogs Arena",
+    "categories": [
+      "Games"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/85561486-53b3-434c-a33e-04d3ae9134d5/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://mantledogs.fun",
+    "site": "https://mantledogs.fun",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/battledogsarena",
+    "telegram": "https://t.me/battledogsarena",
+    "github": "https://github.com/Battledog-Games"
   },
   {
     "id": "139",
-    "title": "PWNDAO",
-    "shortDescription": "PWN is an oracle-free, multi-purpose P2P lending protocol, providing maximum asset utilization.",
-    "description": "PWN is an oracle-free, multi-purpose P2P lending protocol, providing maximum asset utilization.",
-    "author": "PWNDAO",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/b0af056d-5249-4391-970c-a316b773add4?width=180&height=180&fit=contain&quality=75",
-    "url": "https://pwn.xyz/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/pwndao",
-    "telegram": "https://discord.pwn.xyz/",
-    "github": "https://github.com/pwnfinance/pwn_contracts"
-  },
-  {
-    "id": "140",
     "title": "DRPC",
     "shortDescription": "DRPC is a reliable, scalable & cost-efficient Decentralized RPC network of independent third-party partners and public nodes. ",
     "description": "DRPC is a reliable, scalable & cost-efficient Decentralized RPC network of independent third-party partners and public nodes. ",
     "author": "DRPC",
     "categories": [
-      "Infrastructure"
+      "Node Provider"
     ],
-    "logo": "https://cms.mantle.xyz/assets/8a00b813-0c50-4e2c-b7b7-462956df1775?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/b74039b8-296a-4a7a-83f2-40249c1e80ea/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://drpc.org/",
+    "site": "https://drpc.org/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/drpcorg",
     "github": "https://github.com/p2p-org/dshackle"
   },
   {
-    "id": "142",
+    "id": "140",
+    "title": "Axelar",
+    "shortDescription": "Axelar is the full-stack interoperability layer for Web3 - integrating diverse networks into a seamless “Internet of blockchains.”",
+    "description": "Axelar is the full-stack interoperability layer for Web3 - integrating diverse networks into a seamless “Internet of blockchains.”",
+    "author": "Axelar",
+    "categories": [
+      "Bridge"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/381ecb48-ff68-4437-8526-31032aba28de/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://axelar.network",
+    "site": "https://axelar.network",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/axelarcore",
+    "telegram": "https://t.me/+MkC9iW8L31JiOGUx",
+    "github": "https://github.com/axelarnetwork"
+  },
+  {
+    "id": "141",
     "title": "Zonic.app",
     "shortDescription": "Zonic.app, the Ethereum Layer-2 NFT marketplace, enables everyone on Ethereum Layer-2 to trade their NFTs at lightning speed.",
     "description": "Zonic.app, the Ethereum Layer-2 NFT marketplace, enables everyone on Ethereum Layer-2 to trade their NFTs at lightning speed.",
     "author": "Zonic.app",
     "categories": [
-      "NFT"
+      "NFT Marketplace"
     ],
-    "logo": "https://cms.mantle.xyz/assets/3610cd42-2128-4fc4-955a-632fd1698d1b?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/56b9b613-4128-4b14-bb2c-aac34b0c42c7/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://zonic.app/",
+    "site": "https://zonic.app/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/ZonicApp",
@@ -1136,32 +1063,34 @@
     "github": "https://github.com/zonicapp"
   },
   {
-    "id": "143",
-    "title": "Clipper DEX",
+    "id": "142",
+    "title": "Clipper",
     "shortDescription": "Clipper is the most profitable DEX for LPs and best place to swap blue-chips like ETH, WBTC and USD.",
     "description": "Clipper is the most profitable DEX for LPs and best place to swap blue-chips like ETH, WBTC and USD.",
-    "author": "Clipper DEX",
+    "author": "Clipper",
     "categories": [
-      "DeFi"
+      "DEX"
     ],
-    "logo": "https://cms.mantle.xyz/assets/4a91d631-8cbb-4bfb-bf4a-5e23070caa33?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/80b7b23d-ea24-4b65-b729-5e42131c1add/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://clipper.exchange/",
+    "site": "https://clipper.exchange/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/Clipper_DEX",
     "github": "https://github.com/shipyard-software"
   },
   {
-    "id": "144",
+    "id": "143",
     "title": "Krystal Wallet",
     "shortDescription": "Krystal is the simplest web3 wallet offering cutting-edge portfolio management, numerous on-chain transactions and multiple security features.",
     "description": "Krystal is the simplest web3 wallet offering cutting-edge portfolio management, numerous on-chain transactions and multiple security features.",
     "author": "Krystal Wallet",
     "categories": [
-      "Wallet"
+      "Wallet/Custody"
     ],
-    "logo": "https://cms.mantle.xyz/assets/fd0b15a6-acda-4754-9b00-eeab745a78e8?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/1b9a080c-ad37-4150-840c-6479c14b4a62/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://krystal.app/",
+    "site": "https://krystal.app/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/KrystalWallet",
@@ -1169,49 +1098,35 @@
     "github": "https://github.com/KYRDTeam"
   },
   {
-    "id": "151",
-    "title": "Transak.com",
-    "shortDescription": "Global On/Off Ramp ",
-    "description": "Global On/Off Ramp ",
-    "author": "Transak.com",
+    "id": "147",
+    "title": "Gamma Strategies",
+    "shortDescription": "A protocol for active liquidity management and market making strategies.",
+    "description": "A protocol for active liquidity management and market making strategies.",
+    "author": "Gamma Strategies",
     "categories": [
-      "Infrastructure"
+      "Money Market"
     ],
-    "logo": "https://cms.mantle.xyz/assets/2b97b93c-a82b-436c-8c98-ad892a6d9e5a?width=180&height=180&fit=contain&quality=75",
-    "url": "https://transak.com/",
+    "logo": "https://cms.mantle.xyz/assets/c9700042-feb5-4ce8-9af9-a4721b409cdf/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://app.gamma.xyz/",
+    "site": "https://app.gamma.xyz/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/Transak",
-    "telegram": "https://t.me/transakfinance",
-    "github": "https://github.com/Transak"
+    "twitter": "https://twitter.com/GammaStrategies",
+    "telegram": "https://github.com/GammaStrategies",
+    "github": "https://github.com/GammaStrategies"
   },
   {
-    "id": "153",
-    "title": "Meson",
-    "shortDescription": "Meson is a leading unified cross-chain bridging protocol that enables the seamless cross-chain experience for tokens ",
-    "description": "Meson is a leading unified cross-chain bridging protocol that enables the seamless cross-chain experience for tokens ",
-    "author": "Meson",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/cd981766-d211-43fc-b3d1-cfe5eea154fb?width=180&height=180&fit=contain&quality=75",
-    "url": "https://meson.fi",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/mesonfi",
-    "github": "https://github.com/mesonfi"
-  },
-  {
-    "id": "154",
+    "id": "150",
     "title": "Esper Finance",
     "shortDescription": "Esper Finance is an ecosystem-focused, community-driven DEX built upon the robust, highly scalable Mantle Network.",
     "description": "Esper Finance is an ecosystem-focused, community-driven DEX built upon the robust, highly scalable Mantle Network.",
     "author": "Esper Finance",
     "categories": [
-      "DeFi"
+      "DEX"
     ],
-    "logo": "https://cms.mantle.xyz/assets/3317f651-7ba8-4f71-9b5b-3dc9dcb337e0?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/4876de02-18d7-49b9-ab91-fd2c9e98c34d/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://esper.finance/",
+    "site": "https://esper.finance/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/EsperFinance",
@@ -1219,47 +1134,67 @@
     "github": "https://github.com/orgs/EsperFinance/repositories"
   },
   {
-    "id": "156",
-    "title": "Teller",
-    "shortDescription": "Teller is a non-custodial lending book that enables users to borrow against any ERC20 (token) or ERC721 / ERC1155 (NFT). ",
-    "description": "Teller is a non-custodial lending book that enables users to borrow against any ERC20 (token) or ERC721 / ERC1155 (NFT). ",
-    "author": "Teller",
+    "id": "153",
+    "title": "Mintle",
+    "shortDescription": "Mintle is an NFT marketplace on the Mantle network where you can mint, buy and sell NFTs! Powered by Rarible.",
+    "description": "Mintle is an NFT marketplace on the Mantle network where you can mint, buy and sell NFTs! Powered by Rarible.",
+    "author": "Mintle",
     "categories": [
-      "DeFi"
+      "NFT Marketplace"
     ],
-    "logo": "https://cms.mantle.xyz/assets/0acc7ae5-380e-4c21-af55-46d8e7d12d84?width=180&height=180&fit=contain&quality=75",
-    "url": "https://teller.org",
+    "logo": "https://cms.mantle.xyz/assets/46721e25-08e1-4b64-8f5e-f1f80b159a49/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://mintle.app/",
+    "site": "https://mintle.app/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/useteller",
-    "github": "https://github.com/teller-protocol/teller-protocol-v2"
+    "twitter": "https://twitter.com/mintleapp"
   },
   {
-    "id": "157",
+    "id": "154",
     "title": "Boto.io",
     "shortDescription": "Boto is the no-code automation platform for creating and sharing bots that automate your crypto, NFT and other blockchain or DeFi activities.",
     "description": "Boto is the no-code automation platform for creating and sharing bots that automate your crypto, NFT and other blockchain or DeFi activities.",
     "author": "Boto.io",
     "categories": [
-      "NFT"
+      "NFT Tool"
     ],
-    "logo": "https://cms.mantle.xyz/assets/ea4b5440-c6a6-4e7c-a0f9-c29861b80c0f?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/3fd50e2c-47a2-44d8-9faf-c7d2befcfcad/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://boto.io",
+    "site": "https://boto.io",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/boto_io"
   },
   {
-    "id": "158",
+    "id": "144",
+    "title": "ONDO",
+    "shortDescription": "Institutional-Grade Finance. On-Chain. For Everyone.",
+    "description": "Institutional-Grade Finance. On-Chain. For Everyone.",
+    "author": "ONDO",
+    "categories": [
+      "RWA/Synthetic"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/94d9870c-d86c-437c-85cd-3f8db589cc3f/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://ondo.finance/",
+    "site": "https://ondo.finance/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/OndoFinance",
+    "telegram": "https://t.me/ondofinance",
+    "github": "https://github.com/ondoprotocol"
+  },
+  {
+    "id": "155",
     "title": "Circuit Protocol",
     "shortDescription": "Circuit is Mantle's native yield optimizer, offering the auto-compounded strategies for the highest yield on the network.",
     "description": "Circuit is Mantle's native yield optimizer, offering the auto-compounded strategies for the highest yield on the network.",
     "author": "Circuit Protocol",
     "categories": [
-      "DeFi"
+      "Vault"
     ],
-    "logo": "https://cms.mantle.xyz/assets/adbb6f3b-376e-417e-88c5-c462b9281190?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/affd6ac8-11d6-4d28-b6bf-ec56d4eb0d68/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://www.circuit.farm",
+    "site": "https://www.circuit.farm",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/circuitprotocol",
@@ -1267,16 +1202,52 @@
     "github": "https://github.com/Circuit-Finance-Org"
   },
   {
-    "id": "159",
-    "title": "SafePal Wallet Suite",
+    "id": "149",
+    "title": "Transak.com",
+    "shortDescription": "Global On/Off Ramp ",
+    "description": "Global On/Off Ramp ",
+    "author": "Transak.com",
+    "categories": [
+      "Fiat-On-Ramp"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/4fbdc083-a0ff-4768-8855-ae4104864cb8/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://transak.com/",
+    "site": "https://transak.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/Transak",
+    "telegram": "https://t.me/transakfinance",
+    "github": "https://github.com/Transak"
+  },
+  {
+    "id": "151",
+    "title": "Meson",
+    "shortDescription": "Meson is a leading unified cross-chain bridging protocol that enables the seamless cross-chain experience for tokens.",
+    "description": "Meson is a leading unified cross-chain bridging protocol that enables the seamless cross-chain experience for tokens.",
+    "author": "Meson",
+    "categories": [
+      "Bridge"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/094fd109-462f-43e4-b9a3-87861199216d/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://meson.fi",
+    "site": "https://meson.fi",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/mesonfi",
+    "github": "https://github.com/mesonfi"
+  },
+  {
+    "id": "156",
+    "title": "SafePal ",
     "shortDescription": "SafePal is a comprehensive crypto wallet suite with hardware wallet, mobile app, and browser extension wallet solutions to help users manage and secure their assets.",
     "description": "SafePal is a comprehensive crypto wallet suite with hardware wallet, mobile app, and browser extension wallet solutions to help users manage and secure their assets.",
-    "author": "SafePal Wallet Suite",
+    "author": "SafePal ",
     "categories": [
-      "Wallet"
+      "Wallet/Custody"
     ],
-    "logo": "https://cms.mantle.xyz/assets/f9968250-0c5a-4239-ab3e-ace791f76b0e?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/571b7254-1e56-4fbe-96ef-93c67618d99b/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://www.safepal.com/",
+    "site": "https://www.safepal.com/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/iSafePal",
@@ -1285,31 +1256,16 @@
   },
   {
     "id": "160",
-    "title": "YoungParrot",
-    "shortDescription": "YoungParrot is a NFT marketplace on multichain, we have NFT launchpad and NFT staking.",
-    "description": "YoungParrot is a NFT marketplace on multichain, we have NFT launchpad and NFT staking.",
-    "author": "YoungParrot",
-    "categories": [
-      "NFT"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/e1f784d0-665e-46ff-b788-cb466762664f?width=180&height=180&fit=contain&quality=75",
-    "url": "https://app.youngparrotnft.com/mantle",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/youngparrotnft",
-    "telegram": "https://t.me/youngparrotnft"
-  },
-  {
-    "id": "163",
     "title": "KnowYourCat",
     "shortDescription": "Cross-chain attestation data aggregator protocol. KnowYourCat make your on-chain and off-chain reputation available for other dApps on blockchains they use.",
     "description": "Cross-chain attestation data aggregator protocol. KnowYourCat make your on-chain and off-chain reputation available for other dApps on blockchains they use.",
     "author": "KnowYourCat",
     "categories": [
-      "Infrastructure"
+      "Aggregator"
     ],
-    "logo": "https://cms.mantle.xyz/assets/f4cf63f4-35a3-4a6a-aa01-51995e9ec10d?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/59ac3679-0f2e-4fdd-ab2f-92a2e040eb34/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://knowyourcat.id",
+    "site": "https://knowyourcat.id",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/Knowyourcat_id",
@@ -1317,64 +1273,52 @@
     "github": "https://github.com/KnowYourCat"
   },
   {
-    "id": "165",
-    "title": "Fan.tech",
-    "shortDescription": "Build a network, grow your networth. Fantech is redefining relationships in a hyperfinancialized world.",
-    "description": "Build a network, grow your networth. Fantech is redefining relationships in a hyperfinancialized world.",
-    "author": "Fan.tech",
+    "id": "158",
+    "title": "GeckoTerminal",
+    "shortDescription": "GeckoTerminal is a DEX tracker and cryptocurrency price charting tool by CoinGecko.",
+    "description": "GeckoTerminal is a DEX tracker and cryptocurrency price charting tool by CoinGecko.",
+    "author": "GeckoTerminal",
     "categories": [
-      "Social"
+      "Other Infra"
     ],
-    "logo": "https://cms.mantle.xyz/assets/ea28ac30-a923-48a1-a06b-17e25d7140fd?width=180&height=180&fit=contain&quality=75",
-    "url": "https://fan.tech/",
+    "logo": "https://cms.mantle.xyz/assets/ea747524-b9be-4ae4-97ae-ae78ff9482de/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.geckoterminal.com",
+    "site": "https://www.geckoterminal.com",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/joinfantech",
-    "telegram": "https://t.me/Fantechsupport"
+    "twitter": "https://twitter.com/GeckoTerminal",
+    "telegram": "https://t.me/geckoterminal"
   },
   {
-    "id": "172",
-    "title": "Cobo Argus ",
-    "shortDescription": "Cobo Argus is a secure and efficient on-chain digital asset management solution that supports role-based access controls, DeFi investment strategies and more.",
-    "description": "Cobo Argus is a secure and efficient on-chain digital asset management solution that supports role-based access controls, DeFi investment strategies and more.",
-    "author": "Cobo Argus ",
+    "id": "163",
+    "title": "MUFEX",
+    "shortDescription": "Smart Money, Social Interaction, Exciting Entertainment - A Whole New Decentralized Trading Experience!",
+    "description": "Smart Money, Social Interaction, Exciting Entertainment - A Whole New Decentralized Trading Experience!",
+    "author": "MUFEX",
     "categories": [
-      "DeFi"
+      "DEX"
     ],
-    "logo": "https://cms.mantle.xyz/assets/bb8dc3bd-fea4-451a-8167-97e591ebab8f?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.cobo.com/argus",
+    "logo": "https://cms.mantle.xyz/assets/5552b939-9ca8-4b53-b828-27c23942c4be/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.mufex.finance",
+    "site": "https://www.mufex.finance",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/Cobo_Global",
-    "github": "https://github.com/CoboGlobal/cobosafe"
+    "twitter": "https://twitter.com/Mufex_Official",
+    "telegram": "https://t.me/MUFEX",
+    "github": "https://github.com/orgs/MUFEX-Exchange/repositories"
   },
   {
-    "id": "173",
-    "title": "TokenPocket",
-    "shortDescription": "TokenPocket is the leading multi-chain Crypto&DeFi wallet. Since its launch in 2018, it has provided trusted digital asset management services to over 20 million users worldwide. ",
-    "description": "TokenPocket is the leading multi-chain Crypto&DeFi wallet. Since its launch in 2018, it has provided trusted digital asset management services to over 20 million users worldwide. ",
-    "author": "TokenPocket",
-    "categories": [
-      "Wallet"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/bd62172e-4fd3-40cf-b425-366e1198c630?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.tokenpocket.pro/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/TokenPocket_TP",
-    "github": "https://github.com/TP-Lab"
-  },
-  {
-    "id": "167",
+    "id": "164",
     "title": "XY Finance",
     "shortDescription": "XY Finance is a cross-chain interoperability protocol aggregating multiple bridges. ",
     "description": "XY Finance is a cross-chain interoperability protocol aggregating multiple bridges. ",
     "author": "XY Finance",
     "categories": [
-      "DeFi"
+      "Bridge"
     ],
-    "logo": "https://cms.mantle.xyz/assets/85b8b644-743e-4d8c-8e41-8351fdaab20c?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/bf36a0ad-3a67-42f8-81a0-4c3de88942c4/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://xy.finance/",
+    "site": "https://xy.finance/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/xyfinance",
@@ -1382,48 +1326,120 @@
     "github": "https://github.com/XY-Finance"
   },
   {
-    "id": "175",
-    "title": "PoPP (PoP Planet)",
-    "shortDescription": "PoPP is a Dapp known as PoP Planet, which aims to monetize your influence with the Web3 Social Network and empowers you",
-    "description": "PoPP is a Dapp known as PoP Planet, which aims to monetize your influence with the Web3 Social Network and empowers you",
-    "author": "PoPP (PoP Planet)",
+    "id": "169",
+    "title": "Cobo Argus",
+    "shortDescription": "Cobo Argus is a secure and efficient on-chain digital asset management solution that supports role-based access controls, DeFi investment strategies and more.",
+    "description": "Cobo Argus is a secure and efficient on-chain digital asset management solution that supports role-based access controls, DeFi investment strategies and more.",
+    "author": "Cobo Argus",
     "categories": [
-      "Social"
+      "Vault"
     ],
-    "logo": "https://cms.mantle.xyz/assets/7deeb915-5ef1-4f2d-9b08-f2fc69d6746f?width=180&height=180&fit=contain&quality=75",
-    "url": "https://popp.club",
+    "logo": "https://cms.mantle.xyz/assets/85dd82eb-a719-4719-a103-76f7607a1cfb/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.cobo.com/argus",
+    "site": "https://www.cobo.com/argus",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/Hi_PoPPOfficial",
-    "telegram": "https://t.me/PoPPOfficialGroup",
-    "github": "https://github.com/PoPPlanet/popp-airdrop-contract"
+    "twitter": "https://twitter.com/Cobo_Global",
+    "github": "https://github.com/CoboGlobal/cobosafe"
   },
   {
-    "id": "177",
+    "id": "170",
+    "title": "TokenPocket",
+    "shortDescription": "TokenPocket is the leading multi-chain Crypto&DeFi wallet. Since its launch in 2018, it has provided trusted digital asset management services to over 20 million users worldwide. ",
+    "description": "TokenPocket is the leading multi-chain Crypto&DeFi wallet. Since its launch in 2018, it has provided trusted digital asset management services to over 20 million users worldwide. ",
+    "author": "TokenPocket",
+    "categories": [
+      "Wallet/Custody"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/af6a5762-34af-4b8a-b074-e5b532542aa1/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.tokenpocket.pro/",
+    "site": "https://www.tokenpocket.pro/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/TokenPocket_TP",
+    "github": "https://github.com/TP-Lab"
+  },
+  {
+    "id": "171",
+    "title": "Okapi",
+    "shortDescription": "Discover Web3 through on-chain verified attestations.",
+    "description": "Discover Web3 through on-chain verified attestations.",
+    "author": "Okapi",
+    "categories": [
+      "Dev Tool"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/29a0c527-cf79-4076-adb4-67c76fde0d55/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.okapi.xyz/",
+    "site": "https://www.okapi.xyz/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/okapixyz",
+    "github": "https://github.com/okapilabs"
+  },
+  {
+    "id": "173",
+    "title": "imToken",
+    "shortDescription": "imToken is a non-custodial wallet where users can store, trade and stake tokens.",
+    "description": "imToken is a non-custodial wallet where users can store, trade and stake tokens.",
+    "author": "imToken",
+    "categories": [
+      "Wallet/Custody"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/13741106-b4ab-402c-a894-8e14c7b88182/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://token.im/",
+    "site": "https://token.im/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/imTokenOfficial",
+    "telegram": "https://discord.com/invite/imToken",
+    "github": "https://github.com/consenlabs"
+  },
+  {
+    "id": "174",
     "title": "Chat3",
     "shortDescription": "Chat3 is the premier social live-streaming and conferencing tool for web3.",
     "description": "Chat3 is the premier social live-streaming and conferencing tool for web3.",
     "author": "Chat3",
     "categories": [
-      "Social"
+      "Other Social"
     ],
-    "logo": "https://cms.mantle.xyz/assets/e1052caa-77e0-427f-a70f-22208462faa9?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/44ccde62-8cea-4183-8258-b1644e0a1dbb/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://chat3.one/",
+    "site": "https://chat3.one/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/chat3one"
   },
   {
-    "id": "169",
+    "id": "159",
+    "title": "Catalyst",
+    "shortDescription": "Catalyst is the cross-chain AMM built to connect all chains",
+    "description": "Catalyst is the cross-chain AMM built to connect all chains",
+    "author": "Catalyst",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/6b845d22-4f03-4b10-bd28-eb99f832308c/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://catalyst.exchange/",
+    "site": "https://catalyst.exchange/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/catalystAMM",
+    "telegram": "https://t.me/CatalystChat",
+    "github": "https://github.com/catalystdao"
+  },
+  {
+    "id": "166",
     "title": "OpenOcean",
     "shortDescription": "OpenOcean is a leading DEX aggregator integrated 1000+ liquidity sources and providing the best swap prices across 30+ chains. ",
     "description": "OpenOcean is a leading DEX aggregator integrated 1000+ liquidity sources and providing the best swap prices across 30+ chains. ",
     "author": "OpenOcean",
     "categories": [
-      "DeFi"
+      "Aggregator"
     ],
-    "logo": "https://cms.mantle.xyz/assets/98f524e0-3e65-4f0a-aa06-f68c4df3a25a?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/fc0b02e9-333f-4e42-9057-bb769f471004/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://openocean.finance/",
+    "site": "https://openocean.finance/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/OpenOceanGlobal",
@@ -1431,215 +1447,69 @@
     "github": "https://github.com/openocean-finance/"
   },
   {
-    "id": "178",
-    "title": "1delta",
-    "shortDescription": "Decentralized margin trading protocol providing access to $10B+ of liquidity to build low-cost, non-custodial margin positions.",
-    "description": "Decentralized margin trading protocol providing access to $10B+ of liquidity to build low-cost, non-custodial margin positions.",
-    "author": "1delta",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/76c55a7b-703c-4d83-b4ba-2b2fe4aee47c?width=180&height=180&fit=contain&quality=75",
-    "url": "https://1delta.io/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://x.com/1deltaDAO",
-    "telegram": "https://t.me/OneDeltaDAO",
-    "github": "https://github.com/1delta-dao"
-  },
-  {
-    "id": "180",
-    "title": "OnThis",
-    "shortDescription": "Send ETH to human readable addresses to bridge, swap, stake and more directly from your wallet.",
-    "description": "Send ETH to human readable addresses to bridge, swap, stake and more directly from your wallet.",
-    "author": "OnThis",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/46d0fc3b-2b41-49b8-9100-3f6529cce778?width=180&height=180&fit=contain&quality=75",
-    "url": "https://onthis.xyz/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/onthisxyz",
-    "telegram": "https://t.me/onthisxyz",
-    "github": "https://github.com/onthisxyz/shortcuts"
-  },
-  {
-    "id": "171",
-    "title": "MailZero",
-    "shortDescription": "MailZero is the world's first All-In-One Automation & Email Marketing Platform of Web3. ",
-    "description": "MailZero is the world's first All-In-One Automation & Email Marketing Platform of Web3. ",
-    "author": "MailZero",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/aa447bb7-c8ac-42e1-b963-bb378e964493?width=180&height=180&fit=contain&quality=75",
-    "url": "https://mailzero.network/stamp?earneth=1",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/MailZeroNetwork",
-    "github": "https://github.com/mailzero/web-interface"
-  },
-  {
     "id": "181",
-    "title": "SupraOracles",
-    "shortDescription": "Supra is a middleware network pioneering cross-chain solutions across L1 and L2 ecosystems to power Web3 applications.",
-    "description": "Supra is a middleware network pioneering cross-chain solutions across L1 and L2 ecosystems to power Web3 applications.",
-    "author": "SupraOracles",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/cad4ea15-1a39-4ed3-b5b4-196795476df7?width=180&height=180&fit=contain&quality=75",
-    "url": "https://supra.com",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/SupraOracles",
-    "telegram": "https://t.me/SupraOracles",
-    "github": "https://github.com/Entropy-Foundation"
-  },
-  {
-    "id": "182",
-    "title": "NativeX",
-    "shortDescription": "NativeX is a DEX powered by Native. Trade different coins on and across different chains at the best prices at zero trading fees (Ever)!!!",
-    "description": "NativeX is a DEX powered by Native. Trade different coins on and across different chains at the best prices at zero trading fees (Ever)!!!",
-    "author": "NativeX",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/84a5dcb7-c67e-4e32-83b7-2bec4dacf9b6?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.nativex.finance/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/NativeX_fi",
-    "telegram": "https://t.me/native_labs/1",
-    "github": "https://github.com/Native-org"
-  },
-  {
-    "id": "183",
-    "title": "Swapsicle",
-    "shortDescription": "Swapsicle is more than a DEX. Swapsicle features a dual token economy, single-sided staking, utility NFTs, perpetual trading, and much more. ",
-    "description": "Swapsicle is more than a DEX. Swapsicle features a dual token economy, single-sided staking, utility NFTs, perpetual trading, and much more. ",
-    "author": "Swapsicle",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/f1aef283-244d-41be-940a-2e32ddcc84a8?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.swapsicle.io/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/SwapsicleDEX",
-    "telegram": "https://t.me/SwapsicleDAO",
-    "github": "https://github.com/swapsicledex"
-  },
-  {
-    "id": "184",
     "title": "RabbitHole",
     "shortDescription": "RabbitHole makes it easy to earn crypto by participating in the best cryptonetworks",
     "description": "RabbitHole makes it easy to earn crypto by participating in the best cryptonetworks",
     "author": "RabbitHole",
     "categories": [
-      "Social"
+      "Other Social"
     ],
-    "logo": "https://cms.mantle.xyz/assets/ffb57f39-5daa-412f-bb04-ad43226c2d24?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/03880dd8-867f-44d3-90c1-94513d3b3538/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://rabbithole.gg/quests",
+    "site": "https://rabbithole.gg/quests",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/rabbithole_gg?lang=en",
     "github": "https://github.com/rabbitholegg"
   },
   {
-    "id": "187",
-    "title": "RubyDex",
-    "shortDescription": "Perpetual Contracts DEX for Forex, Stocks, Crypto, and NFTs",
-    "description": "Perpetual Contracts DEX for Forex, Stocks, Crypto, and NFTs",
-    "author": "RubyDex",
+    "id": "186",
+    "title": "Stakefish",
+    "shortDescription": "stakefish is one of the largest and most trusted validators in the crypto ecosystem.",
+    "description": "stakefish is one of the largest and most trusted validators in the crypto ecosystem.",
+    "author": "Stakefish",
     "categories": [
-      "DeFi"
+      "Node Provider"
     ],
-    "logo": "https://cms.mantle.xyz/assets/b0370443-393e-4d8f-8450-1663f8d550e7?width=180&height=180&fit=contain&quality=75",
-    "url": "https://rubydex.com/en",
+    "logo": "https://cms.mantle.xyz/assets/694e3da1-3f6e-4c50-a14d-c4a9f901b4bb/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://stake.fish/",
+    "site": "https://stake.fish/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/Ruby_Dex",
-    "telegram": "https://t.me/RubyDex_Official",
-    "github": "https://github.com/Rubydex"
-  },
-  {
-    "id": "66",
-    "title": "Ammos",
-    "shortDescription": "Ultra-Capital Efficient DEX with Limit Orders, Managed Liquidity Positions (MLP), Optimised Liquidity and Native Bribing Markets ",
-    "description": "Ultra-Capital Efficient DEX with Limit Orders, Managed Liquidity Positions (MLP), Optimised Liquidity and Native Bribing Markets ",
-    "author": "Ammos",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/ae135865-c55c-4916-985f-7eb4bd8d501b?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.ammos.fi/ ",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/Ammosfinance",
-    "telegram": "https://t.me/AmmosFinance",
-    "github": "https://github.com/ammos-fi"
-  },
-  {
-    "id": "192",
-    "title": "Privy",
-    "shortDescription": "Privy is the easiest way to onboard all your users to web3, regardless of whether they already have wallets.",
-    "description": "Privy is the easiest way to onboard all your users to web3, regardless of whether they already have wallets.",
-    "author": "Privy",
-    "categories": [
-      "B2B"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/312d2f0d-5b41-4243-9dc1-436e80bf31f3?width=180&height=180&fit=contain&quality=75",
-    "url": "https://www.privy.io/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/privy_io",
-    "github": "https://github.com/privy-io"
+    "twitter": "https://twitter.com/stakefish",
+    "telegram": "https://t.me/stakefish",
+    "github": "https://github.com/stakefish"
   },
   {
     "id": "193",
-    "title": "Aboard Exchange",
-    "shortDescription": "The Order-Book Perpetual DEX on Arbitrum, Avalanche, Scroll, and Era, featuring an on-chain broker model to reward users with multiple incentives.",
-    "description": "The Order-Book Perpetual DEX on Arbitrum, Avalanche, Scroll, and Era, featuring an on-chain broker model to reward users with multiple incentives.",
-    "author": "Aboard Exchange",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/e1327152-ab1e-462c-97d1-f750ae40bb43?width=180&height=180&fit=contain&quality=75",
-    "url": "https://aboard.exchange/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/AboardExchange",
-    "github": "https://github.com/aboard-exchange"
-  },
-  {
-    "id": "198",
-    "title": "Mantle Name Service (MantleNS)",
+    "title": "MantleNS",
     "shortDescription": "MantleNS, the first-ever Omnichain Naming Service powered by  @star_protocol on the Mantle Network, redefines the fusion of DID and blockchain domains.",
     "description": "MantleNS, the first-ever Omnichain Naming Service powered by  @star_protocol on the Mantle Network, redefines the fusion of DID and blockchain domains.",
-    "author": "Mantle Name Service (MantleNS)",
+    "author": "MantleNS",
     "categories": [
-      "Infrastructure"
+      "Other Infra"
     ],
-    "logo": "https://cms.mantle.xyz/assets/b1b8b30d-6bff-4775-a290-5e97da110e10?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/fc677f02-6051-41a6-b74a-0a8b9c6b9b53/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://mantlens.domains/",
+    "site": "https://mantlens.domains/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/mantlensdomains",
     "github": "https://github.com/asterso"
   },
   {
-    "id": "199",
+    "id": "194",
     "title": "Mini Bridge",
     "shortDescription": "Cross-chain bridge for small transfer scenarios, offering low fees and fast confirmation times.",
     "description": "Cross-chain bridge for small transfer scenarios, offering low fees and fast confirmation times.",
     "author": "Mini Bridge",
     "categories": [
-      "DeFi"
+      "Bridge"
     ],
-    "logo": "https://cms.mantle.xyz/assets/d218fd73-b4aa-4102-967a-8844f06a2df6?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/1085d1fe-a247-40ed-ab5a-5460265831dd/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://minibridge.chaineye.tools/",
+    "site": "https://minibridge.chaineye.tools/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/Chaineye_tools",
@@ -1647,65 +1517,170 @@
     "github": "https://github.com/DeFiEye/Mini-Bridge"
   },
   {
-    "id": "200",
-    "title": "Liquid Crypto",
-    "shortDescription": "Liquid Crypto - DeFi Redefined. Removing complexity in all things DEX.",
-    "description": "Liquid Crypto - DeFi Redefined. Removing complexity in all things DEX.",
-    "author": "Liquid Crypto",
+    "id": "185",
+    "title": "Aurelius Finance",
+    "shortDescription": "Aurelius is a DeFi platform on the Mantle Network that innovatively integrates CDPs and lending markets to provide a comprehensive borrowing and lending solution.",
+    "description": "Aurelius is a DeFi platform on the Mantle Network that innovatively integrates CDPs and lending markets to provide a comprehensive borrowing and lending solution.",
+    "author": "Aurelius Finance",
     "categories": [
-      "DeFi"
+      "Money Market"
     ],
-    "logo": "https://cms.mantle.xyz/assets/ea3073d4-f41d-4704-831e-54f4a55c1176?width=180&height=180&fit=contain&quality=75",
-    "url": "https://liquidcrypto.finance/",
+    "logo": "https://cms.mantle.xyz/assets/499f33aa-0fb1-4b35-b190-032bcf740a18/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.aurelius.finance/",
+    "site": "https://www.aurelius.finance/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/_LiquidCrypto",
-    "telegram": "https://t.me/liquidcommunitychat",
-    "github": "https://gitlab.com/liquidcypto/addressbook"
+    "twitter": "https://twitter.com/AureliusFi"
   },
   {
-    "id": "201",
-    "title": "Bitverse",
+    "id": "180",
+    "title": "Swapsicle",
+    "shortDescription": "Swapsicle is more than a DEX. Swapsicle features a dual token economy, single-sided staking, utility NFTs, perpetual trading, and much more. ",
+    "description": "Swapsicle is more than a DEX. Swapsicle features a dual token economy, single-sided staking, utility NFTs, perpetual trading, and much more. ",
+    "author": "Swapsicle",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/b065d8b4-917b-4e56-8dc4-a819c8f9e036/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.swapsicle.io/",
+    "site": "https://www.swapsicle.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/SwapsicleDEX",
+    "telegram": "https://t.me/SwapsicleDAO",
+    "github": "https://github.com/swapsicledex"
+  },
+  {
+    "id": "190",
+    "title": "Aboard Exchange",
+    "shortDescription": "The Order-Book Perpetual DEX on Arbitrum, Avalanche, Scroll, and Era, featuring an on-chain broker model to reward users with multiple incentives.",
+    "description": "The Order-Book Perpetual DEX on Arbitrum, Avalanche, Scroll, and Era, featuring an on-chain broker model to reward users with multiple incentives.",
+    "author": "Aboard Exchange",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/85ac11ef-6560-4a29-9b65-f6ac21185a18/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://aboard.exchange/",
+    "site": "https://aboard.exchange/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/AboardExchange",
+    "github": "https://github.com/aboard-exchange"
+  },
+  {
+    "id": "187",
+    "title": "Minterest",
+    "shortDescription": "Minterest is a cross-chain DeFi lending protocol with sustainable governance token and auto-liquidations.",
+    "description": "Minterest is a cross-chain DeFi lending protocol with sustainable governance token and auto-liquidations.",
+    "author": "Minterest",
+    "categories": [
+      "Money Market"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/65b89cf5-334c-49a5-817e-dcefc5bd6756/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://minterest.com",
+    "site": "https://minterest.com",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/Minterest",
+    "telegram": "https://t.me/MinterestFinanceChat"
+  },
+  {
+    "id": "189",
+    "title": "Privy",
+    "shortDescription": "Privy is the easiest way to onboard all your users to web3, regardless of whether they already have wallets.",
+    "description": "Privy is the easiest way to onboard all your users to web3, regardless of whether they already have wallets.",
+    "author": "Privy",
+    "categories": [
+      "Other Infra"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/b731e88e-e5fd-4566-8432-63b7b712faf8/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.privy.io/",
+    "site": "https://www.privy.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/privy_io",
+    "github": "https://github.com/privy-io"
+  },
+  {
+    "id": "191",
+    "title": "Cleopatra",
+    "shortDescription": "Cleopatra is The Next Generation of Concentrated Liquidity. ve3.3 Dex",
+    "description": "Cleopatra is The Next Generation of Concentrated Liquidity. ve3.3 Dex",
+    "author": "Cleopatra",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/dbce319c-f771-4455-941c-e645249313d7/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://cleo.exchange/swap",
+    "site": "https://cleo.exchange/swap",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/CleopatraDEX",
+    "github": "https://github.com/RamsesExchange"
+  },
+  {
+    "id": "192",
+    "title": "Guild.xyz",
+    "shortDescription": "Homepage and toolkit for your onchain community.  Automated membership management, campaigns, Sybil-resistance solutions, and token rewards.",
+    "description": "Homepage and toolkit for your onchain community.  Automated membership management, campaigns, Sybil-resistance solutions, and token rewards.",
+    "author": "Guild.xyz",
+    "categories": [
+      "Other Infra"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/f5376202-f7dd-42d0-aa7d-0dbb7bab4b00/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://guild.xyz/",
+    "site": "https://guild.xyz/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/guildxyz",
+    "github": "https://github.com/guildxyz"
+  },
+  {
+    "id": "196",
+    "title": "Bitverse ",
     "shortDescription": "Bitverse app is a BTC-friendly MPC + AA Web3 wallet.",
     "description": "Bitverse app is a BTC-friendly MPC + AA Web3 wallet.",
-    "author": "Bitverse",
+    "author": "Bitverse ",
     "categories": [
-      "Wallet"
+      "Wallet/Custody"
     ],
-    "logo": "https://cms.mantle.xyz/assets/497f43c6-373b-4d89-8fcc-2f9cb67feaa5?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/d5c5aebd-4255-4f68-ae1d-1db47f702d7c/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://www.bitverse.zone",
+    "site": "https://www.bitverse.zone",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/BitverseApp",
     "telegram": "https://t.me/eventguessingBitversecommunity"
   },
   {
-    "id": "202",
+    "id": "197",
     "title": "IDriss",
     "shortDescription": "A community-owned and operated suite of tools making web3 more usable for everyone. Send crypto directly on Twitter using Mantle.",
     "description": "A community-owned and operated suite of tools making web3 more usable for everyone. Send crypto directly on Twitter using Mantle.",
     "author": "IDriss",
     "categories": [
-      "Social"
+      "Other Social"
     ],
-    "logo": "https://cms.mantle.xyz/assets/adaac323-c672-49d7-bca7-37cb791f3d89?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/6eed4acd-42c1-42c5-bc5f-4814fc387e6f/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://www.idriss.xyz/",
+    "site": "https://www.idriss.xyz/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/IDriss_xyz",
     "github": "https://github.com/idriss-crypto"
   },
   {
-    "id": "203",
+    "id": "198",
     "title": "TropicalSwap",
     "shortDescription": "The most exotic DEX on Mantle! Trade, stake, and earn crypto in our ecosystem. Powered by $PAPPLE.",
     "description": "The most exotic DEX on Mantle! Trade, stake, and earn crypto in our ecosystem. Powered by $PAPPLE.",
     "author": "TropicalSwap",
     "categories": [
-      "DeFi"
+      "DEX"
     ],
-    "logo": "https://cms.mantle.xyz/assets/357b0613-6ab3-44b3-ab85-97fcd5f146ea?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/035e711c-f49e-45d4-9369-a3b571360fb8/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://tropicalswap.exchange/",
+    "site": "https://tropicalswap.exchange/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/tropical_swap",
@@ -1713,16 +1688,158 @@
     "github": "https://github.com/orgs/TropicalSwap-Organization/repositories"
   },
   {
-    "id": "204",
+    "id": "200",
+    "title": "Mantscription",
+    "shortDescription": "Mantscription is the first community-driven inscription ecosystem built on Mantle, and aims to develop a user-friendly inscription marketplace and launchpad.",
+    "description": "Mantscription is the first community-driven inscription ecosystem built on Mantle, and aims to develop a user-friendly inscription marketplace and launchpad.",
+    "author": "Mantscription",
+    "categories": [
+      "Other Infra"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/27a21d1e-2087-4566-960e-5d1fb9be4598/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://mantscription.market/",
+    "site": "https://mantscription.market/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/mantscription",
+    "telegram": "https://t.me/mantscription",
+    "github": "https://github.com/Mantscription"
+  },
+  {
+    "id": "202",
+    "title": "Slash",
+    "shortDescription": "［／］Slash supports any token payments as the next generation of decentralized payment instruments,created by SlashVisionLabs.",
+    "description": "［／］Slash supports any token payments as the next generation of decentralized payment instruments,created by SlashVisionLabs.",
+    "author": "Slash",
+    "categories": [
+      "Other Infra"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/3f2e27d8-4a21-4d9e-b411-96a4a265ed94/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://slash.fi/",
+    "site": "https://slash.fi/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/SlashWeb3",
+    "github": "https://slash-fi.gitbook.io/docs/whitepaper/slash-vision-labs-white-paper"
+  },
+  {
+    "id": "207",
+    "title": "Clearpool",
+    "shortDescription": "A decentralized credit marketplace — lend stablecoins to institutions & earn market-leading returns",
+    "description": "A decentralized credit marketplace — lend stablecoins to institutions & earn market-leading returns",
+    "author": "Clearpool",
+    "categories": [
+      "Money Market"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/f95da8e8-0036-4bcc-9702-7a5edb0e50ae/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://clearpool.finance/",
+    "site": "https://clearpool.finance/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/ClearpoolFin",
+    "telegram": "https://t.me/clearpoolofficial",
+    "github": "https://github.com/clearpool-finance"
+  },
+  {
+    "id": "209",
+    "title": "Chronicle Protocol ",
+    "shortDescription": "Chronicle Protocol offers scalable, cost-efficient, verifiable Oracles. Powering MakerDAO, Spark & more.",
+    "description": "Chronicle Protocol offers scalable, cost-efficient, verifiable Oracles. Powering MakerDAO, Spark & more.",
+    "author": "Chronicle Protocol ",
+    "categories": [
+      "Oracle"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/c1079413-20b9-41c1-b104-5801a6468345/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://chroniclelabs.org/",
+    "site": "https://chroniclelabs.org/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/ChronicleLabs",
+    "github": "https://github.com/chronicleprotocol"
+  },
+  {
+    "id": "210",
+    "title": "NFTScan",
+    "shortDescription": "The world's largest NFT infrastructure, supporting 20+ chains. ",
+    "description": "The world's largest NFT infrastructure, supporting 20+ chains. ",
+    "author": "NFTScan",
+    "categories": [
+      "NFT Tool"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/7f1894a7-32f4-41ef-afc4-0b81bada748f/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://mantle.nftscan.com/",
+    "site": "https://mantle.nftscan.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/nftscan_com",
+    "github": "https://github.com/nftscan-official"
+  },
+  {
+    "id": "212",
+    "title": "Router Nitro",
+    "shortDescription": "Router Nitro by Router Protocol is the world's most gas optimised, fast, and highly capital efficient intent-based bridge. With Router Nitro, users can experience <15 sec bridging & ~50%+ cheaper costs.",
+    "description": "Router Nitro by Router Protocol is the world's most gas optimised, fast, and highly capital efficient intent-based bridge. With Router Nitro, users can experience <15 sec bridging & ~50%+ cheaper costs.",
+    "author": "Router Nitro",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/f6d24b87-acb3-44ce-a79b-979a5f5b8418/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://nitro.routerprotocol.com/",
+    "site": "https://nitro.routerprotocol.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/routerprotocol",
+    "telegram": "https://t.me/routerprotocol",
+    "github": "https://github.com/router-protocol"
+  },
+  {
+    "id": "214",
+    "title": "zk.Link",
+    "shortDescription": "A Thousand Blockchains & Rollups, Aggregated. Build on the world’s first ZK Aggregated Layer 3 and access limitless liquidity with zkLink's Rollup solutions.",
+    "description": "A Thousand Blockchains & Rollups, Aggregated. Build on the world’s first ZK Aggregated Layer 3 and access limitless liquidity with zkLink's Rollup solutions.",
+    "author": "zk.Link",
+    "categories": [
+      "Bridge"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/0e73f900-257b-4e92-a74d-b5f0871b47f2/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://zk.link/",
+    "site": "https://zk.link/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/zkLink_Official",
+    "telegram": "https://t.me/zkLinkorg",
+    "github": "https://github.com/zkLinkProtocol"
+  },
+  {
+    "id": "213",
+    "title": "Native ",
+    "shortDescription": "Native is building Web3’s Liquidity Layer, a comprehensive solution to crypto’s fragmented liquidity that unifies bridging, assets and pricing into one offering. ",
+    "description": "Native is building Web3’s Liquidity Layer, a comprehensive solution to crypto’s fragmented liquidity that unifies bridging, assets and pricing into one offering. ",
+    "author": "Native ",
+    "categories": [
+      "Lending"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/176afbf5-734a-4ce2-b5c4-b430a07fb44a/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://native.org/lend/",
+    "site": "https://native.org/lend/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/native_fi",
+    "telegram": "https://t.me/native_labs/1",
+    "github": "https://github.com/Native-org"
+  },
+  {
+    "id": "199",
     "title": "WOOFi",
-    "shortDescription": "Cross-chain DEX with perpetual futures",
-    "description": "Cross-chain DEX with perpetual futures",
+    "shortDescription": "Cross-chain DEX with perpetual futures.",
+    "description": "Cross-chain DEX with perpetual futures.",
     "author": "WOOFi",
     "categories": [
       "DEX"
     ],
-    "logo": "https://cms.mantle.xyz/assets/8665b598-09cb-4690-a78b-12e3aa42d5c0?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/130d124a-abaa-4ddf-8651-3c676724ea19/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://fi.woo.org/",
+    "site": "https://fi.woo.org/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/_WOOFi",
@@ -1730,84 +1847,635 @@
     "github": "https://github.com/woonetwork"
   },
   {
-    "id": "206",
-    "title": "MetaCene",
-    "shortDescription": "Next-gen blockchain MMORPG homeland ",
-    "description": "Next-gen blockchain MMORPG homeland ",
-    "author": "MetaCene",
-    "categories": [
-      "Gaming"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/5ce9fee9-5a7a-45d4-b9e9-eec54411dfb1?width=180&height=180&fit=contain&quality=75",
-    "url": "https://metacene.io/",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/MetaCeneGame",
-    "telegram": "https://metacene.io/"
-  },
-  {
-    "id": "209",
-    "title": "Tellor",
-    "shortDescription": "Tellor is a flexible and permissionless oracle protocol for your smart contract to get any data whenever it needs it.",
-    "description": "Tellor is a flexible and permissionless oracle protocol for your smart contract to get any data whenever it needs it.",
-    "author": "Tellor",
-    "categories": [
-      "Infrastructure"
-    ],
-    "logo": "https://cms.mantle.xyz/assets/9f03ea06-cdbb-4080-8323-679ceed1d55a?width=180&height=180&fit=contain&quality=75",
-    "url": "https://tellor.io",
-    "external": true,
-    "internalWallet": false,
-    "twitter": "https://twitter.com/WeAreTellor",
-    "github": "https://github.com/tellor-io"
-  },
-  {
-    "id": "210",
+    "id": "205",
     "title": "Gravita Protocol",
     "shortDescription": "An ETH-centric Borrowing Protocol for LSTs. Fueling decentralization. Supporting mETH.",
     "description": "An ETH-centric Borrowing Protocol for LSTs. Fueling decentralization. Supporting mETH.",
     "author": "Gravita Protocol",
     "categories": [
-      "DeFi"
+      "Money Market"
     ],
-    "logo": "https://cms.mantle.xyz/assets/00cf8fae-9d4e-407a-a5cd-01d673ce56e5?width=180&height=180&fit=contain&quality=75",
+    "logo": "https://cms.mantle.xyz/assets/c654260f-5254-42ab-b917-4a41d8a64920/featured.jpg?width=180&height=180&fit=contain&quality=75",
     "url": "https://www.gravitaprotocol.com/",
+    "site": "https://www.gravitaprotocol.com/",
     "external": true,
     "internalWallet": false,
     "twitter": "https://twitter.com/gravitaprotocol",
     "github": "https://github.com/Gravita-Protocol"
   },
   {
-    "id": "211",
-    "title": "Heroes Battle Arena",
-    "shortDescription": "A free, play&fun multichain game inspired by the legendary 'Heroes Might and Magic', featuring AI, cash rewards & NFTs through strategic battles or lucky draws",
-    "description": "A free, play&fun multichain game inspired by the legendary 'Heroes Might and Magic', featuring AI, cash rewards & NFTs through strategic battles or lucky draws",
-    "author": "Heroes Battle Arena",
+    "id": "11",
+    "title": "Merchant Moe",
+    "shortDescription": "Merchant Moe is the cornerstone DEX for Mantle Network. A trader's oasis, Moe offers seamless trading, discretized liquidity, and real yield all within his intuitive and easy-to-navigate platform.",
+    "description": "Merchant Moe is the cornerstone DEX for Mantle Network. A trader's oasis, Moe offers seamless trading, discretized liquidity, and real yield all within his intuitive and easy-to-navigate platform.",
+    "author": "Merchant Moe",
     "categories": [
-      "Gaming"
+      "DEX"
     ],
-    "logo": "https://cms.mantle.xyz/assets/1cbef738-165c-4c73-85a1-f94593edd1a4?width=180&height=180&fit=contain&quality=75",
-    "url": "https://heroesbattlearena.online/",
+    "logo": "https://cms.mantle.xyz/assets/f00a472c-2754-4a5f-8b09-aaa4dad2ae4e/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://merchantmoe.com/",
+    "site": "https://merchantmoe.com/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/heroesbattlearn",
-    "telegram": "https://t.me/heroesbattlearena"
+    "twitter": "https://twitter.com/MerchantMoe_xyz",
+    "github": "https://github.com/merchant-moe"
   },
   {
-    "id": "212",
-    "title": "Clearpool",
-    "shortDescription": "A decentralized credit marketplace — lend stablecoins to institutions & earn market-leading returns",
-    "description": "A decentralized credit marketplace — lend stablecoins to institutions & earn market-leading returns",
-    "author": "Clearpool",
+    "id": "216",
+    "title": "Stargate",
+    "shortDescription": "Stargate is a fully composable liquidity transport protocol that lives at the heart of omnichain DeFi.",
+    "description": "Stargate is a fully composable liquidity transport protocol that lives at the heart of omnichain DeFi.",
+    "author": "Stargate",
+    "categories": [
+      "Bridge"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/dacf03b8-0413-4882-8f1a-ee4c6b49aec5/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://stargate.finance/",
+    "site": "https://stargate.finance/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/StargateFinance",
+    "telegram": "https://t.me/joinchat/LEM0ELklmO1kODdh",
+    "github": "https://github.com/stargate-protocol"
+  },
+  {
+    "id": "92",
+    "title": "Timeswap ",
+    "shortDescription": "Timeswap is the first oracle-less and permissionless AMM-based lending/borrowing market.",
+    "description": "Timeswap is the first oracle-less and permissionless AMM-based lending/borrowing market.",
+    "author": "Timeswap ",
+    "categories": [
+      "Lending"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/daa56a7b-9caa-4b95-8f8f-85a810d9147e/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://app.timeswap.io/#markets",
+    "site": "https://app.timeswap.io/#markets",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/TimeswapLabs",
+    "telegram": "https://t.me/timeswap",
+    "github": "https://github.com/Timeswap-Labs"
+  },
+  {
+    "id": "102",
+    "title": "MYSO Finance",
+    "shortDescription": "MYSO is a lending platform enabling scalable and cost-efficient credit markets without liquidations",
+    "description": "MYSO is a lending platform enabling scalable and cost-efficient credit markets without liquidations",
+    "author": "MYSO Finance",
     "categories": [
       "DeFi"
     ],
-    "logo": "https://cms.mantle.xyz/assets/01185e8f-2467-4a40-8716-92d70595095b?width=180&height=180&fit=contain&quality=75",
-    "url": "https://clearpool.finance/",
+    "logo": "https://cms.mantle.xyz/assets/1ac85920-c277-40df-9958-c00831dcafec/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://myso.finance/",
+    "site": "https://myso.finance/",
     "external": true,
     "internalWallet": false,
-    "twitter": "https://twitter.com/ClearpoolFin",
-    "telegram": "https://t.me/clearpoolofficial",
-    "github": "https://github.com/clearpool-finance"
+    "twitter": "https://twitter.com/MysoFinance",
+    "telegram": "https://t.me/MysoFinance",
+    "github": "https://github.com/mysofinance/v2"
+  },
+  {
+    "id": "152",
+    "title": "Teller",
+    "shortDescription": "Teller is a non-custodial lending book that enables users to borrow against any ERC20 (token) or ERC721 / ERC1155 (NFT). ",
+    "description": "Teller is a non-custodial lending book that enables users to borrow against any ERC20 (token) or ERC721 / ERC1155 (NFT). ",
+    "author": "Teller",
+    "categories": [
+      "NFT Marketplace"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/41720d3a-f1ed-4310-a1a0-56a71b494c9e/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://teller.org",
+    "site": "https://teller.org",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/useteller",
+    "github": "https://github.com/teller-protocol/teller-protocol-v2"
+  },
+  {
+    "id": "80",
+    "title": "Stratum Exchange",
+    "shortDescription": "The liquidity hub for Mantle Network.",
+    "description": "The liquidity hub for Mantle Network.",
+    "author": "Stratum Exchange",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/7e6e763b-913a-4dca-95de-8ef1d3d133b9/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.stratumexchange.com",
+    "site": "https://www.stratumexchange.com",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/stratumexchange",
+    "github": "https://github.com/stratum-exchange/v1"
+  },
+  {
+    "id": "215",
+    "title": "MethLab ",
+    "shortDescription": "MethLab is a liquidation-free, and oracle-less lending/borrowing protocol that enables fixed-rate/fixed-term positions on Mantle. ",
+    "description": "MethLab is a liquidation-free, and oracle-less lending/borrowing protocol that enables fixed-rate/fixed-term positions on Mantle. ",
+    "author": "MethLab ",
+    "categories": [
+      "Lending"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/f5d630e9-d441-4fd3-be28-b18533b75a0a/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.methlab.xyz/",
+    "site": "https://www.methlab.xyz/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/methlabxyz"
+  },
+  {
+    "id": "222",
+    "title": "PixelPals",
+    "shortDescription": "@Pixelmon 's Second Hyper Casual game | #farm2farm | Built on  @0xMantle  ",
+    "description": "@Pixelmon 's Second Hyper Casual game | #farm2farm | Built on  @0xMantle  ",
+    "author": "PixelPals",
+    "categories": [
+      "Games"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/e7430557-0a45-401e-b958-d46bae17545d/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://app.pixelpals.ai/",
+    "site": "https://app.pixelpals.ai/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/PixelPalsAI",
+    "github": "https://liquidx.gitbook.io/pixelpals-documentation-season-0"
+  },
+  {
+    "id": "220",
+    "title": "Bybit",
+    "shortDescription": "The most reliable cryptocurrency exchange. The Golden Door to Your Greatest Wish",
+    "description": "The most reliable cryptocurrency exchange. The Golden Door to Your Greatest Wish",
+    "author": "Bybit",
+    "categories": [
+      "CEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/69602fdf-1d81-4517-86b8-a47cac894942/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.bybit.com/en/",
+    "site": "https://www.bybit.com/en/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/Bybit_Official"
+  },
+  {
+    "id": "74",
+    "title": "Lendle",
+    "shortDescription": "Lendle is a decentralized, non-custodial liquidity market inspired by Geist and Aave.",
+    "description": "Lendle is a decentralized, non-custodial liquidity market inspired by Geist and Aave.",
+    "author": "Lendle",
+    "categories": [
+      "Lending"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/80505749-7d37-42a8-b401-86dcce48567c/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://lendle.xyz/",
+    "site": "https://lendle.xyz/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/lendlexyz",
+    "github": "https://github.com/lendle-xyz"
+  },
+  {
+    "id": "217",
+    "title": "Velocimeter ",
+    "shortDescription": "Velocimeter is a solidly-like DEX with few major differences. The main difference is option tokens being emitted as a reward tokens for liquidity providers.",
+    "description": "Velocimeter is a solidly-like DEX with few major differences. The main difference is option tokens being emitted as a reward tokens for liquidity providers.",
+    "author": "Velocimeter ",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/6d54eda3-04fa-4dcb-884d-bdfeaf3301ff/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.velocimeter.xyz/",
+    "site": "https://www.velocimeter.xyz/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/VelocimeterDEX",
+    "github": "https://docs.velocimeter.xyz/getting-started"
+  },
+  {
+    "id": "221",
+    "title": "Mantle Native Bridge",
+    "shortDescription": "Bridge tokens for your mainnet wallet, and test your dApps deployed on Mantle Mainnet.",
+    "description": "Bridge tokens for your mainnet wallet, and test your dApps deployed on Mantle Mainnet.",
+    "author": "Mantle Native Bridge",
+    "categories": [
+      "Bridge"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/81f34c7e-374b-41ef-a80e-54ddab4a8680/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://bridge.mantle.xyz/",
+    "site": "https://bridge.mantle.xyz/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/0xMantle"
+  },
+  {
+    "id": "175",
+    "title": "1delta",
+    "shortDescription": "Decentralized margin trading protocol providing access to $10B+ of liquidity to build low-cost, non-custodial margin positions.",
+    "description": "Decentralized margin trading protocol providing access to $10B+ of liquidity to build low-cost, non-custodial margin positions.",
+    "author": "1delta",
+    "categories": [
+      "DEX"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/6d45fb49-8055-499d-b985-eb2f866c39b7/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://1delta.io/",
+    "site": "https://1delta.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/1deltaDAO",
+    "telegram": "https://t.me/OneDeltaDAO",
+    "github": "https://github.com/1delta-dao"
+  },
+  {
+    "id": "134",
+    "title": "Solv Protocol",
+    "shortDescription": "Solv V3 is an on-chain fund platform that offers a secure, transparent space for global investors to explore diverse crypto investments. ",
+    "description": "Solv V3 is an on-chain fund platform that offers a secure, transparent space for global investors to explore diverse crypto investments. ",
+    "author": "Solv Protocol",
+    "categories": [
+      "Vault"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/49df7c39-35d0-4729-8a99-679ff0920a2e/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://app.solv.finance/earn",
+    "site": "https://app.solv.finance/earn",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/SolvProtocol",
+    "telegram": "https://t.me/+dq0cJrSNtzQ4NTNl",
+    "github": "https://github.com/solv-finance"
+  },
+  {
+    "id": "224",
+    "title": "Zircuit",
+    "shortDescription": "Zircuit is a modular zk rollup with AI-enabled security at the sequencer level.",
+    "description": "Zircuit is a modular zk rollup with AI-enabled security at the sequencer level.",
+    "author": "Zircuit",
+    "categories": [
+      "Vault"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/0f4b6c85-6492-4aac-b761-5813b5aad42a/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.zircuit.com/",
+    "site": "https://www.zircuit.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/ZircuitL2?t=hcRszB0kuNkPTmP0uxDSLw&s=09"
+  },
+  {
+    "id": "226",
+    "title": "Puff",
+    "shortDescription": "$Puff has been Summoned! A mystical Dragon with a dual nature- part solar lawful, part lunar degen.",
+    "description": "$Puff has been Summoned! A mystical Dragon with a dual nature- part solar lawful, part lunar degen.",
+    "author": "Puff",
+    "categories": [
+      "Vault"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/50c97c6e-d4e6-42e0-8241-9ef2e4c12bb1/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://puffthedragon.xyz/",
+    "site": "https://puffthedragon.xyz/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/puff_drgn",
+    "telegram": "https://t.me/puff_drgn_official"
+  },
+  {
+    "id": "230",
+    "title": "Gem Wallet",
+    "shortDescription": "Gem Wallet is a community owned, privacy respecting crypto wallet for iOS and Android.",
+    "description": "Gem Wallet is a community owned, privacy respecting crypto wallet for iOS and Android.",
+    "author": "Gem Wallet",
+    "categories": [
+      "Wallet/Custody"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/e06e9e2c-eac3-4a79-a7f8-3d5a5002a82f/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://gemwallet.com/",
+    "site": "https://gemwallet.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/GemWalletApp",
+    "telegram": "https://t.me/gemwallet_en",
+    "github": "https://github.com/gemwalletcom"
+  },
+  {
+    "id": "231",
+    "title": "Intract",
+    "shortDescription": "Intract is a gamified user-engagement platform with 12M+ verified on-chain users. ",
+    "description": "Intract is a gamified user-engagement platform with 12M+ verified on-chain users. ",
+    "author": "Intract",
+    "categories": [
+      "Other Social"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/6212cdc7-dfd7-4839-bbba-3b7f8e2b4b07/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.intract.io/",
+    "site": "https://www.intract.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/IntractCampaign"
+  },
+  {
+    "id": "232",
+    "title": "XSTAR",
+    "shortDescription": "XSTAR, the Omnichain Identity Protocol for Proof of Humanity, features an adaptive humanity scoring system that securely and privately authenticates individual personas.",
+    "description": "XSTAR, the Omnichain Identity Protocol for Proof of Humanity, features an adaptive humanity scoring system that securely and privately authenticates individual personas.",
+    "author": "XSTAR",
+    "categories": [
+      "Other Social"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/60e6cd34-cd5b-4296-a274-1c5dbec73a21/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://xstar.id/",
+    "site": "https://xstar.id/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/xstar_id"
+  },
+  {
+    "id": "228",
+    "title": "FBTC",
+    "shortDescription": "FBTC is a secure, decentralized, and composable BTC asset aimed at liberating Bitcoin's true power of growth. FBTC provides a liquid Bitcoin asset that adheres to a 1:1 peg with Bitcoin to redefine its role across all blockchain platforms.",
+    "description": "FBTC is a secure, decentralized, and composable BTC asset aimed at liberating Bitcoin's true power of growth. FBTC provides a liquid Bitcoin asset that adheres to a 1:1 peg with Bitcoin to redefine its role across all blockchain platforms.",
+    "author": "FBTC",
+    "categories": [
+      "DeFi"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/6081c9ee-7a3e-4e5a-b14a-4a87ac535c97/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://fbtc.com/",
+    "site": "https://fbtc.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/FBTC_official",
+    "telegram": "https://t.me/FBTCofficial"
+  },
+  {
+    "id": "233",
+    "title": "Dolomite",
+    "shortDescription": "Dolomite is an innovative next-gen money market and DEX protocol that enables users to borrow, lend, trade and farm with leverage on both blue-chip and exotic DeFi assets.",
+    "description": "Dolomite is an innovative next-gen money market and DEX protocol that enables users to borrow, lend, trade and farm with leverage on both blue-chip and exotic DeFi assets.",
+    "author": "Dolomite",
+    "categories": [
+      "Money Market"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/90b3e9ca-d5e2-461a-a114-7987d45011a1/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://dolomite.io/",
+    "site": "https://dolomite.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/Dolomite_io",
+    "telegram": "https://t.me/dolomite_official",
+    "github": "https://github.com/dolomite-exchange"
+  },
+  {
+    "id": "203",
+    "title": "0xscope",
+    "shortDescription": "0xscope built the leading AI Data Layer for Web3 AI applications, enabling community-driven and in-house Web3 AI products like Scopechat and Scopescan.",
+    "description": "0xscope built the leading AI Data Layer for Web3 AI applications, enabling community-driven and in-house Web3 AI products like Scopechat and Scopescan.",
+    "author": "0xscope",
+    "categories": [
+      "Other Infra"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/694c959d-6646-400a-837a-7394f2f7dedc/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.0xscope.com/?ch=mantle",
+    "site": "https://www.0xscope.com/?ch=mantle",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/ScopeProtocol",
+    "telegram": "https://t.me/scope_official",
+    "github": "https://developer.0xscope.com/"
+  },
+  {
+    "id": "234",
+    "title": "Catizen",
+    "shortDescription": "Explore the Meow Metaverse with Catizens! 🐾 Unleash, Play, Earn - Where Every Game Leads to an Airdrop Adventure!",
+    "description": "Explore the Meow Metaverse with Catizens! 🐾 Unleash, Play, Earn - Where Every Game Leads to an Airdrop Adventure!",
+    "author": "Catizen",
+    "categories": [
+      "Games"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/35327f95-785d-4f85-9c70-8579f9e65ee0/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://catizen.ai/",
+    "site": "https://catizen.ai/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/CatizenAI"
+  },
+  {
+    "id": "241",
+    "title": "Native",
+    "shortDescription": " Our network of private market makers do the complex work to put your liquidity to use facilitating trades, so you never have to worry about capital sitting idle.",
+    "description": " Our network of private market makers do the complex work to put your liquidity to use facilitating trades, so you never have to worry about capital sitting idle.",
+    "author": "Native",
+    "categories": [
+      "Aggregator"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/d3926dbc-d90a-4f6f-a9e7-21351d8889c5/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://native.org/swap/",
+    "site": "https://native.org/swap/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/native_fi",
+    "telegram": "https://t.me/native_labs"
+  },
+  {
+    "id": "251",
+    "title": "OMNIA Protocol",
+    "shortDescription": "OMNIA is a leading RPC provider for DeFi traders. Frontrunning, MEV, honeypot protections and more.",
+    "description": "OMNIA is a leading RPC provider for DeFi traders. Frontrunning, MEV, honeypot protections and more.",
+    "author": "OMNIA Protocol",
+    "categories": [
+      "Other Infra"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/94f51216-0ef2-48ea-8852-141704fc79ad/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://omniatech.io/",
+    "site": "https://omniatech.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/omnia_protocol",
+    "telegram": "https://t.me/Omnia_protocol",
+    "github": "https://github.com/omniaprotocol"
+  },
+  {
+    "id": "252",
+    "title": "Chasm Network ",
+    "shortDescription": "Chasm Network is a collaborative platform of experts specializing in the aggregation of open-source large language models (LLMs). ",
+    "description": "Chasm Network is a collaborative platform of experts specializing in the aggregation of open-source large language models (LLMs). ",
+    "author": "Chasm Network ",
+    "categories": [
+      "Other Infra"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/62d7e143-e65e-4b16-99c3-352d735132a4/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.chasm.net/",
+    "site": "https://www.chasm.net/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/ChasmNetwork",
+    "github": "https://github.com/ChasmNetwork"
+  },
+  {
+    "id": "255",
+    "title": "Karak",
+    "shortDescription": "Karak is the universal restaking layer powered by the entire cryptoeconomy across every asset and every chain.",
+    "description": "Karak is the universal restaking layer powered by the entire cryptoeconomy across every asset and every chain.",
+    "author": "Karak",
+    "categories": [
+      "Restaking"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/00d4410f-3646-4ae8-a5d3-c5dfd7f43198/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://karak.network/",
+    "site": "https://karak.network/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/Karak_Network"
+  },
+  {
+    "id": "257",
+    "title": "Port3 Network",
+    "shortDescription": "Port3 Network is a unified artificial intelligence operating system. To date, we have built various applications within the ecosystem.",
+    "description": "Port3 Network is a unified artificial intelligence operating system. To date, we have built various applications within the ecosystem.",
+    "author": "Port3 Network",
+    "categories": [
+      "Other Infra"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/1d458db4-7f44-4f5a-be33-707472892b75/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://port3.io/",
+    "site": "https://port3.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/Port3Network",
+    "telegram": "https://t.me/Port3_Network",
+    "github": "https://github.com/Port3-Network"
+  },
+  {
+    "id": "258",
+    "title": "RetroBridge",
+    "shortDescription": "RetroBridge is a robust multichain ecosystem and gateway to seamless connectivity across various EVM and non-EVM chains, providing solution for all interactions within a single app.",
+    "description": "RetroBridge is a robust multichain ecosystem and gateway to seamless connectivity across various EVM and non-EVM chains, providing solution for all interactions within a single app.",
+    "author": "RetroBridge",
+    "categories": [
+      "Bridge"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/9a3a9f25-c800-46b6-a981-54588cb37009/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://retrobridge.io/",
+    "site": "https://retrobridge.io/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/retro_bridge",
+    "github": "https://github.com/retro-bridge"
+  },
+  {
+    "id": "259",
+    "title": "Thetanuts Finance",
+    "shortDescription": "Thetanuts Finance is a decentralized on-chain options protocol focused on altcoin options, allowing users to go long or short on on-chain options.",
+    "description": "Thetanuts Finance is a decentralized on-chain options protocol focused on altcoin options, allowing users to go long or short on on-chain options.",
+    "author": "Thetanuts Finance",
+    "categories": [
+      "Vault"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/00c8b733-9568-4139-94c9-ff35b5277f64/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://www.thetanuts.finance/",
+    "site": "https://www.thetanuts.finance/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/ThetanutsFi",
+    "telegram": "https://t.me/thetanuts_official"
+  },
+  {
+    "id": "243",
+    "title": "Beefy",
+    "shortDescription": "Beefy is a Decentralized, Multichain Yield Optimizer that allows its users to earn compound interest on their crypto holdings. Beefy earns you the highest APYs with safety and efficiency in mind.",
+    "description": "Beefy is a Decentralized, Multichain Yield Optimizer that allows its users to earn compound interest on their crypto holdings. Beefy earns you the highest APYs with safety and efficiency in mind.",
+    "author": "Beefy",
+    "categories": [
+      "Vault"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/1f464325-1faa-42b5-8ab6-6734ba92496d/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://beefy.com/",
+    "site": "https://beefy.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/beefyfinance",
+    "telegram": "https://t.me/beefyfinance",
+    "github": "https://github.com/beefyfinance"
+  },
+  {
+    "id": "261",
+    "title": "ODOS",
+    "shortDescription": "ODOS provides Smart Order Routing across multiple blockchain protocols, 900+ Liquidity Sources and thousands of token pairs, delivering ultimate savings to users.",
+    "description": "ODOS provides Smart Order Routing across multiple blockchain protocols, 900+ Liquidity Sources and thousands of token pairs, delivering ultimate savings to users.",
+    "author": "ODOS",
+    "categories": [
+      "Aggregator"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/3783aa46-bcb4-48da-9f60-f872971d3550/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "http://app.odos.xyz",
+    "site": "http://app.odos.xyz",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/odosprotocol",
+    "github": "https://github.com/odos-xyz"
+  },
+  {
+    "id": "262",
+    "title": "KyberSwap",
+    "shortDescription": "KyberSwap is a multichain DEX aggregator & Limit Order. We provide our users competitive trading rates by analyzing liquidity from thousands of different sources instantly!",
+    "description": "KyberSwap is a multichain DEX aggregator & Limit Order. We provide our users competitive trading rates by analyzing liquidity from thousands of different sources instantly!",
+    "author": "KyberSwap",
+    "categories": [
+      "Aggregator"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/5af9aa5e-cbb8-4b5e-bd25-49f150970b5b/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://kyberswap.com/",
+    "site": "https://kyberswap.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://twitter.com/KyberNetwork",
+    "github": "https://github.com/KyberNetwork"
+  },
+  {
+    "id": "267",
+    "title": "NovaSeeds",
+    "shortDescription": "The NovaSeeds platform is dedicated to offering fair and innovative asset launch solutions. ",
+    "description": "The NovaSeeds platform is dedicated to offering fair and innovative asset launch solutions. ",
+    "author": "NovaSeeds",
+    "categories": [
+      "DeFi"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/c3bf3569-3596-46f4-b6c7-f214d145e30c/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://novaseeds.xyz/en-US",
+    "site": "https://novaseeds.xyz/en-US",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/0xNovaSeeds",
+    "telegram": "https://x.com/0xNovaSeeds",
+    "github": "https://novaseeds.notion.site/NovaSeeds-About-Us-b889325616654a03915358a73189f21a"
+  },
+  {
+    "id": "263",
+    "title": "Ember Sword",
+    "shortDescription": "Ember Sword is an in-development, free to play, cross-platform MMORPG! Play anywhere, anytime ⚔️🔥 powered by $EMBER",
+    "description": "Ember Sword is an in-development, free to play, cross-platform MMORPG! Play anywhere, anytime ⚔️🔥 powered by $EMBER",
+    "author": "Ember Sword",
+    "categories": [
+      "Games"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/0800fd87-8dac-4764-ba0f-ef8614ca2657/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://embersword.com/",
+    "site": "https://embersword.com/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/PlayEmberSword",
+    "telegram": "https://t.me/EmberSword"
+  },
+  {
+    "id": "269",
+    "title": "Zapper",
+    "shortDescription": "Track your DeFi and NFT portfolio. Discover new onchain opportunities.",
+    "description": "Track your DeFi and NFT portfolio. Discover new onchain opportunities.",
+    "author": "Zapper",
+    "categories": [
+      "Aggregator"
+    ],
+    "logo": "https://cms.mantle.xyz/assets/346dec44-f692-49b3-a88f-5ef4b3393038/featured.jpg?width=180&height=180&fit=contain&quality=75",
+    "url": "https://zapper.xyz/",
+    "site": "https://zapper.xyz/",
+    "external": true,
+    "internalWallet": false,
+    "twitter": "https://x.com/zapper_fi"
   }
 ]
