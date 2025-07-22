@@ -43,7 +43,7 @@ defmodule BlockScoutWeb.Tokens.Instance.MetadataController do
             res = %{
               "token_id" => token_id_str,
               "token_contract_address_hash" => token_address_hash,
-              # "metadata" => metadata,
+              "metadata" => metadata,
             }|> Jason.encode!()
             send_resp(conn, 200, res)
           _ ->

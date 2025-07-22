@@ -162,7 +162,7 @@ defmodule BlockScoutWeb.API.V2.TokenView do
   def prepare_token_instance(instance, token) do
     %{
       "id" => instance.token_id,
-      "metadata" => instance.metadata,
+      # "metadata" => instance.metadata,
       "owner" => token_instance_owner(instance.is_unique, instance),
       "token" => render("token.json", %{token: token}),
       "external_app_url" => NFTHelper.external_url(instance),
