@@ -185,7 +185,18 @@ defmodule EthereumJSONRPC.Receipt do
     |> chain_type_fields(elixir)
   end
 
-  # Mantle V1
+  # Safe Float.parse helper - handles nil, non-string, and invalid float strings
+  defp safe_float_parse(nil), do: 0.0
+  defp safe_float_parse(value) when is_number(value), do: value / 1.0
+  defp safe_float_parse(value) when is_binary(value) do
+    case Float.parse(value) do
+      {float_val, _} -> float_val
+      :error -> 0.0
+    end
+  end
+  defp safe_float_parse(_), do: 0.0
+
+  # Mantle V1 - with DA fields
   def do_elixir_to_params(
         %{
           "cumulativeGasUsed" => cumulative_gas_used,
@@ -204,10 +215,8 @@ defmodule EthereumJSONRPC.Receipt do
       ) do
 
     status = elixir_to_status(elixir)
+    l1_fee_scalar = safe_float_parse(l1_fee_scalar_string)
 
-    {l1_fee_scalar, _} =
-      l1_fee_scalar_string
-      |> Float.parse()
     %{
       cumulative_gas_used: cumulative_gas_used,
       gas_used: gas_used,
@@ -240,10 +249,7 @@ defmodule EthereumJSONRPC.Receipt do
     } = elixir
   ) do
       status = elixir_to_status(elixir)
-
-      {l1_fee_scalar, _} =
-        l1_fee_scalar_string
-        |> Float.parse()
+      l1_fee_scalar = safe_float_parse(l1_fee_scalar_string)
 
       %{
         cumulative_gas_used: cumulative_gas_used,
@@ -274,10 +280,7 @@ defmodule EthereumJSONRPC.Receipt do
         } = elixir
       ) do
     status = elixir_to_status(elixir)
-
-    {l1_fee_scalar, _} =
-      l1_fee_scalar_string
-      |> Float.parse()
+    l1_fee_scalar = safe_float_parse(l1_fee_scalar_string)
 
     %{
       cumulative_gas_used: cumulative_gas_used,
@@ -293,6 +296,40 @@ defmodule EthereumJSONRPC.Receipt do
     }
   end
 
+  # Mantle V2 Arsia (Ecotone+) - l1Fee present WITHOUT l1FeeScalar
+  # After arsia upgrade, l1FeeScalar is removed and replaced by l1BaseFeeScalar + l1BlobBaseFeeScalar.
+  # daFee/daGasPrice/daGasUsed are also removed, replaced by daFootprintGasScalar.
+  # We still save l1_fee, l1_gas_price, l1_gas_used to the existing DB columns.
+  def do_elixir_to_params(
+        %{
+          "cumulativeGasUsed" => cumulative_gas_used,
+          "gasUsed" => gas_used,
+          "contractAddress" => created_contract_address_hash,
+          "transactionHash" => transaction_hash,
+          "transactionIndex" => transaction_index,
+          "l1Fee" => l1_fee,
+          "l1GasPrice" => l1_gas_price,
+          "l1GasUsed" => l1_gas_used
+        } = elixir
+      ) do
+    status = elixir_to_status(elixir)
+
+    %{
+      cumulative_gas_used: cumulative_gas_used,
+      gas_used: gas_used,
+      created_contract_address_hash: created_contract_address_hash,
+      status: status,
+      transaction_hash: transaction_hash,
+      transaction_index: transaction_index,
+      l1_fee: l1_fee,
+      l1_fee_scalar: 0.0,
+      l1_gas_price: l1_gas_price,
+      l1_gas_used: l1_gas_used
+    }
+    |> maybe_append_gas_price(elixir)
+  end
+
+  # Fallback - basic fields only (e.g. deposit transactions without L1 fee fields)
   def do_elixir_to_params(
         %{
           "cumulativeGasUsed" => cumulative_gas_used,
@@ -540,6 +577,11 @@ defmodule EthereumJSONRPC.Receipt do
 
   # Mantle V1 fields
   defp entry_to_elixir({key, _}) when key in ~w(l1GasUsed l1GasPrice l1FeeScalar l1Fee daFee daGasPrice daGasUsed tokenRatio) do
+    :ignore
+  end
+
+  # Mantle v2 Arsia specific receipt fields (Ecotone+/Isthmus+/Jovian+)
+  defp entry_to_elixir({key, _}) when key in ~w(operatorFeeScalar operatorFeeConstant daFootprintGasScalar) do
     :ignore
   end
 
