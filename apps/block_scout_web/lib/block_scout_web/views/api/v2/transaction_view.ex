@@ -502,6 +502,10 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
       "da_fee" => transaction.da_fee,
       "da_gas_price" => transaction.da_gas_price,
       "da_gas_used" => transaction.da_gas_used,
+      "operator_fee" => get_operator_fee(transaction),
+      "operator_fee_scalar" => transaction.operator_fee_scalar,
+      "operator_fee_constant" => transaction.operator_fee_constant,
+      "da_footprint_gas_scalar" => transaction.da_footprint_gas_scalar,
     }
 
     result
@@ -510,73 +514,86 @@ defmodule BlockScoutWeb.API.V2.TransactionView do
 
 
 
+  # Arsia+:  Total fee = l2_execution_fee + l1_fee + operator_fee
+  # Pre-arsia (legacy): Total fee = l2_execution_fee + l1_fee + da_fee
   defp get_total_fee(%Transaction{} = transaction) do
-    if is_nil(transaction.da_fee) do
+    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
 
+    operator_fee_val = Transaction.operator_fee(transaction)
+    {:ok, operator_fee_wei} = Wei.cast(operator_fee_val)
 
-      actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
-      l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-      l2_fee = Wei.to(transaction.gas_price, :wei)
-      |> Decimal.mult(actual_gas)
-      |> Wei.from(:wei)
-      |> Wei.sub(l1_fee)
-      |> Wei.to(:wei)
+    if Decimal.gt?(operator_fee_val, Decimal.new(0)) do
+      # Arsia+ path: total = gas_used × gas_price + l1_fee + operator_fee
+      {type, base_fee} = transaction |> Transaction.fee(:wei)
+      total =
+        Wei.from(base_fee, :wei)
+        |> Wei.sum(l1_fee)
+        |> Wei.sum(operator_fee_wei)
 
-
-      total_fee = if Decimal.compare(l2_fee, Decimal.new(0)) == :lt do
-        l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-        da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
-        l1_and_da_fee = Wei.sum(l1_fee, da_fee)
-
-        {type, fee} = transaction |> Transaction.fee(:wei)
-        total_fee = Wei.sum(Wei.from(fee, :wei), l1_and_da_fee)
-
-        {type, total_fee} |> format_fee()
-      else
-        transaction |> Transaction.fee(:wei) |> format_fee()
-      end
-
-      total_fee
+      {type, total} |> format_fee()
     else
-      l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
+      # Pre-arsia legacy path: total = gas_used × gas_price + l1_fee + da_fee
       da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
-      l1_and_da_fee = Wei.sum(l1_fee, da_fee)
 
-      {type, fee} = transaction |> Transaction.fee(:wei)
-      total_fee = Wei.sum(Wei.from(fee, :wei), l1_and_da_fee)
+      {type, base_fee} = transaction |> Transaction.fee(:wei)
+      total =
+        Wei.from(base_fee, :wei)
+        |> Wei.sum(l1_fee)
+        |> Wei.sum(da_fee)
 
-      {type, total_fee} |> format_fee()
+      {type, total} |> format_fee()
     end
   end
 
+  # Arsia+:  L2 fee = gas_used × gas_price (pure execution cost)
+  # Pre-arsia without da_fee: L2 fee = gas_used × gas_price - l1_fee (reverse calc)
+  # Pre-arsia with da_fee:    L2 fee = gas_used × gas_price
   defp get_l2_fee(%Transaction{} = transaction) do
-    if is_nil(transaction.da_fee) do
+    operator_fee_val = Transaction.operator_fee(transaction)
 
+    if operator_fee_val != nil and Decimal.gt?(operator_fee_val, Decimal.new(0)) do
+      # Arsia+ path: L2 fee = gas_used × gas_price
       actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
-      l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-      l2_fee = Wei.to(transaction.gas_price, :wei)
+      Wei.to(transaction.gas_price, :wei)
       |> Decimal.mult(actual_gas)
       |> Wei.from(:wei)
-      |> Wei.sub(l1_fee)
-      |> Wei.to(:wei)
+    else
+      # Pre-arsia legacy path
+      if is_nil(transaction.da_fee) do
+        actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
+        l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
 
+        l2_fee = Wei.to(transaction.gas_price, :wei)
+        |> Decimal.mult(actual_gas)
+        |> Wei.from(:wei)
+        |> Wei.sub(l1_fee)
+        |> Wei.to(:wei)
 
-      l2_fee = if Decimal.compare(l2_fee, Decimal.new(0)) == :lt do
+        l2_fee = if Decimal.compare(l2_fee, Decimal.new(0)) == :lt do
+          Wei.to(transaction.gas_price, :wei)
+          |> Decimal.mult(actual_gas)
+          |> Wei.from(:wei)
+        else
+          l2_fee
+        end
+
+        l2_fee
+      else
+        actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
         Wei.to(transaction.gas_price, :wei)
         |> Decimal.mult(actual_gas)
         |> Wei.from(:wei)
-      else
-        l2_fee
       end
+    end
+  end
 
-      l2_fee
+  # Operator fee (arsia+): gas_used × operator_fee_scalar × 100 + operator_fee_constant
+  # Returns nil if both scalar and constant are nil (pre-arsia transactions)
+  defp get_operator_fee(%Transaction{} = transaction) do
+    if is_nil(transaction.operator_fee_scalar) and is_nil(transaction.operator_fee_constant) do
+      nil
     else
-      actual_gas = if transaction.gas_used == nil, do: transaction.gas, else: transaction.gas_used
-      l2_fee = Wei.to(transaction.gas_price, :wei)
-      |> Decimal.mult(actual_gas)
-      |> Wei.from(:wei)
-
-      l2_fee
+      Transaction.operator_fee(transaction)
     end
   end
 

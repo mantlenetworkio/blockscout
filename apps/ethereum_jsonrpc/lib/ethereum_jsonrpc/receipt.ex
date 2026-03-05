@@ -299,7 +299,7 @@ defmodule EthereumJSONRPC.Receipt do
   # Mantle V2 Arsia (Ecotone+) - l1Fee present WITHOUT l1FeeScalar
   # After arsia upgrade, l1FeeScalar is removed and replaced by l1BaseFeeScalar + l1BlobBaseFeeScalar.
   # daFee/daGasPrice/daGasUsed are also removed, replaced by daFootprintGasScalar.
-  # We still save l1_fee, l1_gas_price, l1_gas_used to the existing DB columns.
+  # New fields: operatorFeeScalar, operatorFeeConstant, daFootprintGasScalar.
   def do_elixir_to_params(
         %{
           "cumulativeGasUsed" => cumulative_gas_used,
@@ -324,7 +324,10 @@ defmodule EthereumJSONRPC.Receipt do
       l1_fee: l1_fee,
       l1_fee_scalar: 0.0,
       l1_gas_price: l1_gas_price,
-      l1_gas_used: l1_gas_used
+      l1_gas_used: l1_gas_used,
+      operator_fee_scalar: Map.get(elixir, "operatorFeeScalar"),
+      operator_fee_constant: Map.get(elixir, "operatorFeeConstant"),
+      da_footprint_gas_scalar: Map.get(elixir, "daFootprintGasScalar")
     }
     |> maybe_append_gas_price(elixir)
   end
@@ -581,8 +584,16 @@ defmodule EthereumJSONRPC.Receipt do
   end
 
   # Mantle v2 Arsia specific receipt fields (Ecotone+/Isthmus+/Jovian+)
-  defp entry_to_elixir({key, _}) when key in ~w(operatorFeeScalar operatorFeeConstant daFootprintGasScalar) do
-    :ignore
+  defp entry_to_elixir({key, quantity})
+       when key in ~w(operatorFeeScalar operatorFeeConstant daFootprintGasScalar) do
+    result =
+      if is_nil(quantity) do
+        nil
+      else
+        quantity_to_integer(quantity)
+      end
+
+    {:ok, {key, result}}
   end
 
   # Metis fields

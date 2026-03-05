@@ -208,6 +208,10 @@ defmodule Explorer.Chain.Transaction.Schema do
         field(:da_fee, Wei)
         field(:l1_fee_scalar, :decimal)
         field(:l1_origin_tx_hash, :string)
+        # mantle v2 arsia fields
+        field(:operator_fee_scalar, :decimal)
+        field(:operator_fee_constant, :decimal)
+        field(:da_footprint_gas_scalar, :decimal)
 
         # A transient field for deriving old block hash during transaction upserts.
         # Used to force refetch of a block in case a transaction is re-collated
@@ -297,6 +301,7 @@ defmodule Explorer.Chain.Transaction do
                      gas_used index created_contract_code_indexed_at status
                      to_address_hash revert_reason type has_error_in_internal_txs
                      l1_gas_price l1_gas_used l1_fee l1_fee_scalar l1_origin_tx_hash da_fee da_gas_price da_gas_used
+                     operator_fee_scalar operator_fee_constant da_footprint_gas_scalar
                      r s v)a
 
   @chain_type_optional_attrs (case Application.compile_env(:explorer, :chain_type) do
@@ -1840,6 +1845,23 @@ defmodule Explorer.Chain.Transaction do
       |> Decimal.mult(gas_used)
 
     {:actual, fee}
+  end
+
+  @doc """
+  Calculates the operator fee for a Mantle V2 (arsia+) transaction.
+  Formula (Jovian): gas_used × operator_fee_scalar × 100 + operator_fee_constant
+  Returns 0 if operator_fee_scalar/operator_fee_constant are nil.
+  """
+  @spec operator_fee(Transaction.t()) :: Decimal.t()
+  def operator_fee(%Transaction{gas: gas, gas_used: gas_used} = transaction) do
+    gas_used = gas_used || gas || Decimal.new(0)
+    operator_fee_scalar = Map.get(transaction, :operator_fee_scalar) || Decimal.new(0)
+    operator_fee_constant = Map.get(transaction, :operator_fee_constant) || Decimal.new(0)
+
+    gas_used
+    |> Decimal.mult(operator_fee_scalar)
+    |> Decimal.mult(100)
+    |> Decimal.add(operator_fee_constant)
   end
 
   @doc """
