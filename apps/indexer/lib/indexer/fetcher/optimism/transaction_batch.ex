@@ -132,6 +132,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
          batch_inbox: batch_inbox,
          batch_submitter: batch_submitter,
          eip4844_blobs_api_url: Helper.trim_url(env[:eip4844_blobs_api_url]),
+         eip4844_blobs_api_fallback_url: Helper.trim_url(env[:eip4844_blobs_api_fallback_url]),
          celestia_blobs_api_url: Helper.trim_url(env[:celestia_blobs_api_url]),
          eigenda_blobs_api_url: Helper.trim_url(env[:eigenda_blobs_api_url]),
          alt_da_server_url: Helper.trim_url(env[:alt_da_server_url]),
@@ -237,6 +238,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
           batch_inbox: batch_inbox,
           batch_submitter: batch_submitter,
           eip4844_blobs_api_url: eip4844_blobs_api_url,
+          eip4844_blobs_api_fallback_url: eip4844_blobs_api_fallback_url,
           celestia_blobs_api_url: celestia_blobs_api_url,
           eigenda_blobs_api_url: eigenda_blobs_api_url,
           alt_da_server_url: alt_da_server_url,
@@ -282,7 +284,8 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
                 {genesis_block_l2, block_duration},
                 incomplete_channels_acc,
                 {json_rpc_named_arguments, json_rpc_named_arguments_l2},
-                {eip4844_blobs_api_url, celestia_blobs_api_url, eigenda_blobs_api_url, alt_da_server_url, chain_id_l1},
+                {eip4844_blobs_api_url, eip4844_blobs_api_fallback_url, celestia_blobs_api_url, eigenda_blobs_api_url,
+                 alt_da_server_url, chain_id_l1},
                 Helper.infinite_retries_number()
               )
 
@@ -568,7 +571,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     end
   end
 
-  defp eip4844_blobs_to_inputs(_transaction_hash, _blob_versioned_hashes, _block_timestamp, "", _chain_id_l1) do
+  defp eip4844_blobs_to_inputs(_transaction_hash, _blob_versioned_hashes, _block_timestamp, "", _fb_url, _chain_id_l1) do
     Logger.error(
       "Cannot read EIP-4844 blobs from the Blockscout Blobs API as the API URL is not defined. Please, check INDEXER_OPTIMISM_L1_BATCH_BLOCKSCOUT_BLOBS_API_URL env variable."
     )
@@ -576,56 +579,129 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     []
   end
 
+  # Tries to resolve each blob through a three-layer chain:
+  #   1. Primary URL (`INDEXER_OPTIMISM_L1_BATCH_BLOCKSCOUT_BLOBS_API_URL`)
+  #   2. Fallback URL (`INDEXER_OPTIMISM_L1_BATCH_BLOBS_API_FALLBACK_URL`), optional
+  #   3. Beacon Node `/blob_sidecars/` endpoint (`INDEXER_BEACON_RPC_URL`)
+  #
+  # Both Primary and Fallback URLs accept either the Blockscout Blobs API format
+  # (`{url}/{hash}` returning `{"blob_data": "0x..."}`) or the Mantle DA Indexer
+  # format (`{url}/eth/v1/beacon/blobs/{slot}?versioned_hashes={hash}` returning
+  # `{"data": ["0x..."]}`). Detection is based on the URL path.
   defp eip4844_blobs_to_inputs(
          transaction_hash,
          blob_versioned_hashes,
          block_timestamp,
-         blobs_api_url,
+         primary_api_url,
+         fallback_api_url,
          chain_id_l1
        ) do
     blob_versioned_hashes
     |> Enum.reduce([], fn blob_hash, inputs_acc ->
-      with {:ok, response} <- Helper.http_get_request(blobs_api_url <> "/" <> blob_hash),
-           blob_data = Map.get(response, "blob_data"),
-           false <- is_nil(blob_data) do
-        # read the data from Blockscout API
-        decoded =
-          blob_data
-          |> hash_to_binary()
-          |> OptimismTransactionBatch.decode_eip4844_blob()
-
-        if is_nil(decoded) do
-          Logger.warning("Cannot decode the blob #{blob_hash} taken from the Blockscout Blobs API.")
-
-          inputs_acc
-        else
-          Logger.info(
-            "The input for transaction #{transaction_hash} is taken from the Blockscout Blobs API. Blob hash: #{blob_hash}"
-          )
-
-          input = %{
-            bytes: decoded,
-            eip4844_blob_hash: blob_hash
-          }
-
-          [input | inputs_acc]
-        end
-      else
-        _ ->
-          # read the data from the fallback source (beacon node)
-          eip4844_blobs_to_inputs_from_fallback(
-            transaction_hash,
-            blob_hash,
-            block_timestamp,
-            inputs_acc,
-            chain_id_l1
-          )
-      end
+      resolve_eip4844_blob(
+        transaction_hash,
+        blob_hash,
+        block_timestamp,
+        primary_api_url,
+        fallback_api_url,
+        chain_id_l1,
+        inputs_acc
+      )
     end)
     |> Enum.reverse()
   end
 
-  defp eip4844_blobs_to_inputs_from_fallback(
+  # Walks the Primary → Fallback (Blockscout API) → Beacon Sidecar chain for a single blob hash.
+  @spec resolve_eip4844_blob(String.t(), String.t(), DateTime.t(), String.t(), String.t(), non_neg_integer() | nil, [
+          map()
+        ]) :: [map()]
+  defp resolve_eip4844_blob(
+         transaction_hash,
+         blob_hash,
+         block_timestamp,
+         primary_api_url,
+         fallback_api_url,
+         chain_id_l1,
+         inputs_acc
+       ) do
+    sources = [
+      {"Primary Blobs API (#{primary_api_url})", primary_api_url},
+      {"Fallback Blobs API (#{fallback_api_url})", fallback_api_url}
+    ]
+
+    decoded =
+      Enum.reduce_while(sources, nil, fn {source_label, url}, _acc ->
+        case fetch_blob_from_blobs_api(blob_hash, block_timestamp, url, chain_id_l1) do
+          {:ok, raw_blob} ->
+            case OptimismTransactionBatch.decode_eip4844_blob(raw_blob) do
+              nil ->
+                Logger.warning("Cannot decode the blob #{blob_hash} taken from the #{source_label}.")
+                {:cont, nil}
+
+              decoded_blob ->
+                Logger.info(
+                  "The input for transaction #{transaction_hash} is taken from the #{source_label}. Blob hash: #{blob_hash}"
+                )
+
+                {:halt, decoded_blob}
+            end
+
+          :error ->
+            {:cont, nil}
+        end
+      end)
+
+    case decoded do
+      nil ->
+        # All blobs APIs exhausted — final fallback is Beacon Node `/blob_sidecars/`.
+        eip4844_blobs_to_inputs_from_sidecars(
+          transaction_hash,
+          blob_hash,
+          block_timestamp,
+          inputs_acc,
+          chain_id_l1
+        )
+
+      bytes ->
+        [%{bytes: bytes, eip4844_blob_hash: blob_hash} | inputs_acc]
+    end
+  end
+
+  # Fetches a raw EIP-4844 blob from a Blobs API URL.
+  # Supports two URL formats (auto-detected by path):
+  #   1. Blockscout Blobs API — `{url}/{blob_hash}` → `{"blob_data": "0x..."}`
+  #   2. Mantle DA Indexer (or any Beacon-compatible `/blobs/` endpoint) —
+  #      `{url}/eth/v1/beacon/blobs/{slot}?versioned_hashes={blob_hash}` → `{"data": ["0x..."]}`
+  #
+  # Returns `{:ok, raw_blob_bytes}` on success or `:error` on failure (including empty URL).
+  @spec fetch_blob_from_blobs_api(String.t(), DateTime.t(), String.t(), non_neg_integer() | nil) ::
+          {:ok, binary()} | :error
+  defp fetch_blob_from_blobs_api(_blob_hash, _block_timestamp, "", _chain_id_l1), do: :error
+
+  defp fetch_blob_from_blobs_api(blob_hash, block_timestamp, blobs_api_url, chain_id_l1) do
+    if da_indexer_blobs_url?(blobs_api_url) do
+      base_url = String.replace_suffix(blobs_api_url, "/eth/v1/beacon/blobs", "")
+
+      case Helper.get_eip4844_blob_from_indexer(base_url, blob_hash, block_timestamp, chain_id_l1) do
+        nil -> :error
+        blob_bytes -> {:ok, blob_bytes}
+      end
+    else
+      with {:ok, response} <- Helper.http_get_request(blobs_api_url <> "/" <> blob_hash),
+           blob_data when not is_nil(blob_data) <- Map.get(response, "blob_data") do
+        {:ok, hash_to_binary(blob_data)}
+      else
+        _ -> :error
+      end
+    end
+  end
+
+  # Returns `true` if the URL targets a DA-indexer-style `/eth/v1/beacon/blobs` endpoint.
+  @spec da_indexer_blobs_url?(String.t()) :: boolean()
+  defp da_indexer_blobs_url?(url), do: String.contains?(url, "/eth/v1/beacon/blobs")
+
+  # Final fallback — fetches the blob via the standard Beacon Node `/blob_sidecars/` endpoint.
+  defp eip4844_blobs_to_inputs_from_sidecars(
          transaction_hash,
          blob_hash,
          block_timestamp,
@@ -638,7 +714,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
          decoded_blob_data = OptimismTransactionBatch.decode_eip4844_blob(blob),
          {:blob_data_invalid, false} <- {:blob_data_invalid, is_nil(decoded_blob_data)} do
       Logger.info(
-        "The input for transaction #{transaction_hash} is taken from the Beacon Node. Blob hash: #{blob_hash}"
+        "The input for transaction #{transaction_hash} is taken from the Beacon Node blob_sidecars. Blob hash: #{blob_hash}"
       )
 
       input = %{
@@ -876,7 +952,8 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
          {genesis_block_l2, block_duration},
          incomplete_channels,
          json_rpc_named_arguments_l2,
-         {eip4844_blobs_api_url, celestia_blobs_api_url, eigenda_blobs_api_url, alt_da_server_url, chain_id_l1}
+         {eip4844_blobs_api_url, eip4844_blobs_api_fallback_url, celestia_blobs_api_url, eigenda_blobs_api_url,
+          alt_da_server_url, chain_id_l1}
        ) do
     transactions_filtered
     |> Enum.reduce({:ok, incomplete_channels, [], [], []}, fn transaction,
@@ -893,6 +970,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
               transaction.blob_versioned_hashes,
               block_timestamp,
               eip4844_blobs_api_url,
+              eip4844_blobs_api_fallback_url,
               chain_id_l1
             )
 

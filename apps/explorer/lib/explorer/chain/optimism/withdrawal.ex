@@ -26,7 +26,11 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   @proof_maturity_delay_seconds "optimism_proof_maturity_delay_seconds"
 
   # 32-byte signature of the event MessagePassed(uint256 indexed nonce, address indexed sender, address indexed target, uint256 value, uint256 gasLimit, bytes data, bytes32 withdrawalHash)
-  @message_passed_event "0x02a52367d10742d8032712c1bb8e0144ff1ec5ffda1ed7d70bb05a2744955054"
+  @message_passed_event_standard "0x02a52367d10742d8032712c1bb8e0144ff1ec5ffda1ed7d70bb05a2744955054"
+
+  # Mantle MessagePassed has an extra mntValue field:
+  # MessagePassed(uint256 indexed nonce, address indexed sender, address indexed target, uint256 mntValue, uint256 ethValue, uint256 gasLimit, bytes data, bytes32 withdrawalHash)
+  @message_passed_event_mantle "0x5da382596b838a63b4248e533d8e399b3b0f13ba6c6679f670489d44716cb173"
 
   @required_attrs ~w(msg_nonce hash l2_transaction_hash l2_block_number)a
   @game_fields ~w(created_at resolved_at status)a
@@ -68,6 +72,8 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
         []
 
       _ ->
+        event_topic = message_passed_event()
+
         base_query =
           from(w in __MODULE__,
             order_by: [desc: w.msg_nonce],
@@ -79,7 +85,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
             on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized,
             left_join: log in Log,
             on:
-              log.transaction_hash == w.l2_transaction_hash and log.first_topic == ^@message_passed_event and
+              log.transaction_hash == w.l2_transaction_hash and log.first_topic == ^event_topic and
                 log.second_topic == fragment("numeric_to_bytea32(msg_nonce)"),
             select: %{
               msg_nonce: w.msg_nonce,
@@ -154,6 +160,8 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   """
   @spec transaction_statuses(Hash.t()) :: [{non_neg_integer(), String.t(), map()}]
   def transaction_statuses(l2_transaction_hash) do
+    event_topic = message_passed_event()
+
     query =
       from(w in __MODULE__,
         where: w.l2_transaction_hash == ^l2_transaction_hash,
@@ -163,7 +171,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
         on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized,
         left_join: log in Log,
         on:
-          log.transaction_hash == w.l2_transaction_hash and log.first_topic == ^@message_passed_event and
+          log.transaction_hash == w.l2_transaction_hash and log.first_topic == ^event_topic and
             log.second_topic == fragment("numeric_to_bytea32(msg_nonce)"),
         select: %{
           hash: w.hash,
@@ -468,7 +476,17 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
     - A 0x-prefixed string representing the signature.
   """
   @spec message_passed_event() :: String.t()
-  def message_passed_event, do: @message_passed_event
+  def message_passed_event do
+    if mantle_mode?() do
+      @message_passed_event_mantle
+    else
+      @message_passed_event_standard
+    end
+  end
+
+  defp mantle_mode? do
+    Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] == true
+  end
 
   @doc """
     Returns `OptimismPortal` contract address. First, the function tries to get the address from the

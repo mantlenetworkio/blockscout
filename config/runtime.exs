@@ -1274,7 +1274,12 @@ config :indexer, Indexer.Fetcher.SignedAuthorizationStatus,
 
 config :indexer, Indexer.Fetcher.Optimism.TransactionBatch.Supervisor, enabled: ConfigHelper.chain_type() == :optimism
 config :indexer, Indexer.Fetcher.Optimism.OutputRoot.Supervisor, enabled: ConfigHelper.chain_type() == :optimism
-config :indexer, Indexer.Fetcher.Optimism.DisputeGame.Supervisor, enabled: ConfigHelper.chain_type() == :optimism
+
+config :indexer, Indexer.Fetcher.Optimism.DisputeGame.Supervisor,
+  enabled:
+    ConfigHelper.chain_type() == :optimism &&
+      ConfigHelper.parse_bool_env_var("INDEXER_OPTIMISM_L2_DISPUTE_GAME_ENABLED", "true")
+
 config :indexer, Indexer.Fetcher.Optimism.Deposit.Supervisor, enabled: ConfigHelper.chain_type() == :optimism
 config :indexer, Indexer.Fetcher.Optimism.Withdrawal.Supervisor, enabled: ConfigHelper.chain_type() == :optimism
 config :indexer, Indexer.Fetcher.Optimism.WithdrawalEvent.Supervisor, enabled: ConfigHelper.chain_type() == :optimism
@@ -1282,17 +1287,19 @@ config :indexer, Indexer.Fetcher.Optimism.WithdrawalEvent.Supervisor, enabled: C
 config :indexer, Indexer.Fetcher.Optimism.EIP1559ConfigUpdate.Supervisor,
   disabled?: ConfigHelper.chain_type() != :optimism
 
-config :indexer, Indexer.Fetcher.Optimism.Interop.Message.Supervisor, disabled?: ConfigHelper.chain_type() != :optimism
+optimism_interop_disabled? =
+  ConfigHelper.chain_type() != :optimism ||
+    !ConfigHelper.parse_bool_env_var("INDEXER_OPTIMISM_L2_INTEROP_ENABLED", "true")
 
-config :indexer, Indexer.Fetcher.Optimism.Interop.MessageFailed.Supervisor,
-  disabled?: ConfigHelper.chain_type() != :optimism
+config :indexer, Indexer.Fetcher.Optimism.Interop.Message.Supervisor, disabled?: optimism_interop_disabled?
 
-config :indexer, Indexer.Fetcher.Optimism.Interop.MessageQueue.Supervisor,
-  disabled?: ConfigHelper.chain_type() != :optimism
+config :indexer, Indexer.Fetcher.Optimism.Interop.MessageFailed.Supervisor, disabled?: optimism_interop_disabled?
+
+config :indexer, Indexer.Fetcher.Optimism.Interop.MessageQueue.Supervisor, disabled?: optimism_interop_disabled?
 
 config :indexer, Indexer.Fetcher.Optimism.Interop.MultichainExport.Supervisor,
   disabled?:
-    ConfigHelper.chain_type() != :optimism ||
+    optimism_interop_disabled? ||
       ConfigHelper.parse_bool_env_var("INDEXER_DISABLE_OPTIMISM_INTEROP_MULTICHAIN_EXPORT", "true")
 
 config :indexer, Indexer.Fetcher.Optimism,
@@ -1303,7 +1310,8 @@ config :indexer, Indexer.Fetcher.Optimism,
   block_duration: ConfigHelper.parse_integer_env_var("INDEXER_OPTIMISM_BLOCK_DURATION", 2),
   start_block_l1: ConfigHelper.parse_integer_or_nil_env_var("INDEXER_OPTIMISM_L1_START_BLOCK"),
   portal: System.get_env("INDEXER_OPTIMISM_L1_PORTAL_CONTRACT"),
-  isthmus_timestamp_l2: optimism_l2_isthmus_timestamp
+  isthmus_timestamp_l2: optimism_l2_isthmus_timestamp,
+  mantle_mode: ConfigHelper.parse_bool_env_var("INDEXER_OPTIMISM_MANTLE_MODE")
 
 config :indexer, Indexer.Fetcher.Optimism.Deposit,
   transaction_type: ConfigHelper.parse_integer_env_var("INDEXER_OPTIMISM_L1_DEPOSITS_TRANSACTION_TYPE", 126)

@@ -159,7 +159,7 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
   end
 
   def event_to_withdrawal(second_topic, data, l2_transaction_hash, l2_block_number) do
-    [_value, _gas_limit, _data, hash] = decode_data(data, [{:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
+    hash = parse_message_passed_data(data)
 
     msg_nonce =
       second_topic
@@ -173,6 +173,29 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
       l2_transaction_hash: l2_transaction_hash,
       l2_block_number: quantity_to_integer(l2_block_number)
     }
+  end
+
+  # Parses MessagePassed event data.
+  # Mantle's MessagePassed has an extra mntValue field:
+  #   (uint256 mntValue, uint256 ethValue, uint256 gasLimit, bytes data, bytes32 withdrawalHash)
+  # Standard OP has:
+  #   (uint256 value, uint256 gasLimit, bytes data, bytes32 withdrawalHash)
+  defp parse_message_passed_data(data) do
+    if mantle_mode?() do
+      [_mnt_value, _eth_value, _gas_limit, _data, hash] =
+        decode_data(data, [{:uint, 256}, {:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
+
+      hash
+    else
+      [_value, _gas_limit, _data, hash] =
+        decode_data(data, [{:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
+
+      hash
+    end
+  end
+
+  defp mantle_mode? do
+    Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] == true
   end
 
   defp msg_nonce_gap_starts(nonce_max) do

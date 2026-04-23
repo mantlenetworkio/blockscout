@@ -237,32 +237,61 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
       |> Base.decode16!(case: :mixed)
       |> ExKeccak.hash_256()
 
-    [
-      <<
-        msg_value::binary-size(32),
-        value::binary-size(32),
-        gas_limit::binary-size(8),
-        _is_creation::binary-size(1),
-        data::binary
-      >>
-    ] = decode_data(opaque_data, [:bytes])
-
     is_system = <<0>>
 
     rlp_encoded =
-      ExRLP.encode(
-        [
+      if mantle_mode?() do
+        {mnt_mint, mnt_value, eth_mint, eth_tx_value, gas_limit, data} = parse_opaque_data_mantle(opaque_data)
+
+        # Mantle DepositTx RLP (from op-geth deposit_tx.go):
+        #   [SourceHash, From, To, Mint, Value, Gas, IsSystemTx, EthValue, Data, EthTxValue?]
+        #
+        # Go RLP encoding rules:
+        #   IsSystemTx false → <<>> (empty bytes, RLP 0x80)
+        #   EthValue *big.Int rlp:"nil": non-nil 0 → <<>> (RLP 0x80)
+        #   EthTxValue *big.Int rlp:"optional": nil/zero → field OMITTED entirely
+        base_fields = [
           source_hash,
           from_stripped |> Base.decode16!(case: :mixed),
           to_stripped |> Base.decode16!(case: :mixed),
-          msg_value |> String.replace_leading(<<0>>, <<>>),
-          value |> String.replace_leading(<<0>>, <<>>),
+          mnt_mint |> String.replace_leading(<<0>>, <<>>),
+          mnt_value |> String.replace_leading(<<0>>, <<>>),
           gas_limit |> String.replace_leading(<<0>>, <<>>),
           is_system |> String.replace_leading(<<0>>, <<>>),
+          eth_mint |> String.replace_leading(<<0>>, <<>>),
           data
-        ],
-        encoding: :hex
-      )
+        ]
+
+        # EthTxValue: only include if non-zero (Go rlp:"optional" omits zero/nil)
+        eth_tx_value_stripped = eth_tx_value |> String.replace_leading(<<0>>, <<>>)
+
+        fields =
+          if eth_tx_value_stripped != <<>> do
+            base_fields ++ [eth_tx_value_stripped]
+          else
+            base_fields
+          end
+
+        ExRLP.encode(fields, encoding: :hex)
+      else
+        {msg_value, value, gas_limit, data} = parse_opaque_data_standard(opaque_data)
+
+        # Standard OP DepositTx RLP (8 fields):
+        #   [SourceHash, From, To, Mint, Value, Gas, IsSystemTx, Data]
+        ExRLP.encode(
+          [
+            source_hash,
+            from_stripped |> Base.decode16!(case: :mixed),
+            to_stripped |> Base.decode16!(case: :mixed),
+            msg_value |> String.replace_leading(<<0>>, <<>>),
+            value |> String.replace_leading(<<0>>, <<>>),
+            gas_limit |> String.replace_leading(<<0>>, <<>>),
+            is_system |> String.replace_leading(<<0>>, <<>>),
+            data
+          ],
+          encoding: :hex
+        )
+      end
 
     transaction_type =
       transaction_type
@@ -285,6 +314,51 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
       l1_transaction_origin: Map.get(origins, String.downcase(transaction_hash)),
       l2_transaction_hash: l2_transaction_hash
     }
+  end
+
+  # Parses Mantle opaqueData (4×uint256) → returns all 6 values for 10-field RLP.
+  # opaqueData layout: [mnt_value(32), mnt_tx_value(32), msg_value(32), eth_tx_value(32), gas_limit(8), is_creation(1), data]
+  #
+  # Mantle DepositTx RLP field mapping (from op-geth deposit_tx.go):
+  #   Mint       = mnt_value    (position 0) — MNT to mint on L2
+  #   Value      = mnt_tx_value (position 1) — MNT to transfer
+  #   EthValue   = msg_value    (position 2) — ETH/BVM_ETH to mint
+  #   EthTxValue = eth_tx_value (position 3) — ETH to transfer
+  @spec parse_opaque_data_mantle(binary()) :: {binary(), binary(), binary(), binary(), binary(), binary()}
+  defp parse_opaque_data_mantle(opaque_data) do
+    [raw] = decode_data(opaque_data, [:bytes])
+
+    <<
+      mnt_mint::binary-size(32),
+      mnt_value::binary-size(32),
+      eth_mint::binary-size(32),
+      eth_tx_value::binary-size(32),
+      gas_limit::binary-size(8),
+      _is_creation::binary-size(1),
+      data::binary
+    >> = raw
+
+    {mnt_mint, mnt_value, eth_mint, eth_tx_value, gas_limit, data}
+  end
+
+  # Standard OP opaqueData (2×uint256) → 4 values for 8-field RLP.
+  @spec parse_opaque_data_standard(binary()) :: {binary(), binary(), binary(), binary()}
+  defp parse_opaque_data_standard(opaque_data) do
+    [raw] = decode_data(opaque_data, [:bytes])
+
+    <<
+      msg_value::binary-size(32),
+      value::binary-size(32),
+      gas_limit::binary-size(8),
+      _is_creation::binary-size(1),
+      data::binary
+    >> = raw
+
+    {msg_value, value, gas_limit, data}
+  end
+
+  defp mantle_mode? do
+    Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] == true
   end
 
   @doc """

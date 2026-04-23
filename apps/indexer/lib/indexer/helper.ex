@@ -872,6 +872,49 @@ defmodule Indexer.Helper do
   """
   @spec get_eip4844_blob_from_beacon_node(String.t(), DateTime.t(), non_neg_integer() | nil) :: binary() | nil
   def get_eip4844_blob_from_beacon_node(blob_hash, l1_block_timestamp, l1_chain_id) do
+    slot = compute_beacon_slot(l1_block_timestamp, l1_chain_id)
+    get_blob_via_sidecars_endpoint(slot, blob_hash)
+  rescue
+    reason ->
+      Logger.warning("Cannot get the blob #{blob_hash} from the Beacon Node. Reason: #{inspect(reason)}")
+      nil
+  end
+
+  @doc """
+    Fetches an EIP-4844 blob from a Mantle-DA-Indexer-compatible blobs endpoint.
+
+    Compatible endpoints expose `/eth/v1/beacon/blobs/{slot}?versioned_hashes={hash}`
+    and return `{"data": ["0x..."]}` (a raw hex string per matched blob).
+
+    ## Parameters
+    - `base_url`: Indexer base URL (e.g. `https://da-indexer-api.mantle.xyz`). Trailing slashes are tolerated.
+    - `blob_hash`: Target blob versioned hash, e.g. `"0x01..."`.
+    - `l1_block_timestamp`: L1 block timestamp used to derive the beacon slot.
+    - `l1_chain_id`: L1 chain id used to pick the right slot-derivation parameters.
+
+    ## Returns
+    - A binary with the raw blob bytes on success.
+    - `nil` on any failure (404, empty data, network error, etc.).
+  """
+  @spec get_eip4844_blob_from_indexer(String.t(), String.t(), DateTime.t(), non_neg_integer() | nil) ::
+          binary() | nil
+  def get_eip4844_blob_from_indexer(base_url, blob_hash, l1_block_timestamp, l1_chain_id) do
+    slot = compute_beacon_slot(l1_block_timestamp, l1_chain_id)
+
+    case get_blob_via_blobs_endpoint(trim_url(base_url), slot, blob_hash) do
+      {:ok, blob_binary} -> blob_binary
+      :fallback -> nil
+    end
+  rescue
+    reason ->
+      Logger.warning("Cannot get the blob #{blob_hash} from the DA indexer at #{base_url}. Reason: #{inspect(reason)}")
+
+      nil
+  end
+
+  # Computes the beacon chain slot for a given L1 block timestamp and chain id.
+  @spec compute_beacon_slot(DateTime.t(), non_neg_integer() | nil) :: non_neg_integer()
+  defp compute_beacon_slot(l1_block_timestamp, l1_chain_id) do
     beacon_config =
       case l1_chain_id do
         @chain_id_eth ->
@@ -902,18 +945,39 @@ defmodule Indexer.Helper do
           |> Enum.into(%{})
       end
 
-    sidecars_url =
-      l1_block_timestamp
-      |> DateTime.to_unix()
-      |> BeaconBlobFetcher.timestamp_to_slot(beacon_config)
-      |> BeaconClient.blob_sidecars_url()
+    l1_block_timestamp
+    |> DateTime.to_unix()
+    |> BeaconBlobFetcher.timestamp_to_slot(beacon_config)
+  end
+
+  # Tries to fetch a blob via the /eth/v1/beacon/blobs/{slot}?versioned_hashes={hash} endpoint.
+  # This is compatible with Mantle DA Indexer and similar services that implement a simplified
+  # Beacon API returning raw blob hex strings filtered by versioned hash.
+  # Returns {:ok, binary} on success, or :fallback if the endpoint is unavailable or returns empty data.
+  @spec get_blob_via_blobs_endpoint(String.t(), non_neg_integer(), String.t()) :: {:ok, binary()} | :fallback
+  defp get_blob_via_blobs_endpoint(base_url, slot, blob_hash) do
+    blobs_url = "#{base_url}/eth/v1/beacon/blobs/#{slot}?versioned_hashes=#{blob_hash}"
+
+    with {:ok, response} <- http_get_request(blobs_url, :json, 0, [404, 501]),
+         [first_blob | _] when is_binary(first_blob) <- Map.get(response, "data", []) do
+      {:ok, hash_to_binary(first_blob)}
+    else
+      _ -> :fallback
+    end
+  end
+
+  # Fetches a blob via the standard /eth/v1/beacon/blob_sidecars/{slot} endpoint.
+  # Matches the target blob by computing versioned hash from each sidecar's kzg_commitment.
+  @spec get_blob_via_sidecars_endpoint(non_neg_integer(), String.t()) :: binary()
+  defp get_blob_via_sidecars_endpoint(slot, blob_hash) do
+    sidecars_url = BeaconClient.blob_sidecars_url(slot)
 
     {:ok, fetched_blobs} = http_get_request(sidecars_url)
 
     blobs = Map.get(fetched_blobs, "data", [])
 
     if Enum.empty?(blobs) do
-      raise "Empty data"
+      raise "Empty data from blob_sidecars for slot #{slot}"
     end
 
     blobs
@@ -927,10 +991,6 @@ defmodule Indexer.Helper do
     end)
     |> Map.get("blob")
     |> hash_to_binary()
-  rescue
-    reason ->
-      Logger.warning("Cannot get the blob #{blob_hash} from the Beacon Node. Reason: #{inspect(reason)}")
-      nil
   end
 
   @doc """

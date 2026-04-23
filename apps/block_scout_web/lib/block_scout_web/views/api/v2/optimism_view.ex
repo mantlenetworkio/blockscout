@@ -6,7 +6,7 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
 
   alias BlockScoutWeb.API.V2.Helper
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.{Block, Data, Hash, Transaction}
+  alias Explorer.Chain.{Block, Transaction}
   alias Explorer.Chain.Optimism.{DisputeGame, FrameSequence, FrameSequenceBlob, InteropMessage, Withdrawal}
 
   @api_true [api?: true]
@@ -215,8 +215,7 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
 
           {status, challenge_period_end} = Withdrawal.status(w, respected_games, @api_true)
 
-          {sender_address_hash, target_address_hash, msg_value, msg_gas_limit, msg_data} =
-            withdrawal_msg_transaction_fields(w)
+          msg_fields = withdrawal_msg_transaction_fields(w)
 
           %{
             "msg_nonce_raw" => Decimal.to_string(w.msg_nonce, :normal),
@@ -228,13 +227,9 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
             "status" => status,
             "l1_transaction_hash" => w.l1_transaction_hash,
             "challenge_period_end" => challenge_period_end,
-            "portal_contract_address_hash" => portal_contract_address_hash,
-            "msg_sender_address_hash" => sender_address_hash,
-            "msg_target_address_hash" => target_address_hash,
-            "msg_value" => msg_value,
-            "msg_gas_limit" => msg_gas_limit,
-            "msg_data" => msg_data
+            "portal_contract_address_hash" => portal_contract_address_hash
           }
+          |> Map.merge(msg_fields)
         end),
       next_page_params: next_page_params
     }
@@ -476,20 +471,16 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
       transaction.hash
       |> Withdrawal.transaction_statuses()
       |> Enum.map(fn {nonce, status, w} ->
-        {sender_address_hash, target_address_hash, value, gas_limit, data} = withdrawal_msg_transaction_fields(w)
+        msg_fields = withdrawal_msg_transaction_fields(w)
 
         %{
           "nonce" => nonce,
           "status" => status,
           "l1_transaction_hash" => w.l1_transaction_hash,
           "portal_contract_address_hash" => portal_contract_address_hash,
-          "msg_nonce_raw" => w.msg_nonce,
-          "msg_sender_address_hash" => sender_address_hash,
-          "msg_target_address_hash" => target_address_hash,
-          "msg_value" => value,
-          "msg_gas_limit" => gas_limit,
-          "msg_data" => data
+          "msg_nonce_raw" => w.msg_nonce
         }
+        |> Map.merge(msg_fields)
       end)
 
     interop_messages =
@@ -525,40 +516,58 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
 
   # Retrieves withdrawal message transaction fields from the `MessagePassed` event emitted by `L2ToL1MessagePasser` contract.
   #
-  # The event looks as follows:
-  # MessagePassed(uint256 indexed nonce, address indexed sender, address indexed target, uint256 value, uint256 gasLimit, bytes data, bytes32 withdrawalHash)
+  # Standard OP event: MessagePassed(uint256 indexed nonce, address indexed sender, address indexed target, uint256 value, uint256 gasLimit, bytes data, bytes32 withdrawalHash)
+  # Mantle event:      MessagePassed(uint256 indexed nonce, address indexed sender, address indexed target, uint256 mntValue, uint256 ethValue, uint256 gasLimit, bytes data, bytes32 withdrawalHash)
   #
-  # ## Parameters
-  # - `w`: A map containing `msg_log_sender_address_hash`, `msg_log_target_address_hash`, and `msg_log_data` components
-  #        of the `MessagePassed` event.
-  #
-  # ## Returns
-  # - A tuple containing the following fields in form of string (each one can be `nil`):
-  #   {sender address, target address, value, gas limit, data}
-  @spec withdrawal_msg_transaction_fields(%{
-          msg_log_sender_address_hash: Hash.t(),
-          msg_log_target_address_hash: Hash.t(),
-          msg_log_data: Data.t()
-        }) :: {String.t() | nil, String.t() | nil, String.t() | nil, String.t() | nil, String.t() | nil}
+  # Returns a map with parsed fields. In Mantle mode, includes both "msg_value" (MNT) and "msg_eth_value" (ETH).
+  @spec withdrawal_msg_transaction_fields(map()) :: map()
   defp withdrawal_msg_transaction_fields(w) do
-    sender_address_hash =
-      if not is_nil(w.msg_log_sender_address_hash) do
-        truncate_address_hash(w.msg_log_sender_address_hash)
-      end
-
-    target_address_hash =
-      if not is_nil(w.msg_log_target_address_hash) do
-        truncate_address_hash(w.msg_log_target_address_hash)
-      end
+    result = %{
+      "msg_sender_address_hash" =>
+        if(not is_nil(w.msg_log_sender_address_hash),
+          do: truncate_address_hash(w.msg_log_sender_address_hash)
+        ),
+      "msg_target_address_hash" =>
+        if(not is_nil(w.msg_log_target_address_hash),
+          do: truncate_address_hash(w.msg_log_target_address_hash)
+        ),
+      "msg_value" => nil,
+      "msg_gas_limit" => nil,
+      "msg_data" => nil
+    }
 
     if is_nil(w.msg_log_data) do
-      {sender_address_hash, target_address_hash, nil, nil, nil}
+      result
     else
-      [msg_value, msg_gas_limit, msg_data, _withdrawal_hash] =
-        decode_data(w.msg_log_data, [{:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
-
-      {sender_address_hash, target_address_hash, to_string(msg_value), to_string(msg_gas_limit),
-       "0x" <> Base.encode16(msg_data, case: :lower)}
+      parse_withdrawal_msg_log_data(w.msg_log_data, result)
     end
+  end
+
+  # Parses MessagePassed event log data.
+  # Mantle has 5 non-indexed fields: (mntValue, ethValue, gasLimit, data, hash)
+  # Standard OP has 4: (value, gasLimit, data, hash)
+  defp parse_withdrawal_msg_log_data(msg_log_data, result) do
+    if mantle_mode?() do
+      [mnt_value, eth_value, gas_limit, data, _hash] =
+        decode_data(msg_log_data, [{:uint, 256}, {:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
+
+      result
+      |> Map.put("msg_value", to_string(mnt_value))
+      |> Map.put("msg_eth_value", to_string(eth_value))
+      |> Map.put("msg_gas_limit", to_string(gas_limit))
+      |> Map.put("msg_data", "0x" <> Base.encode16(data, case: :lower))
+    else
+      [value, gas_limit, data, _hash] =
+        decode_data(msg_log_data, [{:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
+
+      result
+      |> Map.put("msg_value", to_string(value))
+      |> Map.put("msg_gas_limit", to_string(gas_limit))
+      |> Map.put("msg_data", "0x" <> Base.encode16(data, case: :lower))
+    end
+  end
+
+  defp mantle_mode? do
+    Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] == true
   end
 end
