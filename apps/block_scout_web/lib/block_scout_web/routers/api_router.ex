@@ -324,6 +324,15 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
         get("/interop/messages/:unique_id", V2.OptimismController, :interop_message)
         get("/interop/public-key", V2.OptimismController, :interop_public_key)
       end
+
+      # Mantle legacy endpoints — kept for backward compat with pre-v9.3.2 frontend.
+      # Given a state-root-derived L2 block range (blockNumber + blockSize),
+      # return the blocks / transactions inside that range using the legacy
+      # {Current, Size, Total, Records} pagination shape.
+      scope "/mantle" do
+        get("/stateroot/blocks", V2.MantleController, :stateroot_blocks)
+        get("/stateroot/transactions", V2.MantleController, :stateroot_transactions)
+      end
     end
 
     if @chain_identity == {:optimism, :celo} do
