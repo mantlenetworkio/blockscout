@@ -38,6 +38,12 @@ defmodule Indexer.Fetcher.Stats.HotSmartContracts do
 
       Logger.info("Hot contracts fetched for #{date}")
     else
+      # Date is before chain genesis (no corresponding block), skip retry:
+      # not rescheduled in this session; next restart's check_completeness
+      # will trigger one warning per date then stop.
+      {:error, {:error, :not_found}} ->
+        Logger.warning("Skip hot contracts for pre-genesis date #{date}")
+
       {:error, error} ->
         Process.send_after(self(), {:fetch_for_date, date, new_day?}, @retry_interval)
         Logger.error("Error fetching hot contracts for #{date}: #{inspect(error)}")
