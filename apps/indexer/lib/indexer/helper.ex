@@ -38,10 +38,15 @@ defmodule Indexer.Helper do
   @beacon_blob_fetcher_reference_timestamp_sepolia 1_708_533_600
   @beacon_blob_fetcher_reference_slot_holesky 1_000_000
   @beacon_blob_fetcher_reference_timestamp_holesky 1_707_902_400
+  # Hoodi (Ethereum's successor to Holesky, mainnet-shadow testnet)
+  # Beacon chain genesis: slot 0 at 2025-03-17 14:10:00 UTC
+  @beacon_blob_fetcher_reference_slot_hoodi 0
+  @beacon_blob_fetcher_reference_timestamp_hoodi 1_742_213_400
   @beacon_blob_fetcher_slot_duration 12
   @chain_id_eth 1
   @chain_id_sepolia 11_155_111
   @chain_id_holesky 17000
+  @chain_id_hoodi 560_048
 
   @doc """
   Checks whether the given Ethereum address looks correct.
@@ -876,7 +881,15 @@ defmodule Indexer.Helper do
     get_blob_via_sidecars_endpoint(slot, blob_hash)
   rescue
     reason ->
-      Logger.warning("Cannot get the blob #{blob_hash} from the Beacon Node. Reason: #{inspect(reason)}")
+      # Most common case: INDEXER_BEACON_RPC_URL points to a Mantle DA indexer
+      # which doesn't support the standard `/eth/v1/beacon/blob_sidecars/{slot}`
+      # endpoint (returns 501) — the previous two layers (Primary/Fallback Blobs
+      # API) were already tried and failed. Log at :info to avoid alarm.
+      Logger.info(
+        "Beacon-Node sidecar fallback unavailable for blob #{blob_hash} (slot derived from L1 timestamp). " <>
+          "Reason: #{inspect(reason)}. The previous two blob sources were also unable to serve this blob."
+      )
+
       nil
   end
 
@@ -938,6 +951,13 @@ defmodule Indexer.Helper do
             slot_duration: @beacon_blob_fetcher_slot_duration
           }
 
+        @chain_id_hoodi ->
+          %{
+            reference_slot: @beacon_blob_fetcher_reference_slot_hoodi,
+            reference_timestamp: @beacon_blob_fetcher_reference_timestamp_hoodi,
+            slot_duration: @beacon_blob_fetcher_slot_duration
+          }
+
         _ ->
           :indexer
           |> Application.get_env(BeaconBlobFetcher)
@@ -972,7 +992,16 @@ defmodule Indexer.Helper do
   defp get_blob_via_sidecars_endpoint(slot, blob_hash) do
     sidecars_url = BeaconClient.blob_sidecars_url(slot)
 
-    {:ok, fetched_blobs} = http_get_request(sidecars_url)
+    fetched_blobs =
+      case http_get_request(sidecars_url) do
+        {:ok, response} ->
+          response
+
+        {:error, reason} ->
+          # Bubbles up to the caller's `rescue` clause as a tagged failure
+          # (MatchError is replaced with a clean RuntimeError for clarity).
+          raise "blob_sidecars endpoint unavailable for slot #{slot}: #{inspect(reason)}"
+      end
 
     blobs = Map.get(fetched_blobs, "data", [])
 
