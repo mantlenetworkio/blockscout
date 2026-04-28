@@ -37,6 +37,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   alias Explorer.Chain.Optimism.{FrameSequence, FrameSequenceBlob}
   alias Explorer.Chain.Optimism.TransactionBatch, as: OptimismTransactionBatch
   alias Indexer.Fetcher.{Optimism, RollupL1ReorgMonitor}
+  alias Indexer.Fetcher.Optimism.BlobRetryQueue
   alias Indexer.Helper
   alias Indexer.Prometheus.Instrumenter
   alias Varint.LEB128
@@ -256,6 +257,27 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
       ) do
     time_before = Timex.now()
 
+    # If any previously-failed blob fetches are due for retry, rewind start_block
+    # back to the earliest pending L1 block so the upcoming scan re-fetches those
+    # blobs (da-indexer should have caught up by now in most cases).
+    {start_block, retried_min_block} =
+      case BlobRetryQueue.due_min_block() do
+        nil ->
+          {start_block, nil}
+
+        retry_block when retry_block < start_block ->
+          Logger.info(
+            "BlobRetryQueue: retrying L1 block #{retry_block} (current head was #{start_block}). " <>
+              "Pending queue size: #{BlobRetryQueue.size()}."
+          )
+
+          {retry_block, retry_block}
+
+        _other ->
+          # Retry block is ahead of current start_block — natural catchup will cover it
+          {start_block, nil}
+      end
+
     chunks_number = ceil((end_block - start_block + 1) / chunk_size)
     chunk_range = Range.new(0, max(chunks_number - 1, 0), 1)
 
@@ -355,6 +377,12 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
 
     new_start_block = last_written_block + 1
     new_end_block = Helper.fetch_latest_l1_block_number(json_rpc_named_arguments)
+
+    # If we rewound for blob retries, mark the rescanned range as attempted so
+    # the queue can advance backoff / drop entries that exceeded max attempts.
+    if retried_min_block do
+      BlobRetryQueue.mark_range_attempted(retried_min_block, last_written_block)
+    end
 
     delay =
       if new_end_block == last_written_block do
@@ -571,7 +599,15 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     end
   end
 
-  defp eip4844_blobs_to_inputs(_transaction_hash, _blob_versioned_hashes, _block_timestamp, "", _fb_url, _chain_id_l1) do
+  defp eip4844_blobs_to_inputs(
+         _transaction_hash,
+         _l1_block_number,
+         _blob_versioned_hashes,
+         _block_timestamp,
+         "",
+         _fb_url,
+         _chain_id_l1
+       ) do
     Logger.error(
       "Cannot read EIP-4844 blobs from the Blockscout Blobs API as the API URL is not defined. Please, check INDEXER_OPTIMISM_L1_BATCH_BLOCKSCOUT_BLOBS_API_URL env variable."
     )
@@ -590,6 +626,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   # `{"data": ["0x..."]}`). Detection is based on the URL path.
   defp eip4844_blobs_to_inputs(
          transaction_hash,
+         l1_block_number,
          blob_versioned_hashes,
          block_timestamp,
          primary_api_url,
@@ -600,6 +637,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     |> Enum.reduce([], fn blob_hash, inputs_acc ->
       resolve_eip4844_blob(
         transaction_hash,
+        l1_block_number,
         blob_hash,
         block_timestamp,
         primary_api_url,
@@ -612,11 +650,19 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   end
 
   # Walks the Primary → Fallback (Blockscout API) → Beacon Sidecar chain for a single blob hash.
-  @spec resolve_eip4844_blob(String.t(), String.t(), DateTime.t(), String.t(), String.t(), non_neg_integer() | nil, [
-          map()
-        ]) :: [map()]
+  @spec resolve_eip4844_blob(
+          String.t(),
+          non_neg_integer(),
+          String.t(),
+          DateTime.t(),
+          String.t(),
+          String.t(),
+          non_neg_integer() | nil,
+          [map()]
+        ) :: [map()]
   defp resolve_eip4844_blob(
          transaction_hash,
+         l1_block_number,
          blob_hash,
          block_timestamp,
          primary_api_url,
@@ -656,6 +702,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
         # All blobs APIs exhausted — final fallback is Beacon Node `/blob_sidecars/`.
         eip4844_blobs_to_inputs_from_sidecars(
           transaction_hash,
+          l1_block_number,
           blob_hash,
           block_timestamp,
           inputs_acc,
@@ -703,6 +750,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   # Final fallback — fetches the blob via the standard Beacon Node `/blob_sidecars/` endpoint.
   defp eip4844_blobs_to_inputs_from_sidecars(
          transaction_hash,
+         l1_block_number,
          blob_hash,
          block_timestamp,
          inputs_acc,
@@ -725,6 +773,16 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
       [input | inputs_acc]
     else
       true ->
+        # All 3 layers exhausted. Most common cause on Mantle Hoodi: da-indexer
+        # hasn't yet ingested this brand-new blob. Enqueue for later retry —
+        # the main loop will rewind start_block to re-scan this L1 block once
+        # the backoff window elapses.
+        Logger.warning(
+          "BLOB ALL-SOURCES EXHAUSTED — L1 block #{l1_block_number}, tx #{transaction_hash}, " <>
+            "blob hash #{blob_hash}. Enqueued for retry."
+        )
+
+        BlobRetryQueue.enqueue(l1_block_number, blob_hash, transaction_hash)
         inputs_acc
 
       {:blob_data_invalid, true} ->
@@ -967,6 +1025,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
 
             eip4844_blobs_to_inputs(
               transaction.hash,
+              transaction.block_number,
               transaction.blob_versioned_hashes,
               block_timestamp,
               eip4844_blobs_api_url,

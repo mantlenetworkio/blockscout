@@ -166,6 +166,10 @@ defmodule Indexer.Supervisor do
         {MultichainSearchDbCountersExportQueue.Supervisor, [[memory_monitor: memory_monitor]]},
         {MultichainSearchDbCountersFetcher.Supervisor, [[memory_monitor: memory_monitor]]},
         {Indexer.Fetcher.RollupL1ReorgMonitor.Supervisor, [[memory_monitor: memory_monitor]]},
+        # Retry queue must start BEFORE TransactionBatch so it's ready when the
+        # batch fetcher tries to enqueue failed blob fetches. Lightweight Agent
+        # — safe to start unconditionally (no-op if no enqueues happen).
+        Indexer.Fetcher.Optimism.BlobRetryQueue,
         configure(
           Indexer.Fetcher.Optimism.TransactionBatch.Supervisor,
           [[memory_monitor: memory_monitor, json_rpc_named_arguments: json_rpc_named_arguments]]

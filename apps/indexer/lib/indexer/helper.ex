@@ -877,20 +877,37 @@ defmodule Indexer.Helper do
   """
   @spec get_eip4844_blob_from_beacon_node(String.t(), DateTime.t(), non_neg_integer() | nil) :: binary() | nil
   def get_eip4844_blob_from_beacon_node(blob_hash, l1_block_timestamp, l1_chain_id) do
-    slot = compute_beacon_slot(l1_block_timestamp, l1_chain_id)
-    get_blob_via_sidecars_endpoint(slot, blob_hash)
+    if beacon_sidecars_disabled?() do
+      # Operator explicitly opted out (no real Beacon Node available, e.g. when
+      # `INDEXER_BEACON_RPC_URL` points to a Mantle DA Indexer which doesn't
+      # implement `/eth/v1/beacon/blob_sidecars/{slot}`). Skip silently.
+      nil
+    else
+      slot = compute_beacon_slot(l1_block_timestamp, l1_chain_id)
+      get_blob_via_sidecars_endpoint(slot, blob_hash)
+    end
   rescue
     reason ->
-      # Most common case: INDEXER_BEACON_RPC_URL points to a Mantle DA indexer
-      # which doesn't support the standard `/eth/v1/beacon/blob_sidecars/{slot}`
-      # endpoint (returns 501) — the previous two layers (Primary/Fallback Blobs
-      # API) were already tried and failed. Log at :info to avoid alarm.
+      # Previous two layers (Primary/Fallback Blobs API) already tried and failed.
+      # Log at :info to avoid alarm — last-resort fallback failure is expected
+      # when not running a real Beacon Node.
       Logger.info(
         "Beacon-Node sidecar fallback unavailable for blob #{blob_hash} (slot derived from L1 timestamp). " <>
           "Reason: #{inspect(reason)}. The previous two blob sources were also unable to serve this blob."
       )
 
       nil
+  end
+
+  # Reads `:beacon_blob_sidecars_disabled` from the centralized Optimism indexer
+  # config (set in `config/runtime.exs` via `INDEXER_BEACON_BLOB_SIDECARS_DISABLED`).
+  # Set to `true` when `INDEXER_BEACON_RPC_URL` intentionally points at a DA
+  # indexer that doesn't expose `/eth/v1/beacon/blob_sidecars/`, to avoid noisy
+  # retries+errors when Layer 1 + Layer 2 both miss a blob.
+  defp beacon_sidecars_disabled? do
+    :indexer
+    |> Application.get_env(Indexer.Fetcher.Optimism, [])
+    |> Keyword.get(:beacon_blob_sidecars_disabled, false) == true
   end
 
   @doc """
@@ -978,11 +995,33 @@ defmodule Indexer.Helper do
   defp get_blob_via_blobs_endpoint(base_url, slot, blob_hash) do
     blobs_url = "#{base_url}/eth/v1/beacon/blobs/#{slot}?versioned_hashes=#{blob_hash}"
 
-    with {:ok, response} <- http_get_request(blobs_url, :json, 0, [404, 501]),
-         [first_blob | _] when is_binary(first_blob) <- Map.get(response, "data", []) do
-      {:ok, hash_to_binary(first_blob)}
-    else
-      _ -> :fallback
+    case http_get_request(blobs_url, :json, 0, [404, 501]) do
+      {:ok, response} ->
+        case Map.get(response, "data", []) do
+          [first_blob | _] when is_binary(first_blob) ->
+            {:ok, hash_to_binary(first_blob)}
+
+          [] ->
+            Logger.debug(
+              "DA indexer returned empty `data` for blob #{blob_hash} at slot #{slot} — likely not yet indexed."
+            )
+
+            :fallback
+
+          other ->
+            Logger.warning(
+              "DA indexer returned unexpected `data` shape for blob #{blob_hash} at slot #{slot}: #{inspect(other, limit: 50)}"
+            )
+
+            :fallback
+        end
+
+      {:error, reason} ->
+        Logger.warning(
+          "DA indexer Blobs API failed for blob #{blob_hash} at slot #{slot}. Reason: #{inspect(reason, limit: 200)}"
+        )
+
+        :fallback
     end
   end
 
