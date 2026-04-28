@@ -39,7 +39,7 @@ defmodule Indexer.Helper do
   @beacon_blob_fetcher_reference_slot_holesky 1_000_000
   @beacon_blob_fetcher_reference_timestamp_holesky 1_707_902_400
   # Hoodi (Ethereum's successor to Holesky, mainnet-shadow testnet)
-  # Beacon chain genesis: slot 0 at 2025-03-17 14:10:00 UTC
+  # Beacon chain genesis: slot 0 at 2025-03-17 12:10:00 UTC
   @beacon_blob_fetcher_reference_slot_hoodi 0
   @beacon_blob_fetcher_reference_timestamp_hoodi 1_742_213_400
   @beacon_blob_fetcher_slot_duration 12
@@ -810,7 +810,7 @@ defmodule Indexer.Helper do
 
       {:ok, %{body: body, status: status}} ->
         if status in avoid_retry_for_statuses do
-          http_get_request_error(url, response_format, body, @http_get_request_max_attempts, avoid_retry_for_statuses)
+          http_get_request_avoided_status(url, status, body)
         else
           http_get_request_error(url, response_format, body, attempts_done, avoid_retry_for_statuses)
         end
@@ -818,6 +818,17 @@ defmodule Indexer.Helper do
       {:error, error} ->
         http_get_request_error(url, response_format, error, attempts_done, avoid_retry_for_statuses)
     end
+  end
+
+  defp http_get_request_avoided_status(url, status, body) do
+    Logger.debug(fn ->
+      [
+        "Request to #{url} returned HTTP #{status}; skipping retry. Response: ",
+        inspect(body, limit: :infinity, printable_limit: :infinity)
+      ]
+    end)
+
+    {:error, {:http_status, status, "Error while sending request to #{url}"}}
   end
 
   # Handles HTTP GET error and tries to re-call the `http_get_request` function after sleep.
@@ -877,20 +888,37 @@ defmodule Indexer.Helper do
   """
   @spec get_eip4844_blob_from_beacon_node(String.t(), DateTime.t(), non_neg_integer() | nil) :: binary() | nil
   def get_eip4844_blob_from_beacon_node(blob_hash, l1_block_timestamp, l1_chain_id) do
-    slot = compute_beacon_slot(l1_block_timestamp, l1_chain_id)
-    get_blob_via_sidecars_endpoint(slot, blob_hash)
+    if beacon_sidecars_disabled?() do
+      # Operator explicitly opted out (no real Beacon Node available, e.g. when
+      # `INDEXER_BEACON_RPC_URL` points to a Mantle DA Indexer which doesn't
+      # implement `/eth/v1/beacon/blob_sidecars/{slot}`). Skip silently.
+      nil
+    else
+      slot = compute_beacon_slot(l1_block_timestamp, l1_chain_id)
+      get_blob_via_sidecars_endpoint(slot, blob_hash)
+    end
   rescue
     reason ->
-      # Most common case: INDEXER_BEACON_RPC_URL points to a Mantle DA indexer
-      # which doesn't support the standard `/eth/v1/beacon/blob_sidecars/{slot}`
-      # endpoint (returns 501) — the previous two layers (Primary/Fallback Blobs
-      # API) were already tried and failed. Log at :info to avoid alarm.
+      # Previous two layers (Primary/Fallback Blobs API) already tried and failed.
+      # Log at :info to avoid alarm — last-resort fallback failure is expected
+      # when not running a real Beacon Node.
       Logger.info(
         "Beacon-Node sidecar fallback unavailable for blob #{blob_hash} (slot derived from L1 timestamp). " <>
           "Reason: #{inspect(reason)}. The previous two blob sources were also unable to serve this blob."
       )
 
       nil
+  end
+
+  # Reads `:beacon_blob_sidecars_disabled` from the centralized Optimism indexer
+  # config (set in `config/runtime.exs` via `INDEXER_BEACON_BLOB_SIDECARS_DISABLED`).
+  # Set to `true` when `INDEXER_BEACON_RPC_URL` intentionally points at a DA
+  # indexer that doesn't expose `/eth/v1/beacon/blob_sidecars/`, to avoid noisy
+  # retries+errors when Layer 1 + Layer 2 both miss a blob.
+  defp beacon_sidecars_disabled? do
+    :indexer
+    |> Application.get_env(Indexer.Fetcher.Optimism, [])
+    |> Keyword.get(:beacon_blob_sidecars_disabled, false) == true
   end
 
   @doc """
@@ -912,17 +940,22 @@ defmodule Indexer.Helper do
   @spec get_eip4844_blob_from_indexer(String.t(), String.t(), DateTime.t(), non_neg_integer() | nil) ::
           binary() | nil
   def get_eip4844_blob_from_indexer(base_url, blob_hash, l1_block_timestamp, l1_chain_id) do
+    case get_eip4844_blob_from_indexer_result(base_url, blob_hash, l1_block_timestamp, l1_chain_id) do
+      {:ok, blob_binary} -> blob_binary
+      {:error, _reason} -> nil
+    end
+  end
+
+  @doc false
+  @spec get_eip4844_blob_from_indexer_result(String.t(), String.t(), DateTime.t(), non_neg_integer() | nil) ::
+          {:ok, binary()} | {:error, any()}
+  def get_eip4844_blob_from_indexer_result(base_url, blob_hash, l1_block_timestamp, l1_chain_id) do
     slot = compute_beacon_slot(l1_block_timestamp, l1_chain_id)
 
-    case get_blob_via_blobs_endpoint(trim_url(base_url), slot, blob_hash) do
-      {:ok, blob_binary} -> blob_binary
-      :fallback -> nil
-    end
+    get_blob_via_blobs_endpoint(trim_url(base_url), slot, blob_hash)
   rescue
     reason ->
-      Logger.warning("Cannot get the blob #{blob_hash} from the DA indexer at #{base_url}. Reason: #{inspect(reason)}")
-
-      nil
+      {:error, {:exception, reason}}
   end
 
   # Computes the beacon chain slot for a given L1 block timestamp and chain id.
@@ -973,16 +1006,30 @@ defmodule Indexer.Helper do
   # Tries to fetch a blob via the /eth/v1/beacon/blobs/{slot}?versioned_hashes={hash} endpoint.
   # This is compatible with Mantle DA Indexer and similar services that implement a simplified
   # Beacon API returning raw blob hex strings filtered by versioned hash.
-  # Returns {:ok, binary} on success, or :fallback if the endpoint is unavailable or returns empty data.
-  @spec get_blob_via_blobs_endpoint(String.t(), non_neg_integer(), String.t()) :: {:ok, binary()} | :fallback
+  # Returns {:ok, binary} on success, or {:error, reason} if the endpoint is unavailable or returns unusable data.
+  # Logging is intentionally left to callers that know which source (primary/fallback) is being tried.
+  @spec get_blob_via_blobs_endpoint(String.t(), non_neg_integer(), String.t()) :: {:ok, binary()} | {:error, any()}
   defp get_blob_via_blobs_endpoint(base_url, slot, blob_hash) do
     blobs_url = "#{base_url}/eth/v1/beacon/blobs/#{slot}?versioned_hashes=#{blob_hash}"
 
-    with {:ok, response} <- http_get_request(blobs_url, :json, 0, [404, 501]),
-         [first_blob | _] when is_binary(first_blob) <- Map.get(response, "data", []) do
-      {:ok, hash_to_binary(first_blob)}
-    else
-      _ -> :fallback
+    case http_get_request(blobs_url, :json, 0, [404, 501]) do
+      {:ok, response} ->
+        case Map.get(response, "data", []) do
+          [first_blob | _] when is_binary(first_blob) ->
+            {:ok, hash_to_binary(first_blob)}
+
+          [] ->
+            {:error, {:empty_data, %{slot: slot}}}
+
+          other ->
+            {:error, {:unexpected_data_shape, %{slot: slot, data: other}}}
+        end
+
+      {:error, {:http_status, status, reason}} when status in [404, 501] ->
+        {:error, {:http_status, status, reason}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
