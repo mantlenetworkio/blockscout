@@ -381,7 +381,11 @@ defmodule EthereumJSONRPC do
   def fetch_blocks_by_hash(block_hashes, json_rpc_named_arguments, with_transactions? \\ true) do
     block_hashes
     |> Enum.map(fn block_hash -> %{hash: block_hash} end)
-    |> fetch_blocks_by_params(&Block.ByHash.request(&1, with_transactions?), json_rpc_named_arguments)
+    |> fetch_blocks_by_params(
+      &Block.ByHash.request(&1, with_transactions?),
+      json_rpc_named_arguments,
+      with_transactions?
+    )
   end
 
   @doc """
@@ -414,7 +418,11 @@ defmodule EthereumJSONRPC do
   def fetch_blocks_by_numbers(block_numbers, json_rpc_named_arguments, with_transactions? \\ true) do
     block_numbers
     |> Enum.map(fn number -> %{number: number} end)
-    |> fetch_blocks_by_params(&Block.ByNumber.request(&1, with_transactions?), json_rpc_named_arguments)
+    |> fetch_blocks_by_params(
+      &Block.ByNumber.request(&1, with_transactions?),
+      json_rpc_named_arguments,
+      with_transactions?
+    )
   end
 
   @doc """
@@ -434,7 +442,7 @@ defmodule EthereumJSONRPC do
           {:ok, Blocks.t()} | {:error, reason :: :invalid_tag | :not_found | term()}
   def fetch_block_by_tag(tag, json_rpc_named_arguments) when tag in ~w(earliest latest pending safe) do
     [%{tag: tag}]
-    |> fetch_blocks_by_params(&Block.ByTag.request/1, json_rpc_named_arguments)
+    |> fetch_blocks_by_params(&Block.ByTag.request/1, json_rpc_named_arguments, false)
   end
 
   @doc """
@@ -443,7 +451,7 @@ defmodule EthereumJSONRPC do
   @spec fetch_uncle_blocks([nephew_index()], json_rpc_named_arguments) :: {:ok, Blocks.t()} | {:error, reason :: term}
   def fetch_uncle_blocks(blocks, json_rpc_named_arguments) do
     blocks
-    |> fetch_blocks_by_params(&Block.ByNephew.request/1, json_rpc_named_arguments)
+    |> fetch_blocks_by_params(&Block.ByNephew.request/1, json_rpc_named_arguments, false)
   end
 
   @doc """
@@ -905,7 +913,9 @@ defmodule EthereumJSONRPC do
   # - `{:error, reason}`: Error occurred during fetch or processing
   @spec fetch_blocks_by_params([map()], function(), json_rpc_named_arguments()) ::
           {:ok, Blocks.t()} | {:error, reason :: term()}
-  defp fetch_blocks_by_params(params, request, json_rpc_named_arguments)
+  @spec fetch_blocks_by_params([map()], function(), json_rpc_named_arguments(), boolean()) ::
+          {:ok, Blocks.t()} | {:error, reason :: term()}
+  defp fetch_blocks_by_params(params, request, json_rpc_named_arguments, validate_hydrated_transactions? \\ true)
        when is_list(params) and is_function(request, 1) do
     id_to_params = id_to_params(params)
 
@@ -913,7 +923,7 @@ defmodule EthereumJSONRPC do
            id_to_params
            |> Blocks.requests(request)
            |> json_rpc(json_rpc_named_arguments) do
-      {:ok, Blocks.from_responses(responses, id_to_params)}
+      {:ok, Blocks.from_responses(responses, id_to_params, validate_hydrated_transactions?)}
     end
   end
 

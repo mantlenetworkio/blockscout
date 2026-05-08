@@ -101,11 +101,14 @@ defmodule EthereumJSONRPC.Blocks do
       match original requests
   """
   @spec from_responses(EthereumJSONRPC.Transport.batch_response(), %{EthereumJSONRPC.request_id() => map()}) :: t()
-  def from_responses(responses, id_to_params) when is_list(responses) and is_map(id_to_params) do
+  @spec from_responses(EthereumJSONRPC.Transport.batch_response(), %{EthereumJSONRPC.request_id() => map()}, boolean()) ::
+          t()
+  def from_responses(responses, id_to_params, validate_hydrated_transactions? \\ false)
+      when is_list(responses) and is_map(id_to_params) and is_boolean(validate_hydrated_transactions?) do
     %{errors: errors, blocks: blocks} =
       responses
       |> EthereumJSONRPC.sanitize_responses(id_to_params)
-      |> Enum.map(&Block.from_response(&1, id_to_params))
+      |> Enum.map(&block_from_response(&1, id_to_params, validate_hydrated_transactions?))
       |> Enum.reduce(%{errors: [], blocks: []}, fn
         {:ok, block}, %{blocks: blocks} = acc ->
           %{acc | blocks: [block | blocks]}
@@ -133,6 +136,30 @@ defmodule EthereumJSONRPC.Blocks do
       withdrawals_params: withdrawals_params
     }
     |> extend_with_chain_type_fields(elixir_blocks)
+  end
+
+  defp block_from_response(%{id: id, result: %{"transactions" => transactions}} = response, id_to_params, true)
+       when is_list(transactions) do
+    case Enum.find(transactions, &is_binary/1) do
+      nil ->
+        Block.from_response(response, id_to_params)
+
+      transaction_hash ->
+        params = Map.fetch!(id_to_params, id)
+
+        {:error,
+         %{
+           code: :unhydrated_transactions,
+           data: params,
+           message:
+             "Expected hydrated block transactions, but RPC returned transaction hash #{transaction_hash}. " <>
+               "Retrying is required to avoid silently dropping transactions."
+         }}
+    end
+  end
+
+  defp block_from_response(response, id_to_params, _validate_hydrated_transactions?) do
+    Block.from_response(response, id_to_params)
   end
 
   @spec extend_with_chain_type_fields(t(), elixir()) :: t()

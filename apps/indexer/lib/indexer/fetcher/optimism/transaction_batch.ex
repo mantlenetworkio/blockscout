@@ -557,16 +557,33 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
           |> Enum.max()
           |> get_block_hash_by_number(blocks_params)
 
-        transactions_params
-        |> transactions_filter(batch_submitter, batch_inbox)
-        |> get_transaction_batches_inner(
-          blocks_params,
-          {genesis_block_l2, block_duration},
-          incomplete_channels,
-          json_rpc_named_arguments_l2,
-          blobs_api_url
-        )
-        |> (&Tuple.insert_at(&1, tuple_size(&1), last_block_hash)).()
+        transactions_filtered = transactions_filter(transactions_params, batch_submitter, batch_inbox)
+
+        case validate_eip4844_blob_hashes(transactions_filtered) do
+          :ok ->
+            transactions_filtered
+            |> get_transaction_batches_inner(
+              blocks_params,
+              {genesis_block_l2, block_duration},
+              incomplete_channels,
+              json_rpc_named_arguments_l2,
+              blobs_api_url
+            )
+            |> (&Tuple.insert_at(&1, tuple_size(&1), last_block_hash)).()
+
+          {:error, message} ->
+            retry_get_transaction_batches(
+              block_range,
+              batch_inbox,
+              batch_submitter,
+              {genesis_block_l2, block_duration},
+              incomplete_channels,
+              {json_rpc_named_arguments, json_rpc_named_arguments_l2},
+              blobs_api_url,
+              retries_left,
+              message
+            )
+        end
 
       {_, message_or_errors} ->
         message =
@@ -575,27 +592,51 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
             msg -> msg
           end
 
-        retries_left = retries_left - 1
+        retry_get_transaction_batches(
+          block_range,
+          batch_inbox,
+          batch_submitter,
+          {genesis_block_l2, block_duration},
+          incomplete_channels,
+          {json_rpc_named_arguments, json_rpc_named_arguments_l2},
+          blobs_api_url,
+          retries_left,
+          message
+        )
+    end
+  end
 
-        error_message = "Cannot fetch blocks #{inspect(block_range)}. Error(s): #{inspect(message)}"
+  defp retry_get_transaction_batches(
+         block_range,
+         batch_inbox,
+         batch_submitter,
+         {genesis_block_l2, block_duration},
+         incomplete_channels,
+         {json_rpc_named_arguments, json_rpc_named_arguments_l2},
+         blobs_api_url,
+         retries_left,
+         message
+       ) do
+    retries_left = retries_left - 1
 
-        if retries_left <= 0 do
-          Logger.error(error_message)
-          {:error, message}
-        else
-          Optimism.log_error_message_with_retry_sleep(error_message)
+    error_message = "Cannot fetch blocks #{inspect(block_range)}. Error(s): #{inspect(message)}"
 
-          get_transaction_batches(
-            block_range,
-            batch_inbox,
-            batch_submitter,
-            {genesis_block_l2, block_duration},
-            incomplete_channels,
-            {json_rpc_named_arguments, json_rpc_named_arguments_l2},
-            blobs_api_url,
-            retries_left
-          )
-        end
+    if retries_left <= 0 do
+      Logger.error(error_message)
+      {:error, message}
+    else
+      Optimism.log_error_message_with_retry_sleep(error_message)
+
+      get_transaction_batches(
+        block_range,
+        batch_inbox,
+        batch_submitter,
+        {genesis_block_l2, block_duration},
+        incomplete_channels,
+        {json_rpc_named_arguments, json_rpc_named_arguments_l2},
+        blobs_api_url,
+        retries_left
+      )
     end
   end
 
@@ -1687,6 +1728,31 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     |> Enum.sort(fn t1, t2 ->
       {t1.block_number, t1.index} < {t2.block_number, t2.index}
     end)
+  end
+
+  @doc false
+  @spec validate_eip4844_blob_hashes([map()]) :: :ok | {:error, String.t()}
+  def validate_eip4844_blob_hashes(transactions) when is_list(transactions) do
+    transactions
+    |> Enum.find(fn transaction ->
+      Map.get(transaction, :type) == 3 and
+        transaction
+        |> Map.get(:blob_versioned_hashes)
+        |> missing_blob_versioned_hashes?()
+    end)
+    |> case do
+      nil ->
+        :ok
+
+      transaction ->
+        {:error,
+         "EIP-4844 transaction #{Map.get(transaction, :hash)} in L1 block #{Map.get(transaction, :block_number)} " <>
+           "has no blobVersionedHashes. Retrying block fetch to avoid silently dropping blob batches."}
+    end
+  end
+
+  defp missing_blob_versioned_hashes?(blob_versioned_hashes) do
+    is_nil(blob_versioned_hashes) or blob_versioned_hashes == []
   end
 
   # Reads some public getters of SystemConfig contract and returns retrieved values.

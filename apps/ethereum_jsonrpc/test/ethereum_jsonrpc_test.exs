@@ -386,6 +386,59 @@ defmodule EthereumJSONRPCTest do
   end
 
   describe "fetch_block_by_range/2" do
+    test "returns an error when a hydrated block response contains transaction hashes", %{
+      json_rpc_named_arguments: json_rpc_named_arguments
+    } do
+      moxed_json_rpc_named_arguments = Keyword.put(json_rpc_named_arguments, :transport, EthereumJSONRPC.Mox)
+
+      transaction_hash = "0xbe1ac68a3b66a7fab4968105f32227775ce536e4755c55170cde69a63610599e"
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn _json, _options ->
+        {:ok,
+         [
+           %{
+             id: 0,
+             result: %{
+               "difficulty" => "0x0",
+               "extraData" => "0x0",
+               "gasLimit" => "0x0",
+               "gasUsed" => "0x0",
+               "hash" => "0x0",
+               "logsBloom" => "0x0",
+               "miner" => "0x0",
+               "number" => "0x1",
+               "parentHash" => "0x0",
+               "receiptsRoot" => "0x0",
+               "sha3Uncles" => "0x0",
+               "size" => "0x0",
+               "stateRoot" => "0x0",
+               "timestamp" => "0x0",
+               "totalDifficulty" => "0x0",
+               "transactions" => [transaction_hash],
+               "transactionsRoot" => "0x0",
+               "uncles" => []
+             },
+             jsonrpc: "2.0"
+           }
+         ]}
+      end)
+
+      assert {:ok,
+              %EthereumJSONRPC.Blocks{
+                blocks_params: [],
+                errors: [
+                  %{
+                    code: :unhydrated_transactions,
+                    data: %{number: 1},
+                    message: message
+                  }
+                ],
+                transactions_params: []
+              }} = EthereumJSONRPC.fetch_blocks_by_range(1..1, moxed_json_rpc_named_arguments)
+
+      assert message =~ transaction_hash
+    end
+
     test "returns errors with block number in data", %{json_rpc_named_arguments: json_rpc_named_arguments} do
       if json_rpc_named_arguments[:transport] == EthereumJSONRPC.Mox do
         expect(EthereumJSONRPC.Mox, :json_rpc, fn _json, _options ->
