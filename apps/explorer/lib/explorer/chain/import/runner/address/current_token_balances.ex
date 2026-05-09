@@ -133,27 +133,6 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
         :address_current_token_balances
       )
     end)
-    |> Multi.run(:address_current_token_balances_update_token_holder_counts, fn repo,
-                                                                                %{
-                                                                                  address_current_token_balances:
-                                                                                    upserted_balances
-                                                                                } ->
-      Instrumenter.block_import_stage_runner(
-        fn ->
-          token_holder_count_deltas = upserted_balances_to_holder_count_deltas(upserted_balances)
-
-          # ShareLocks order already enforced by `acquire_contract_address_tokens` (see docs: sharelocks.md)
-          Tokens.update_holder_counts_with_deltas(
-            repo,
-            token_holder_count_deltas,
-            insert_options
-          )
-        end,
-        :block_following,
-        :current_token_balances,
-        :address_current_token_balances_update_token_holder_counts
-      )
-    end)
   end
 
   @impl Import.Runner
@@ -161,27 +140,6 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
 
   defp valid_holder?(value) do
     not is_nil(value) and Decimal.compare(value, 0) == :gt
-  end
-
-  # Assumes existence of old_value field with previous value or nil
-  defp upserted_balances_to_holder_count_deltas(upserted_balances) do
-    upserted_balances
-    |> Enum.map(fn %{token_contract_address_hash: contract_address_hash, value: value, old_value: old_value} ->
-      delta =
-        cond do
-          not valid_holder?(old_value) and valid_holder?(value) -> 1
-          valid_holder?(old_value) and not valid_holder?(value) -> -1
-          true -> 0
-        end
-
-      %{contract_address_hash: contract_address_hash, delta: delta}
-    end)
-    |> Enum.group_by(& &1.contract_address_hash, & &1.delta)
-    |> Enum.map(fn {contract_address_hash, deltas} ->
-      %{contract_address_hash: contract_address_hash, delta: Enum.sum(deltas)}
-    end)
-    |> Enum.filter(fn %{delta: delta} -> delta != 0 end)
-    |> Enum.sort_by(& &1.contract_address_hash)
   end
 
   defp holder_count_delta(%{
@@ -383,6 +341,8 @@ defmodule Explorer.Chain.Import.Runner.Address.CurrentTokenBalances do
           value_fetched_at: fragment("EXCLUDED.value_fetched_at"),
           old_value: current_token_balance.value,
           token_type: fragment("EXCLUDED.token_type"),
+          refetch_after: fragment("EXCLUDED.refetch_after"),
+          retries_count: fragment("EXCLUDED.retries_count"),
           inserted_at: fragment("LEAST(EXCLUDED.inserted_at, ?)", current_token_balance.inserted_at),
           updated_at: fragment("GREATEST(EXCLUDED.updated_at, ?)", current_token_balance.updated_at)
         ]

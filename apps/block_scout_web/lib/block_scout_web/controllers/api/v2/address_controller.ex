@@ -66,19 +66,6 @@ defmodule BlockScoutWeb.API.V2.AddressController do
       @chain_type_transaction_necessity_by_association %{}
   end
 
-  @transaction_necessity_by_association [
-    necessity_by_association:
-      %{
-        [created_contract_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] =>
-          :optional,
-        [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-        [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-        :block => :optional
-      }
-      |> Map.merge(@chain_type_transaction_necessity_by_association),
-    api?: true
-  ]
-
   @token_transfer_necessity_by_association [
     necessity_by_association: %{
       [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
@@ -406,7 +393,8 @@ defmodule BlockScoutWeb.API.V2.AddressController do
       case Chain.hash_to_address(address_hash, @address_options) do
         {:ok, _address} ->
           options =
-            @transaction_necessity_by_association
+            [necessity_by_association: address_transactions_necessity_by_association()]
+            |> Keyword.merge(@api_true)
             |> Keyword.merge(paging_options(params))
             |> Keyword.merge(current_filter(params))
             |> Keyword.merge(address_transactions_sorting(params))
@@ -427,7 +415,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
           |> put_status(200)
           |> put_view(TransactionView)
           |> render(:transactions, %{
-            transactions: transactions |> maybe_preload_ens() |> maybe_preload_metadata(),
+            transactions: transactions |> maybe_preload_ens_for_address_transactions() |> maybe_preload_metadata(),
             next_page_params: next_page_params
           })
 
@@ -441,6 +429,34 @@ defmodule BlockScoutWeb.API.V2.AddressController do
           })
       end
     end
+  end
+
+  defp address_transactions_necessity_by_association do
+    %{
+      [
+        created_contract_address: [
+          :scam_badge,
+          :names,
+          proxy_implementations_association()
+        ]
+      ] => :optional,
+      [
+        from_address: [
+          :scam_badge,
+          :names,
+          proxy_implementations_association()
+        ]
+      ] => :optional,
+      [
+        to_address: [
+          :scam_badge,
+          :names,
+          proxy_implementations_association()
+        ]
+      ] => :optional,
+      :block => :optional
+    }
+    |> Map.merge(@chain_type_transaction_necessity_by_association)
   end
 
   operation :token_transfers,
@@ -527,7 +543,10 @@ defmodule BlockScoutWeb.API.V2.AddressController do
           |> put_view(TransactionView)
           |> render(:token_transfers, %{
             token_transfers:
-              token_transfers |> Instance.preload_nft(@api_true) |> maybe_preload_ens() |> maybe_preload_metadata(),
+              token_transfers
+              |> Instance.preload_nft(@api_true)
+              |> maybe_preload_ens_for_address_token_transfers()
+              |> maybe_preload_metadata(),
             next_page_params: next_page_params
           })
 
@@ -1528,6 +1547,22 @@ defmodule BlockScoutWeb.API.V2.AddressController do
   # Checks if this address hash string is valid, and this address is not prohibited.
   # Returns the `{:ok, address_hash}` if address hash passed all the checks.
   # Returns {:ok, _} response even if the address is not present in the database.
+  defp maybe_preload_ens_for_address_transactions(transactions) do
+    if Application.get_env(:explorer, Explorer.MicroserviceInterfaces.BENS, [])[:disable_transactions_bens_preload] do
+      transactions
+    else
+      maybe_preload_ens(transactions)
+    end
+  end
+
+  defp maybe_preload_ens_for_address_token_transfers(token_transfers) do
+    if Application.get_env(:explorer, Explorer.MicroserviceInterfaces.BENS, [])[:disable_token_transfers_bens_preload] do
+      token_transfers
+    else
+      maybe_preload_ens(token_transfers)
+    end
+  end
+
   @spec validate_address_hash(String.t(), any()) ::
           {:format, :error}
           | {:restricted_access, true}

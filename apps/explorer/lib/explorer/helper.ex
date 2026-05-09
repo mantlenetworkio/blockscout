@@ -2,14 +2,15 @@ defmodule Explorer.Helper do
   @moduledoc """
   Auxiliary common functions.
   """
-  require Logger
+
+  import Ecto.Query
+  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
 
   alias ABI.TypeDecoder
   alias Explorer.Chain
   alias Explorer.Chain.{Address.Reputation, Address.ScamBadgeToAddress, Data, Hash, Wei}
 
-  import Ecto.Query
-  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
+  require Logger
 
   @max_safe_integer round(:math.pow(2, 63)) - 1
 
@@ -294,13 +295,22 @@ defmodule Explorer.Helper do
 
   @doc """
   Conditionally hides scam addresses in the given query, does not select the reputation field.
+
+  Accepts two forms for the address hash locator:
+  - `atom()` — a field key on the query's root binding, e.g. `:to_address_hash`.
+  - `{binding, field}` tuple — a named binding already present in the query plus its hash
+    field, e.g. `{:to_address, :hash}`. Use this form when the addresses table is already
+    joined; it lets the query planner use the binding's join statistics for better index
+    selection.
   """
-  @spec maybe_hide_scam_addresses(nil | Ecto.Query.t(), atom(), [
-          Chain.paging_options() | Chain.api?() | Chain.show_scam_tokens?()
-        ]) :: Ecto.Query.t()
+  @spec maybe_hide_scam_addresses(
+          nil | Ecto.Query.t(),
+          atom() | {atom(), atom()},
+          [Chain.paging_options() | Chain.api?() | Chain.show_scam_tokens?()]
+        ) :: Ecto.Query.t()
   def maybe_hide_scam_addresses(nil, _address_hash_key, _options), do: nil
 
-  def maybe_hide_scam_addresses(query, address_hash_key, options) do
+  def maybe_hide_scam_addresses(query, address_hash_key, options) when is_atom(address_hash_key) do
     cond do
       Application.get_env(:block_scout_web, :hide_scam_addresses) && !options[:show_scam_tokens?] ->
         query
@@ -312,6 +322,77 @@ defmodule Explorer.Helper do
 
       true ->
         query
+    end
+  end
+
+  def maybe_hide_scam_addresses(query, {named_binding, hash_field}, options) do
+    cond do
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && !options[:show_scam_tokens?] ->
+        query
+        |> join(:left, [{^named_binding, address}], sabm in ScamBadgeToAddress,
+          as: :sabm,
+          on: sabm.address_hash == field(address, ^hash_field)
+        )
+        |> where([sabm: sabm], is_nil(sabm.address_hash))
+
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && options[:show_scam_tokens?] ->
+        query
+
+      true ->
+        query
+    end
+  end
+
+  @doc """
+  Conditionally hides scam addresses in the given query for token transfers.
+  If query already has a named binding :token, it MUST be an inner join with the token table.
+
+  Rationale of inner join with token table:
+
+  PostgreSQL query planner misestimates anti-join selectivity when
+  scam_address_badge_mappings has more unique addresses (50k) than
+  token_transfers.token_contract_address_hash n_distinct (10k).
+  The planner assumes nearly all contracts are covered by the scam table,
+  estimates rows=1 after anti-join, and chooses a full sequential scan
+  instead of using the (block_number DESC, log_index DESC) index with
+  early LIMIT termination.
+
+  Workaround: adding an INNER JOIN to the tokens table changes the
+  intermediate n_distinct estimate — the join with tokens produces a much
+  higher row/distinct estimate, making the planner correctly recognize that
+  the anti-join will filter out only a small fraction. This allows it to
+  choose Nested Loop Anti Join + Index Scan with early termination (~5ms
+  instead of ~1500s).
+  """
+  @spec maybe_hide_scam_addresses_for_token_transfers(nil | Ecto.Query.t(), [
+          Chain.paging_options() | Chain.api?() | Chain.show_scam_tokens?()
+        ]) :: Ecto.Query.t()
+  def maybe_hide_scam_addresses_for_token_transfers(nil, _options), do: nil
+
+  def maybe_hide_scam_addresses_for_token_transfers(query, options) do
+    cond do
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && !options[:show_scam_tokens?] ->
+        query
+        |> maybe_join_token_table()
+        |> join(:left, [token: token], sabm in ScamBadgeToAddress,
+          as: :sabm,
+          on: sabm.address_hash == token.contract_address_hash
+        )
+        |> where([sabm: sabm], is_nil(sabm.address_hash))
+
+      Application.get_env(:block_scout_web, :hide_scam_addresses) && options[:show_scam_tokens?] ->
+        query
+
+      true ->
+        query
+    end
+  end
+
+  defp maybe_join_token_table(query) do
+    if has_named_binding?(query, :token) do
+      query
+    else
+      join(query, :inner, [tt], token in assoc(tt, :token), as: :token)
     end
   end
 
@@ -693,4 +774,27 @@ defmodule Explorer.Helper do
   end
 
   def process_rpc_response(response, _node, _fallback), do: response
+
+  @doc """
+  Generates a key from chain_id and a given string for storing in Redis.
+
+  This function combines the chain_id (if available) with the provided string to
+  create a unique key for Redis storage.
+
+  ## Parameters
+  - `string`: The string to be combined with the chain_id
+
+  ## Returns
+  - `String.t()` representing the generated key
+  """
+  @spec redis_key(String.t()) :: String.t()
+  def redis_key(key) do
+    chain_id = Application.get_env(:block_scout_web, :chain_id)
+
+    if chain_id do
+      chain_id <> "_" <> key
+    else
+      key
+    end
+  end
 end

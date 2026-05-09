@@ -17,11 +17,11 @@ defmodule Indexer.Block.Realtime.FetcherTest do
     InternalTransaction,
     ReplacedTransaction,
     Token,
-    TokenBalance,
     UncleBlock
   }
 
   alias Indexer.Fetcher.OnDemand.ContractCreator, as: ContractCreatorOnDemand
+  alias Indexer.Fetcher.TokenBalance.Historical, as: TokenBalanceHistorical
 
   @moduletag capture_log: true
 
@@ -48,7 +48,7 @@ defmodule Indexer.Block.Realtime.FetcherTest do
       json_rpc_named_arguments: core_json_rpc_named_arguments
     }
 
-    TokenBalance.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+    TokenBalanceHistorical.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
     CoinBalanceRealtime.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
     {:ok, _pid} = ContractCreatorOnDemand.start_link([[], []])
 
@@ -546,7 +546,6 @@ defmodule Indexer.Block.Realtime.FetcherTest do
       assert {:ok,
               %{
                 inserted: %{
-                  addresses: addresses,
                   address_coin_balances: [
                     %{
                       address_hash: first_address_hash,
@@ -794,7 +793,6 @@ defmodule Indexer.Block.Realtime.FetcherTest do
       assert {:ok,
               %{
                 inserted: %{
-                  addresses: addresses,
                   address_coin_balances: [
                     %{
                       address_hash: first_address_hash,

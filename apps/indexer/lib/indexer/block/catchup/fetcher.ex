@@ -13,13 +13,14 @@ defmodule Indexer.Block.Catchup.Fetcher do
       async_import_block_rewards: 2,
       async_import_celo_epoch_block_operations: 2,
       async_import_celo_accounts: 2,
-      async_import_coin_balances: 2,
+      async_import_coin_balances: 1,
       async_import_created_contract_codes: 2,
       async_import_filecoin_addresses_info: 2,
       async_import_internal_transactions: 2,
       async_import_replaced_transactions: 2,
       async_import_signed_authorizations_statuses: 2,
       async_import_token_balances: 2,
+      async_import_current_token_balances: 2,
       async_import_token_instances: 1,
       async_import_tokens: 2,
       async_import_uncles: 2,
@@ -30,7 +31,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
   alias EthereumJSONRPC.Utility.RangesHelper
   alias Explorer.Chain
   alias Explorer.Chain.NullRoundHeight
-  alias Explorer.Utility.{MassiveBlock, MissingBlockRange, MissingRangesManipulator}
+  alias Explorer.Utility.{MassiveBlock, MissingBlockRange}
   alias Indexer.{Block, Tracer}
   alias Indexer.Block.Catchup.TaskSupervisor
   alias Indexer.Fetcher.OnDemand.ContractCreator, as: ContractCreatorOnDemand
@@ -132,16 +133,17 @@ defmodule Indexer.Block.Catchup.Fetcher do
 
   defp async_import_remaining_block_data(
          imported,
-         %{block_rewards: %{errors: block_reward_errors}} = options
+         %{block_rewards: %{errors: block_reward_errors}}
        ) do
     realtime? = false
 
     async_import_block_rewards(block_reward_errors, realtime?)
-    async_import_coin_balances(imported, options)
+    async_import_coin_balances(imported)
     async_import_created_contract_codes(imported, realtime?)
     async_import_internal_transactions(imported, realtime?)
     async_import_tokens(imported, realtime?)
     async_import_token_balances(imported, realtime?)
+    async_import_current_token_balances(imported, realtime?)
     async_import_uncles(imported, realtime?)
     async_import_replaced_transactions(imported, realtime?)
     async_import_token_instances(imported)
@@ -238,7 +240,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
         acc
     end)
     |> numbers_to_ranges()
-    |> MissingRangesManipulator.clear_batch()
+    |> MissingBlockRange.clear_batch()
   end
 
   defp handle_null_rounds(errors) do
@@ -282,7 +284,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
 
     success_numbers
     |> numbers_to_ranges()
-    |> MissingRangesManipulator.clear_batch()
+    |> MissingBlockRange.clear_batch()
   end
 
   defp block_error_to_number(%{data: %{number: number}}) when is_integer(number), do: number

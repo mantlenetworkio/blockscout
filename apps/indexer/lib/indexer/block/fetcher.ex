@@ -15,7 +15,7 @@ defmodule Indexer.Block.Fetcher do
 
   alias EthereumJSONRPC.{Blocks, FetchedBeneficiaries}
   alias Explorer.Chain
-  alias Explorer.Chain.{Address, Block, Hash, Import, Transaction, Wei}
+  alias Explorer.Chain.{Block, Hash, Import, Transaction, Wei}
   alias Explorer.Chain.Block.Reward
   alias Explorer.Chain.Cache.{Accounts, BlockNumber, Transactions, Uncles}
   alias Explorer.Chain.Cache.Blocks, as: BlocksCache
@@ -30,21 +30,24 @@ defmodule Indexer.Block.Fetcher do
   alias Indexer.Fetcher.CoinBalance.Realtime, as: CoinBalanceRealtime
   alias Indexer.Fetcher.Filecoin.AddressInfo, as: FilecoinAddressInfo
   alias Indexer.Fetcher.PolygonZkevm.BridgeL1Tokens, as: PolygonZkevmBridgeL1Tokens
+  alias Indexer.Fetcher.TokenBalance.Current, as: TokenBalanceCurrent
+  alias Indexer.Fetcher.TokenBalance.Historical, as: TokenBalanceHistorical
   alias Indexer.Fetcher.TokenInstance.Realtime, as: TokenInstanceRealtime
   alias Indexer.Fetcher.Zilliqa.Zrc2Tokens
 
   alias Indexer.{Prometheus, TokenBalances, Tracer}
 
   alias Indexer.Fetcher.{
-    AddressNonceUpdater,
+    AddressImporter,
     Beacon.Blob,
     BlockReward,
     ContractCode,
+    CurrentTokenBalanceImporter,
     InternalTransaction,
     ReplacedTransaction,
     SignedAuthorizationStatus,
     Token,
-    TokenBalance,
+    TokenInstanceImporter,
     UncleBlock
   }
 
@@ -54,7 +57,6 @@ defmodule Indexer.Block.Fetcher do
     AddressTokenBalances,
     MintTransfers,
     SignedAuthorizations,
-    TokenInstances,
     TokenTransfers,
     TransactionActions
   }
@@ -236,25 +238,20 @@ defmodule Indexer.Block.Fetcher do
            AddressTokenBalances.params_set(%{token_transfers_params: token_transfers_with_token}),
          transaction_actions =
            Enum.map(transaction_actions, fn action -> Map.put(action, :data, Map.delete(action.data, :block_number)) end),
-         token_instances = TokenInstances.params_set(%{token_transfers_params: token_transfers}),
+         TokenInstanceImporter.add(tokens, token_transfers),
+         process_current_token_balances(address_token_balances),
          stability_validators = StabilityValidators.parse(blocks),
-         addresses_without_nonce = process_addresses_nonce(addresses),
          basic_import_options = %{
-           addresses: %{params: addresses_without_nonce},
+           addresses: %{params: addresses},
            address_coin_balances: %{params: coin_balances_params_set},
            address_token_balances: %{params: address_token_balances},
-           address_current_token_balances: %{
-             params: address_token_balances |> MapSet.to_list() |> TokenBalances.to_address_current_token_balances()
-           },
            blocks: %{params: blocks},
            block_second_degree_relations: %{params: block_second_degree_relations_params},
            block_rewards: %{errors: beneficiaries_errors, params: beneficiaries_with_gas_payment},
            logs: %{params: logs},
            token_transfers: %{params: token_transfers},
-           tokens: %{params: tokens},
            transactions: %{params: transactions_with_receipts},
            withdrawals: %{params: withdrawals_params},
-           token_instances: %{params: token_instances},
            signed_authorizations: %{params: SignedAuthorizations.parse(transactions_with_receipts)}
          },
          chain_type_import_options =
@@ -426,6 +423,13 @@ defmodule Indexer.Block.Fetcher do
     })
   end
 
+  defp process_current_token_balances(address_token_balances) do
+    address_token_balances
+    |> MapSet.to_list()
+    |> TokenBalances.to_address_current_token_balances()
+    |> CurrentTokenBalanceImporter.add()
+  end
+
   defp update_block_cache([]), do: :ok
 
   defp update_block_cache(blocks) when is_list(blocks) do
@@ -462,17 +466,15 @@ defmodule Indexer.Block.Fetcher do
         options
       )
       when is_map(options) do
-    {address_hash_to_fetched_balance_block_number, import_options} =
+    {_address_hash_to_fetched_balance_block_number, import_options} =
       pop_address_hash_to_fetched_balance_block_number(options)
 
+    AddressImporter.add(import_options[:addresses][:params])
+
     options_with_broadcast =
-      Map.merge(
-        import_options,
-        %{
-          address_hash_to_fetched_balance_block_number: address_hash_to_fetched_balance_block_number,
-          broadcast: broadcast
-        }
-      )
+      import_options
+      |> Map.merge(%{broadcast: broadcast})
+      |> Map.delete(:addresses)
 
     {import_time, result} = :timer.tc(fn -> callback_module.import(state, options_with_broadcast) end)
 
@@ -512,18 +514,11 @@ defmodule Indexer.Block.Fetcher do
     |> BlockReward.async_fetch(realtime?)
   end
 
-  def async_import_coin_balances(%{addresses: addresses}, %{
-        address_hash_to_fetched_balance_block_number: address_hash_to_block_number
-      }) do
-    addresses
-    |> Enum.map(fn %Address{hash: address_hash} ->
-      block_number = Map.fetch!(address_hash_to_block_number, to_string(address_hash))
-      %{address_hash: address_hash, block_number: block_number}
-    end)
-    |> CoinBalanceCatchup.async_fetch_balances()
+  def async_import_coin_balances(%{address_coin_balances: balances}) do
+    CoinBalanceCatchup.async_fetch_balances(balances)
   end
 
-  def async_import_coin_balances(_, _), do: :ok
+  def async_import_coin_balances(_), do: :ok
 
   def async_import_realtime_coin_balances(%{address_coin_balances: balances}) do
     CoinBalanceRealtime.async_fetch_balances(balances)
@@ -568,7 +563,7 @@ defmodule Indexer.Block.Fetcher do
   def async_import_tokens(_, _), do: :ok
 
   @doc """
-  Triggers async import of token balances just inserted into the database by the realtime or catchup indexer
+  Triggers async import of historical token balances just inserted into the database by the realtime or catchup indexer
   or internal transactions fetcher.
 
   ## Parameters
@@ -584,10 +579,34 @@ defmodule Indexer.Block.Fetcher do
   def async_import_token_balances(%{address_token_balances: []}, _realtime?), do: :ok
 
   def async_import_token_balances(%{address_token_balances: token_balances}, realtime?) do
-    TokenBalance.async_fetch(token_balances, realtime?)
+    TokenBalanceHistorical.async_fetch(token_balances, realtime?)
   end
 
   def async_import_token_balances(_, _), do: :ok
+
+  @doc """
+  Triggers async import of current token balances just inserted into the database by the realtime or catchup indexer.
+
+  ## Parameters
+  - `%{address_current_token_balances: current_token_balances}`: A map returned by the `Chain.import` function containing
+                                                 the list of inserted current token balances.
+  - `realtime?`: A boolean flag indicating whether to insert the items to the beginning (true)
+                 or to the end (false) of the import queue.
+
+  ## Returns
+  - :ok
+  """
+  @spec async_import_current_token_balances(
+          %{:address_current_token_balances => list(), optional(any()) => any()},
+          boolean()
+        ) :: :ok
+  def async_import_current_token_balances(%{address_current_token_balances: []}, _realtime?), do: :ok
+
+  def async_import_current_token_balances(%{address_current_token_balances: current_token_balances}, realtime?) do
+    TokenBalanceCurrent.async_fetch(current_token_balances, realtime?)
+  end
+
+  def async_import_current_token_balances(_, _), do: :ok
 
   def async_import_uncles(%{block_second_degree_relations: block_second_degree_relations}, realtime?) do
     UncleBlock.async_fetch_blocks(block_second_degree_relations, realtime?)
@@ -868,25 +887,6 @@ defmodule Indexer.Block.Fetcher do
 
       Map.put(token_transfer, :token, token)
     end)
-  end
-
-  defp process_addresses_nonce(addresses) do
-    {addresses_excluding_nonce_update, addresses_nonce_update_params} =
-      Enum.reduce(addresses, {[], []}, fn address,
-                                          {addresses_excluding_nonce_update_acc, addresses_nonce_update_params_acc} ->
-        case Map.get(address, :nonce) do
-          nil ->
-            {[address | addresses_excluding_nonce_update_acc], addresses_nonce_update_params_acc}
-
-          nonce ->
-            {[Map.delete(address, :nonce) | addresses_excluding_nonce_update_acc],
-             [%{hash: address.hash, nonce: nonce} | addresses_nonce_update_params_acc]}
-        end
-      end)
-
-    AddressNonceUpdater.add(addresses_nonce_update_params)
-
-    Enum.reverse(addresses_excluding_nonce_update)
   end
 
   # Asynchronously schedules matching of Arbitrum L1-to-L2 messages where the message ID is hashed.

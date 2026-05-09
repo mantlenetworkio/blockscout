@@ -31,6 +31,8 @@ defmodule Indexer.Supervisor do
   alias Indexer.Fetcher.MultichainSearchDb.TokenInfoExportQueue, as: MultichainSearchDbTokenInfoExportQueue
   alias Indexer.Fetcher.Stability.Validator, as: ValidatorStability
   alias Indexer.Fetcher.Stats.HotSmartContracts
+  alias Indexer.Fetcher.TokenBalance.Current, as: TokenBalanceCurrent
+  alias Indexer.Fetcher.TokenBalance.Historical, as: TokenBalanceHistorical
   alias Indexer.Fetcher.TokenInstance.Realtime, as: TokenInstanceRealtime
   alias Indexer.Fetcher.TokenInstance.Retry, as: TokenInstanceRetry
   alias Indexer.Fetcher.TokenInstance.Sanitize, as: TokenInstanceSanitize
@@ -38,9 +40,10 @@ defmodule Indexer.Supervisor do
   alias Indexer.Fetcher.TokenInstance.SanitizeERC721, as: TokenInstanceSanitizeERC721
 
   alias Indexer.Fetcher.{
-    AddressNonceUpdater,
+    AddressImporter,
     BlockReward,
     ContractCode,
+    CurrentTokenBalanceImporter,
     EmptyBlocksSanitizer,
     InternalTransaction,
     PendingBlockOperationsSanitizer,
@@ -48,8 +51,9 @@ defmodule Indexer.Supervisor do
     ReplacedTransaction,
     RootstockData,
     Token,
-    TokenBalance,
     TokenCountersUpdater,
+    TokenHoldersCountUpdater,
+    TokenInstanceImporter,
     TokenTotalSupplyUpdater,
     TokenUpdater,
     TransactionAction,
@@ -152,7 +156,9 @@ defmodule Indexer.Supervisor do
         configure(TransactionAction.Supervisor, [[memory_monitor: memory_monitor]]),
         {ContractCode.Supervisor,
          [[json_rpc_named_arguments: json_rpc_named_arguments, memory_monitor: memory_monitor]]},
-        {TokenBalance.Supervisor,
+        {TokenBalanceHistorical.Supervisor,
+         [[json_rpc_named_arguments: json_rpc_named_arguments, memory_monitor: memory_monitor]]},
+        {TokenBalanceCurrent.Supervisor,
          [[json_rpc_named_arguments: json_rpc_named_arguments, memory_monitor: memory_monitor]]},
         {TokenUpdater.Supervisor,
          [[json_rpc_named_arguments: json_rpc_named_arguments, memory_monitor: memory_monitor]]},
@@ -278,7 +284,10 @@ defmodule Indexer.Supervisor do
         {EmptyBlocksSanitizer.Supervisor, [[json_rpc_named_arguments: json_rpc_named_arguments]]},
         {PendingTransactionsSanitizer, [[json_rpc_named_arguments: json_rpc_named_arguments]]},
         {TokenTotalSupplyUpdater, [[]]},
-        AddressNonceUpdater,
+        AddressImporter,
+        TokenInstanceImporter,
+        TokenHoldersCountUpdater,
+        CurrentTokenBalanceImporter,
 
         # Notifications cleaner
         configure(EventNotificationsCleaner, [[]]),

@@ -5,7 +5,7 @@ defmodule BlockScoutWeb.API.V2.Helper do
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
   alias Ecto.Association.NotLoaded
-  alias Explorer.Chain.{Address, Address.Reputation, SmartContract}
+  alias Explorer.Chain.{Address, Address.Reputation}
   alias Explorer.Chain.SmartContract.Proxy
   alias Explorer.Chain.Transaction.History.TransactionStats
 
@@ -187,11 +187,10 @@ defmodule BlockScoutWeb.API.V2.Helper do
     - `false` if the smart contract is `NotLoaded`.
     - `true` if the smart contract is present and does not have metadata from a verified bytecode twin.
   """
-  @spec smart_contract_verified?(Address.t()) :: boolean()
-  def smart_contract_verified?(%Address{smart_contract: nil}), do: false
-  def smart_contract_verified?(%Address{smart_contract: %{metadata_from_verified_bytecode_twin: true}}), do: false
-  def smart_contract_verified?(%Address{smart_contract: %NotLoaded{}}), do: nil
-  def smart_contract_verified?(%Address{smart_contract: %SmartContract{}}), do: true
+  @spec smart_contract_verified?(Address.t()) :: boolean() | nil
+  def smart_contract_verified?(%Address{verified: verified}) when is_boolean(verified), do: verified
+  def smart_contract_verified?(%Address{verified: nil}), do: nil
+  def smart_contract_verified?(_), do: false
 
   def market_cap(:standard, %{
         available_supply: available_supply,
@@ -221,7 +220,7 @@ defmodule BlockScoutWeb.API.V2.Helper do
 
   def get_transaction_stats do
     stats_scale = date_range(1)
-    transaction_stats = TransactionStats.by_date_range(stats_scale.earliest, stats_scale.latest)
+    transaction_stats = TransactionStats.by_date_range(stats_scale.earliest, stats_scale.latest, api?: true)
 
     # Need datapoint for legend if none currently available.
     if Enum.empty?(transaction_stats) do

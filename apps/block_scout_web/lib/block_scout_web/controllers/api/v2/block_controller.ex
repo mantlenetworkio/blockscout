@@ -101,18 +101,6 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       @chain_type_block_necessity_by_association %{}
   end
 
-  @transaction_necessity_by_association [
-    necessity_by_association:
-      %{
-        [created_contract_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] =>
-          :optional,
-        [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-        [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-        :block => :optional
-      }
-      |> Map.merge(@chain_type_transaction_necessity_by_association)
-  ]
-
   @internal_transaction_necessity_by_association [
     necessity_by_association: %{
       [created_contract_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] =>
@@ -404,7 +392,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
   def transactions(conn, %{block_hash_or_number_param: block_hash_or_number} = params) do
     with {:ok, block} <- block_param_to_block(block_hash_or_number) do
       full_options =
-        @transaction_necessity_by_association
+        transaction_necessity_by_association()
         |> Keyword.merge(put_key_value_to_paging_options(paging_options(params), :is_index_in_asc_order, true))
         |> Keyword.merge(type_filter_options(params))
         |> Keyword.merge(@api_true)
@@ -421,9 +409,17 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       |> put_status(200)
       |> put_view(TransactionView)
       |> render(:transactions, %{
-        transactions: transactions |> maybe_preload_ens() |> maybe_preload_metadata(),
+        transactions: transactions |> maybe_preload_ens_for_block_transactions() |> maybe_preload_metadata(),
         next_page_params: next_page_params
       })
+    end
+  end
+
+  defp maybe_preload_ens_for_block_transactions(transactions) do
+    if Application.get_env(:explorer, Explorer.MicroserviceInterfaces.BENS, [])[:disable_transactions_bens_preload] do
+      transactions
+    else
+      maybe_preload_ens(transactions)
     end
   end
 
@@ -684,6 +680,39 @@ defmodule BlockScoutWeb.API.V2.BlockController do
         next_page_params: next_page_params
       })
     end
+  end
+
+  defp transaction_necessity_by_association do
+    [
+      necessity_by_association:
+        Map.merge(
+          %{
+            [
+              created_contract_address: [
+                :scam_badge,
+                :names,
+                proxy_implementations_association()
+              ]
+            ] => :optional,
+            [
+              from_address: [
+                :scam_badge,
+                :names,
+                proxy_implementations_association()
+              ]
+            ] => :optional,
+            [
+              to_address: [
+                :scam_badge,
+                :names,
+                proxy_implementations_association()
+              ]
+            ] => :optional,
+            :block => :optional
+          },
+          @chain_type_transaction_necessity_by_association
+        )
+    ]
   end
 
   defp block_param_to_block(block_hash_or_number, options \\ @api_true) do
