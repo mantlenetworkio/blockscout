@@ -15,7 +15,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
 
   import Indexer.Block.Fetcher,
     only: [
-      async_import_coin_balances: 1,
+      async_import_coin_balances: 2,
       async_import_token_balances: 2,
       token_transfers_merge_token: 2
     ]
@@ -24,9 +24,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
   alias Explorer.Chain
   alias Explorer.Chain.{Block, Hash, PendingBlockOperation, PendingTransactionOperation, Transaction}
   alias Explorer.Chain.Cache.{Accounts, Blocks}
-  alias Explorer.Chain.Zilliqa.Helper, as: ZilliqaHelper
   alias Indexer.{BufferedTask, Tracer}
-  alias Indexer.Fetcher.InternalTransaction.Supervisor, as: InternalTransactionSupervisor
   alias Indexer.Transform.{AddressCoinBalances, Addresses, AddressTokenBalances}
   alias Indexer.Transform.Celo.TransactionTokenTransfers, as: CeloTransactionTokenTransfers
 
@@ -51,9 +49,10 @@ defmodule Indexer.Fetcher.InternalTransaction do
   *Note*: The internal transactions for individual transactions cannot be paginated,
   so the total number of internal transactions that could be produced is unknown.
   """
-  @spec async_fetch([Block.block_number()], [Transaction.t()], boolean()) :: :ok
-  def async_fetch(block_numbers, transactions, realtime?, timeout \\ 5000) when is_list(block_numbers) do
-    if InternalTransactionSupervisor.disabled?() do
+  @spec async_fetch([Block.block_number()], [Transaction.t()], boolean(), boolean(), integer()) :: :ok
+  def async_fetch(block_numbers, transactions, realtime?, for_contract_creator? \\ false, timeout \\ 5000)
+      when is_list(block_numbers) do
+    if disabled?() && !for_contract_creator? do
       :ok
     else
       data =
@@ -96,16 +95,42 @@ defmodule Indexer.Fetcher.InternalTransaction do
   def init(initial, reducer, json_rpc_named_arguments) do
     stream_reducer = RangesHelper.stream_reducer_traceable(reducer)
 
-    {:ok, final} =
-      case queue_data_type(json_rpc_named_arguments) do
-        :block_number ->
-          PendingBlockOperation.stream_blocks_with_unfetched_internal_transactions(initial, stream_reducer)
+    if disabled?() do
+      {:ok, final} =
+        case queue_data_type(json_rpc_named_arguments) do
+          :block_number ->
+            PendingBlockOperation.stream_blocks_with_unfetched_internal_transactions(
+              initial,
+              stream_reducer,
+              false,
+              true
+            )
 
-        :transaction_params ->
-          PendingTransactionOperation.stream_transactions_with_unfetched_internal_transactions(initial, stream_reducer)
-      end
+          :transaction_params ->
+            PendingTransactionOperation.stream_transactions_with_unfetched_internal_transactions(
+              initial,
+              stream_reducer,
+              false,
+              true
+            )
+        end
 
-    final
+      final
+    else
+      {:ok, final} =
+        case queue_data_type(json_rpc_named_arguments) do
+          :block_number ->
+            PendingBlockOperation.stream_blocks_with_unfetched_internal_transactions(initial, stream_reducer)
+
+          :transaction_params ->
+            PendingTransactionOperation.stream_transactions_with_unfetched_internal_transactions(
+              initial,
+              stream_reducer
+            )
+        end
+
+      final
+    end
   end
 
   defp params(%{block_number: block_number, hash: hash, index: index}) when is_integer(block_number) do
@@ -258,7 +283,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
 
   defp fetch_internal_transactions_by_transactions(transactions, json_rpc_named_arguments) do
     transactions
-    |> filter_non_traceable_transactions()
+    |> Transaction.filter_non_traceable_transactions()
     |> Enum.map(&params/1)
     |> case do
       [] ->
@@ -274,25 +299,11 @@ defmodule Indexer.Fetcher.InternalTransaction do
     end
   end
 
-  # TODO: should we cover this with tests?
-  @zetachain_non_traceable_type 88
-  @doc """
-  Filters out transactions that are known to not have traceable internal transactions.
-  """
-  @spec filter_non_traceable_transactions([Transaction.t() | map()]) :: [Transaction.t() | map()]
-  def filter_non_traceable_transactions(transactions) do
-    case Application.get_env(:explorer, :chain_type) do
-      :zetachain -> Enum.reject(transactions, &(Map.get(&1, :type) == @zetachain_non_traceable_type))
-      :zilliqa -> Enum.reject(transactions, &ZilliqaHelper.scilla_transaction?/1)
-      _ -> transactions
-    end
-  end
-
   defp safe_import_internal_transaction(internal_transactions_params, block_numbers, data_type) do
     import_internal_transaction(internal_transactions_params, block_numbers, data_type)
   rescue
     exception in Postgrex.Error ->
-      handle_foreign_key_violation(exception, internal_transactions_params, block_numbers, data_type)
+      handle_import_exception(exception, internal_transactions_params, block_numbers, data_type)
       {:retry, block_numbers}
   end
 
@@ -306,6 +317,11 @@ defmodule Indexer.Fetcher.InternalTransaction do
 
     address_coin_balances_params_set =
       AddressCoinBalances.params_set(%{internal_transactions_params: internal_transactions_params_marked})
+
+    address_hash_to_block_number =
+      Enum.into(addresses_params, %{}, fn %{fetched_coin_balance_block_number: block_number, hash: hash} ->
+        {String.downcase(hash), block_number}
+      end)
 
     empty_block_numbers =
       case data_type do
@@ -356,7 +372,9 @@ defmodule Indexer.Fetcher.InternalTransaction do
         Accounts.drop(imported[:addresses])
         Blocks.drop_nonconsensus(imported[:remove_consensus_of_missing_transactions_blocks])
 
-        async_import_coin_balances(imported)
+        async_import_coin_balances(imported, %{
+          address_hash_to_fetched_balance_block_number: address_hash_to_block_number
+        })
 
         async_import_celo_token_balances(celo_token_transfers_params)
 
@@ -432,7 +450,37 @@ defmodule Indexer.Fetcher.InternalTransaction do
     end)
   end
 
+  defp handle_unique_key_violation(
+         %Postgrex.Error{postgres: %{code: :unique_violation}},
+         transactions_params_or_unique_numbers,
+         data_type
+       ) do
+    block_numbers = data_to_block_numbers(transactions_params_or_unique_numbers, data_type)
+
+    Block.set_refetch_needed(block_numbers)
+
+    Logger.error(fn ->
+      [
+        "unique_violation on internal transactions import, #{data_type} identifiers: ",
+        inspect(transactions_params_or_unique_numbers)
+      ]
+    end)
+  end
+
   defp handle_unique_key_violation(_reason, _identifiers, _data_type), do: :ok
+
+  defp handle_import_exception(
+         %Postgrex.Error{postgres: %{code: :unique_violation}} = reason,
+         _internal_transactions_params,
+         block_numbers_or_transactions,
+         data_type
+       ) do
+    handle_unique_key_violation(reason, block_numbers_or_transactions, data_type)
+  end
+
+  defp handle_import_exception(reason, internal_transactions_params, block_numbers_or_transactions, data_type) do
+    handle_foreign_key_violation(reason, internal_transactions_params, block_numbers_or_transactions, data_type)
+  end
 
   defp handle_foreign_key_violation(reason, internal_transactions_params, block_numbers_or_transactions, data_type) do
     block_numbers = data_to_block_numbers(block_numbers_or_transactions, data_type)
@@ -493,7 +541,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
 
   def defaults do
     [
-      poll: false,
+      poll: true,
       flush_interval: :timer.seconds(3),
       max_concurrency: Application.get_env(:indexer, __MODULE__)[:concurrency] || @default_max_concurrency,
       max_batch_size: Application.get_env(:indexer, __MODULE__)[:batch_size] || @default_max_batch_size,
@@ -509,20 +557,32 @@ defmodule Indexer.Fetcher.InternalTransaction do
       address_token_balances =
         %{token_transfers_params: token_transfers_with_token}
         |> AddressTokenBalances.params_set()
-        |> Enum.map(fn %{address_hash: address_hash, token_contract_address_hash: token_contract_address_hash} = entry ->
-          with {:ok, address_hash} <- Hash.Address.cast(address_hash),
-               {:ok, token_contract_address_hash} <- Hash.Address.cast(token_contract_address_hash) do
-            entry
-            |> Map.put(:address_hash, address_hash)
-            |> Map.put(:token_contract_address_hash, token_contract_address_hash)
-          else
-            error -> Logger.error("Failed to cast string to hash: #{inspect(error)}")
-          end
-        end)
+        |> Enum.map(&cast_address_hashes_for_token_balance/1)
 
       async_import_token_balances(%{address_token_balances: address_token_balances}, false)
     else
       :ok
     end
+  end
+
+  defp cast_address_hashes_for_token_balance(entry) do
+    with {:ok, address_hash} <- Hash.Address.cast(entry.address_hash),
+         {:ok, token_contract_address_hash} <- Hash.Address.cast(entry.token_contract_address_hash) do
+      entry
+      |> Map.put(:address_hash, address_hash)
+      |> Map.put(:token_contract_address_hash, token_contract_address_hash)
+    else
+      error -> Logger.error("Failed to cast string to hash: #{inspect(error)}")
+    end
+  end
+
+  @doc """
+  Returns whether the internal transaction fetcher is disabled.
+
+   This can be used to conditionally disable fetching internal transactions, for example, in a staging environment where the load on the JSON-RPC should be minimized.
+  """
+  @spec disabled? :: boolean()
+  def disabled? do
+    Application.get_env(:indexer, __MODULE__, [])[:disabled?] == true
   end
 end

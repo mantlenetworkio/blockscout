@@ -255,7 +255,7 @@ defmodule Explorer.Helper do
   """
   @spec maybe_hide_scam_addresses_with_select(nil | Ecto.Query.t(), atom(), [
           Chain.paging_options() | Chain.api?() | Chain.show_scam_tokens?()
-        ]) :: Ecto.Query.t()
+        ]) :: Ecto.Query.t() | nil
   def maybe_hide_scam_addresses_with_select(nil, _address_hash_key, _options), do: nil
 
   def maybe_hide_scam_addresses_with_select(query, address_hash_key, options) do
@@ -295,7 +295,7 @@ defmodule Explorer.Helper do
           nil | Ecto.Query.t(),
           atom() | {atom(), atom()},
           [Chain.paging_options() | Chain.api?() | Chain.show_scam_tokens?()]
-        ) :: Ecto.Query.t()
+        ) :: Ecto.Query.t() | nil
   def maybe_hide_scam_addresses(nil, _address_hash_key, _options), do: nil
 
   def maybe_hide_scam_addresses(query, address_hash_key, options) when is_atom(address_hash_key) do
@@ -354,7 +354,7 @@ defmodule Explorer.Helper do
   """
   @spec maybe_hide_scam_addresses_for_token_transfers(nil | Ecto.Query.t(), [
           Chain.paging_options() | Chain.api?() | Chain.show_scam_tokens?()
-        ]) :: Ecto.Query.t()
+        ]) :: Ecto.Query.t() | nil
   def maybe_hide_scam_addresses_for_token_transfers(nil, _options), do: nil
 
   def maybe_hide_scam_addresses_for_token_transfers(query, options) do
@@ -389,7 +389,7 @@ defmodule Explorer.Helper do
   """
   @spec maybe_hide_scam_addresses_for_search(nil | Ecto.Query.t(), atom(), [
           Chain.paging_options() | Chain.api?() | Chain.show_scam_tokens?()
-        ]) :: Ecto.Query.t()
+        ]) :: Ecto.Query.t() | nil
   def maybe_hide_scam_addresses_for_search(nil, _address_hash_key, _options), do: nil
 
   def maybe_hide_scam_addresses_for_search(query, address_hash_key, options) do
@@ -785,4 +785,23 @@ defmodule Explorer.Helper do
       key
     end
   end
+
+  @doc """
+  Returns a keyword list with a timeout option if a timeout is provided.
+
+  This helper is needed for Repo calls, since passing `timeout: nil` is not supported.
+  If `timeout` is `nil`, returns an empty keyword list. Otherwise, returns
+  a keyword list with the `:timeout` key set to the given value.
+
+  ## Parameters
+
+    - timeout: The timeout value to use, or `nil`.
+
+  ## Returns
+
+    - A keyword list with the `:timeout` key, or an empty keyword list.
+  """
+  @spec maybe_timeout(timeout() | nil) :: keyword()
+  def maybe_timeout(nil), do: []
+  def maybe_timeout(timeout), do: [timeout: timeout]
 end

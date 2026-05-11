@@ -20,7 +20,7 @@ defmodule Explorer.Mixfile do
       lockfile: "../../mix.lock",
       package: package(),
       start_permanent: Mix.env() == :prod,
-      version: "10.2.6",
+      version: "11.0.3",
       xref: [exclude: [BlockScoutWeb.Routers.WebRouter.Helpers, Indexer.Helper, Indexer.Fetcher.InternalTransaction]]
     ]
   end
@@ -111,11 +111,11 @@ defmodule Explorer.Mixfile do
       # `:spandex` tracing of `:ecto`
       {:spandex_ecto, "~> 0.7.0"},
       # Attach `:prometheus_ecto` to `:ecto`
-      {:telemetry, "~> 1.3.0"},
+      {:telemetry, "~> 1.4.1"},
       # `Timex.Duration` for `Explorer.Chain.Cache.Counters.AverageBlockTime.average_block_time/0`
       {:timex, "~> 3.7.1"},
       {:con_cache, "~> 1.0"},
-      {:tesla, "~> 1.16.0"},
+      {:tesla, "~> 1.17.0"},
       {:cbor, "~> 1.0"},
       {:cloak_ecto, "~> 1.3.0"},
       {:redix, "~> 1.1"},
@@ -135,7 +135,8 @@ defmodule Explorer.Mixfile do
       {:inet_cidr, "~> 1.0.0"},
       {:hammer, "~> 7.0"},
       {:ton, "~> 0.5.0"},
-      {:mint, "~> 1.0"}
+      {:mint, "~> 1.0"},
+      {:oban, "~> 2.19"}
     ]
   end
 
@@ -162,7 +163,7 @@ defmodule Explorer.Mixfile do
   defp package do
     [
       maintainers: ["Blockscout"],
-      licenses: ["GPL 3.0"],
+      licenses: ["Blockscout Software Licence"],
       links: %{"GitHub" => "https://github.com/blockscout/blockscout"}
     ]
   end

@@ -86,8 +86,8 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
 
       {:noreply,
        %{
-         start_block: max(start_block_l2, last_l2_block_number),
          start_block_l2: start_block_l2,
+         start_block: max(start_block_l2, last_l2_block_number),
          safe_block: safe_block,
          safe_block_is_latest: safe_block_is_latest,
          message_passer: env[:message_passer],
@@ -140,20 +140,6 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
         :continue,
         %{
           start_block_l2: start_block_l2,
-          message_passer: message_passer,
-          json_rpc_named_arguments: json_rpc_named_arguments,
-          eth_get_logs_range_size: eth_get_logs_range_size
-        } = state
-      ) do
-    fill_msg_nonce_gaps(start_block_l2, message_passer, json_rpc_named_arguments, eth_get_logs_range_size)
-    Process.send(self(), :find_new_events, [])
-    {:noreply, state}
-  end
-
-  @impl GenServer
-  def handle_info(
-        :find_new_events,
-        %{
           start_block: start_block,
           safe_block: safe_block,
           safe_block_is_latest: safe_block_is_latest,
@@ -162,6 +148,8 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
           eth_get_logs_range_size: eth_get_logs_range_size
         } = state
       ) do
+    fill_msg_nonce_gaps(start_block_l2, message_passer, json_rpc_named_arguments, eth_get_logs_range_size, true)
+
     # find and fill all events between start_block and "safe" block
     # the "safe" block can be "latest" (when safe_block_is_latest == true)
     fill_block_range(start_block, safe_block, message_passer, json_rpc_named_arguments, eth_get_logs_range_size)
@@ -428,7 +416,7 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
          message_passer,
          json_rpc_named_arguments,
          eth_get_logs_range_size,
-         scan_db \\ true
+         scan_db
        ) do
     nonce_min = Repo.aggregate(OptimismWithdrawal, :min, :msg_nonce)
     nonce_max = Repo.aggregate(OptimismWithdrawal, :max, :msg_nonce)
@@ -474,17 +462,16 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
   # ## Parameters
   # - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection.
   #                               Used to get transaction info by its hash from the RPC node.
-  #                               Can be `nil` if the transaction info is not needed.
   #
   # ## Returns
   # - A tuple `{last_block_number, last_transaction_hash, last_transaction}` where
   #   `last_block_number` is the last block number found in the corresponding table (0 if not found),
   #   `last_transaction_hash` is the last transaction hash found in the corresponding table (nil if not found),
-  #   `last_transaction` is the transaction info got from the RPC (nil if not found or not needed).
+  #   `last_transaction` is the transaction info got from the RPC (nil if not found).
   # - A tuple `{:error, message}` in case the `eth_getTransactionByHash` RPC request failed.
-  @spec get_last_l2_item(EthereumJSONRPC.json_rpc_named_arguments() | nil) ::
+  @spec get_last_l2_item(EthereumJSONRPC.json_rpc_named_arguments()) ::
           {non_neg_integer(), binary() | nil, map() | nil} | {:error, any()}
-  defp get_last_l2_item(json_rpc_named_arguments \\ nil) do
+  defp get_last_l2_item(json_rpc_named_arguments) do
     Optimism.get_last_item(
       :L2,
       &OptimismWithdrawal.last_withdrawal_l2_block_number_query/0,

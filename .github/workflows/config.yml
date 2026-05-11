@@ -1,33 +1,21 @@
-name: Blockscout
+name: Blockscout main CI
 
 on:
   push:
     branches:
       - master
-      - production-arbitrum
-      - production-core
-      - production-eth-sepolia
-      - production-filecoin
-      - production-fuse
-      - production-optimism
-      - production-immutable
-      - production-iota
-      - production-lukso
-      - production-rsk
-      - production-sokol
-      - production-xdai
-      - production-zkevm
-      - production-zksync
-      - staging-l2
+      - dev
     paths-ignore:
       - "CHANGELOG.md"
       - "**/README.md"
       - "docker/*"
       - "docker-compose/*"
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
     branches:
       - master
+      - dev
 
 env:
   MIX_ENV: test
@@ -58,7 +46,6 @@ jobs:
               "filecoin",
               "optimism",
               "optimism-celo",
-              "polygon_zkevm",
               "rsk",
               "scroll",
               "shibarium",
@@ -85,7 +72,7 @@ jobs:
               ciLabels.includes("ci:" + chainType)
             );
 
-            // Chain type matrix we use in PRs to master branch
+            // Chain type matrix we use in PRs to master/dev branches
             const ciChainTypes = labeledChainTypes.length > 0 ? labeledChainTypes : defaultChainTypes;
 
             // Check for bridged tokens label

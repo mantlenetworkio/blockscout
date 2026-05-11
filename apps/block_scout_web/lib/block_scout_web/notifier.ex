@@ -6,6 +6,16 @@ defmodule BlockScoutWeb.Notifier do
     chain_type: [:explorer, :chain_type],
     chain_identity: [:explorer, :chain_identity]
 
+  use Utils.RuntimeEnvHelper,
+    block_broadcast_enrichment_disabled?: [
+      :block_scout_web,
+      [BlockScoutWeb.Notifier, :block_broadcast_enrichment_disabled]
+    ],
+    block_broadcast_enrichment_timeout: [
+      :block_scout_web,
+      [BlockScoutWeb.Notifier, :block_broadcast_enrichment_timeout]
+    ]
+
   require Logger
 
   alias Absinthe.Subscription
@@ -13,7 +23,6 @@ defmodule BlockScoutWeb.Notifier do
   alias BlockScoutWeb.API.V2.{
     AddressView,
     BlockView,
-    PolygonZkevmView,
     SmartContractView,
     TransactionView
   }
@@ -42,10 +51,13 @@ defmodule BlockScoutWeb.Notifier do
   alias Explorer.Chain.Cache.Counters.{AddressesCount, AverageBlockTime, Helper}
   alias Explorer.Chain.Supply.RSK
   alias Explorer.Chain.Transaction.History.TransactionStats
+  alias Explorer.MicroserviceInterfaces.{BENS, Metadata}
   alias Explorer.SmartContract.{CompilerVersion, Solidity.CodeCompiler}
   alias Phoenix.View
   alias Timex.Duration
 
+  import Explorer.MicroserviceInterfaces.BENS, only: [maybe_preload_ens_to_block: 1]
+  import Explorer.MicroserviceInterfaces.Metadata, only: [maybe_preload_metadata_to_block: 1]
   import Explorer.Chain.SmartContract.Proxy.Models.Implementation, only: [proxy_implementations_association: 0]
 
   @check_broadcast_sequence_period 500
@@ -159,18 +171,6 @@ defmodule BlockScoutWeb.Notifier do
     end)
   end
 
-  def handle_event({:chain_event, :zkevm_confirmed_batches, :realtime, batches}) do
-    batches
-    |> Enum.sort_by(& &1.number, :asc)
-    |> Enum.each(fn confirmed_batch ->
-      rendered_batch = PolygonZkevmView.render("zkevm_batch.json", %{batch: confirmed_batch, socket: nil})
-
-      Endpoint.broadcast("zkevm_batches:new_zkevm_confirmed_batch", "new_zkevm_confirmed_batch", %{
-        batch: rendered_batch
-      })
-    end)
-  end
-
   def handle_event({:chain_event, :exchange_rate}) do
     exchange_rate = Market.get_coin_exchange_rate()
 
@@ -205,9 +205,13 @@ defmodule BlockScoutWeb.Notifier do
   end
 
   def handle_event(
-        {:chain_event, :internal_transactions, :on_demand,
-         [%InternalTransaction{index: 0, transaction_hash: transaction_hash}]}
+        {:chain_event, :internal_transactions, :on_demand, [%InternalTransaction{index: 0} = internal_transaction]}
       ) do
+    transaction_hash =
+      internal_transaction
+      |> InternalTransaction.preload_transaction()
+      |> Map.get(:transaction_hash)
+
     # TODO: delete duplicated event when old UI becomes deprecated
     Endpoint.broadcast("transactions_old:#{transaction_hash}", "raw_trace", %{raw_trace_origin: transaction_hash})
 
@@ -225,8 +229,10 @@ defmodule BlockScoutWeb.Notifier do
     internal_transactions
     |> Stream.map(
       &(InternalTransaction.where_nonpending_operation()
-        |> Repo.get_by(transaction_hash: &1.transaction_hash, index: &1.index)
-        |> Repo.preload([:from_address, :to_address, :block]))
+        |> Repo.get_by(block_number: &1.block_number, transaction_index: &1.transaction_index, index: &1.index)
+        |> Repo.preload([:block])
+        |> InternalTransaction.preload_addresses()
+        |> InternalTransaction.preload_transaction())
     )
     |> Enum.each(&broadcast_internal_transaction/1)
   end
@@ -565,11 +571,15 @@ defmodule BlockScoutWeb.Notifier do
 
   defp broadcast_block(block) do
     preloaded_block =
-      Repo.preload(block, [
+      block
+      |> Repo.preload([
         [miner: [:names, :smart_contract, proxy_implementations_association()]],
         :transactions,
         :rewards
       ])
+      # TODO: theoretically might introduce performance issues,
+      # consider async broadcast of enrichment data
+      |> maybe_preload_enrichment_for_broadcast()
 
     average_block_time = AverageBlockTime.average_block_time()
 
@@ -596,6 +606,48 @@ defmodule BlockScoutWeb.Notifier do
     Endpoint.broadcast("blocks:new_block", "new_block", block_params_v2)
     Endpoint.broadcast("blocks:#{to_string(block.miner_hash)}", "new_block", block_params_v2)
   end
+
+  defp maybe_preload_enrichment_for_broadcast(block) do
+    if !block_broadcast_enrichment_disabled?() and (BENS.enabled?() or Metadata.enabled?()) do
+      preload_enrichment_for_broadcast(block)
+    else
+      block
+    end
+  end
+
+  defp preload_enrichment_for_broadcast(block) do
+    timeout = block_broadcast_enrichment_timeout()
+
+    results =
+      Task.Supervisor.async_stream_nolink(
+        Explorer.TaskSupervisor,
+        [
+          {:ens_domain_name, &maybe_preload_ens_to_block/1},
+          {:metadata, &maybe_preload_metadata_to_block/1}
+        ],
+        fn {field, preload_fun} ->
+          {field, preload_fun.(block)}
+        end,
+        timeout: timeout,
+        on_timeout: :kill_task,
+        ordered: false
+      )
+
+    Enum.reduce(results, block, fn
+      {:ok, {field, enriched_block}}, acc -> merge_enriched_miner_field(acc, enriched_block, field)
+      _, acc -> acc
+    end)
+  end
+
+  defp merge_enriched_miner_field(%{miner: %{} = miner} = block, %{miner: %{} = enriched_miner}, field) do
+    case Map.fetch(enriched_miner, field) do
+      {:ok, nil} -> block
+      {:ok, value} -> %{block | miner: Map.replace(miner, field, value)}
+      :error -> block
+    end
+  end
+
+  defp merge_enriched_miner_field(block, _enriched_block, _field), do: block
 
   defp broadcast_rewards(rewards) do
     preloaded_rewards = Repo.preload(rewards, [:address, :block])

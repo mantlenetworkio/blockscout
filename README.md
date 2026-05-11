@@ -2,7 +2,6 @@
 <p align="center">Blockchain Explorer for inspecting and analyzing EVM Chains.</p>
 <div align="center">
 
-[![Blockscout](https://github.com/blockscout/blockscout/actions/workflows/config.yml/badge.svg)](https://github.com/blockscout/blockscout/actions)
 [![Discord](https://img.shields.io/badge/chat-Blockscout-green.svg)](https://discord.gg/blockscout)
 
 </div>
@@ -42,10 +41,12 @@ We would like to thank the EthPrize foundation for their funding support.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution and pull request protocol. We expect contributors to follow our [code of conduct](CODE_OF_CONDUCT.md) when submitting code or comments.
+See [CONTRIBUTING.md](.github/CONTRIBUTING.md) for contribution and pull request protocol. We expect contributors to follow our [code of conduct](.github/CODE_OF_CONDUCT.md) when submitting code or comments.
 
 ## License
 
-[![License: GPL v3.0](https://img.shields.io/badge/License-GPL%20v3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![License: Blockscout Software Licence](https://img.shields.io/badge/License-Blockscout%20Software%20Licence-blue.svg)](LICENSE)
 
-This project is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the Blockscout Software Licence. See the [LICENSE](LICENSE) file for full terms.
+
+Third-party components included in this repository remain subject to their own licenses. See dependency manifests and bundled third-party notices for component-level license terms.

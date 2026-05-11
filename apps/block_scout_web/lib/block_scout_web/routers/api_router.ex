@@ -111,7 +111,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
     plug(CheckFeature, feature_check: &mud_enabled?/0)
   end
 
-  alias BlockScoutWeb.API.V2
+  alias BlockScoutWeb.API.{Legacy, V2}
 
   forward("/account", AccountRouter)
 
@@ -153,14 +153,12 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       end
     end
 
+    get("/csv-exports/:uuid_param", V2.CsvExportController, :get_csv_export)
+
     scope "/transactions" do
       get("/", V2.TransactionController, :transactions)
       get("/watchlist", V2.TransactionController, :watchlist_transactions)
       get("/stats", V2.TransactionController, :stats)
-
-      if @chain_type == :polygon_zkevm do
-        get("/zkevm-batch/:batch_number_param", V2.TransactionController, :polygon_zkevm_batch)
-      end
 
       if @chain_type == :zksync do
         get("/zksync-batch/:batch_number_param", V2.TransactionController, :zksync_batch)
@@ -186,6 +184,8 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/:transaction_hash_param/token-transfers", V2.TransactionController, :token_transfers)
       get("/:transaction_hash_param/internal-transactions", V2.TransactionController, :internal_transactions)
       get("/:transaction_hash_param/logs", V2.TransactionController, :logs)
+      get("/:transaction_hash_param/fhe-operations", V2.TransactionController, :fhe_operations)
+
       get("/:transaction_hash_param/raw-trace", V2.TransactionController, :raw_trace)
       get("/:transaction_hash_param/state-changes", V2.TransactionController, :state_changes)
       get("/:transaction_hash_param/summary", V2.TransactionController, :summary)
@@ -278,11 +278,6 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
         get("/optimism-deposits", V2.OptimismController, :main_page_deposits)
       end
 
-      if @chain_type == :polygon_zkevm do
-        get("/zkevm/batches/confirmed", V2.PolygonZkevmController, :batches_confirmed)
-        get("/zkevm/batches/latest-number", V2.PolygonZkevmController, :batch_latest_number)
-      end
-
       if @chain_type == :zksync do
         get("/zksync/batches/confirmed", V2.ZkSyncController, :batches_confirmed)
         get("/zksync/batches/latest-number", V2.ZkSyncController, :batch_latest_number)
@@ -368,18 +363,6 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
     scope "/withdrawals" do
       get("/", V2.WithdrawalController, :withdrawals_list)
       get("/counters", V2.WithdrawalController, :withdrawals_counters)
-    end
-
-    scope "/zkevm" do
-      if @chain_type == :polygon_zkevm do
-        get("/batches", V2.PolygonZkevmController, :batches)
-        get("/batches/count", V2.PolygonZkevmController, :batches_count)
-        get("/batches/:batch_number", V2.PolygonZkevmController, :batch)
-        get("/deposits", V2.PolygonZkevmController, :deposits)
-        get("/deposits/count", V2.PolygonZkevmController, :deposits_count)
-        get("/withdrawals", V2.PolygonZkevmController, :withdrawals)
-        get("/withdrawals/count", V2.PolygonZkevmController, :withdrawals_count)
-      end
     end
 
     scope "/proxy" do
@@ -507,6 +490,19 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/", V2.AdvancedFilterController, :list)
       get("/csv", V2.AdvancedFilterController, :list_csv)
       get("/methods", V2.AdvancedFilterController, :list_methods)
+    end
+  end
+
+  scope "/legacy" do
+    pipe_through(:api_v2)
+
+    scope "/logs" do
+      get("/get-logs", Legacy.LogsController, :get_logs)
+    end
+
+    scope "/block" do
+      get("/get-block-number-by-time", Legacy.BlockController, :get_block_number_by_time)
+      get("/eth-block-number", Legacy.BlockController, :eth_block_number)
     end
   end
 

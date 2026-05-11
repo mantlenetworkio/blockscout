@@ -32,7 +32,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   alias EthereumJSONRPC.Block.ByHash
   alias EthereumJSONRPC.{Blocks, Contract}
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.{Block, Hash, RollupReorgMonitorQueue}
+  alias Explorer.Chain.{Block, Hash}
   alias Explorer.Chain.Events.Publisher
   alias Explorer.Chain.Optimism.{FrameSequence, FrameSequenceBlob}
   alias Explorer.Chain.Optimism.TransactionBatch, as: OptimismTransactionBatch
@@ -40,6 +40,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   alias Indexer.Fetcher.Optimism.BlobRetryQueue
   alias Indexer.Helper
   alias Indexer.Prometheus.Instrumenter
+  alias Indexer.RollupReorgMonitorQueue
   alias Varint.LEB128
 
   @fetcher_name :optimism_transaction_batches
@@ -360,7 +361,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
             {incomplete_channels_acc, nil}
           end
 
-        reorg_block = RollupReorgMonitorQueue.reorg_block_pop(__MODULE__)
+        reorg_block = RollupReorgMonitorQueue.pop(__MODULE__)
 
         if !is_nil(reorg_block) && reorg_block > 0 do
           new_incomplete_channels = handle_l1_reorg(reorg_block, new_incomplete_channels)

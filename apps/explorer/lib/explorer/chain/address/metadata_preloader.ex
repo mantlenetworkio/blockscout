@@ -123,6 +123,15 @@ defmodule Explorer.Chain.Address.MetadataPreloader do
   end
 
   @doc """
+  Preloads metadata to Block.t()
+  """
+  @spec preload_metadata_to_block(Block.t()) :: Block.t()
+  def preload_metadata_to_block(block) do
+    [block_with_metadata] = preload_metadata_to_list([block])
+    block_with_metadata
+  end
+
+  @doc """
     Preload ENS info to search result, using get_address/1
   """
   @spec preload_ens_info_to_search_results(list) :: list

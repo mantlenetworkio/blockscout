@@ -106,6 +106,24 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
+  Returns an optional parameter definition for the start of the time period.
+  Used for endpoints like token holders CSV that don't require a time range.
+  """
+  @spec optional_from_period_param() :: Parameter.t()
+  def optional_from_period_param do
+    %{from_period_param() | required: false}
+  end
+
+  @doc """
+  Returns an optional parameter definition for the end of the time period.
+  Used for endpoints like token holders CSV that don't require a time range.
+  """
+  @spec optional_to_period_param() :: Parameter.t()
+  def optional_to_period_param do
+    %{to_period_param() | required: false}
+  end
+
+  @doc """
   Returns a parameter definition for chain IDs in the query.
   """
   @spec chain_ids_param() :: Parameter.t()
@@ -474,10 +492,12 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
-  Returns a parameter definition for sorting transactions by specified fields.
+  Returns a parameter definition for sorting by specified fields.
   """
   @spec sort_param([String.t()]) :: Parameter.t()
   def sort_param(sort_fields) do
+    description = sort_description(sort_fields)
+
     %Parameter{
       name: :sort,
       in: :query,
@@ -486,20 +506,38 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
         enum: sort_fields
       },
       required: false,
-      description: """
-      Sort transactions by:
-      * block_number - Sort by block number
-      * value - Sort by transaction value
-      * fee - Sort by transaction fee
-      * balance - Sort by account balance
-      * transactions_count - Sort by number of transactions on address
-      * fiat_value - Sort by fiat value of the token transfer
-      * holders_count - Sort by number of token holders
-      * circulating_market_cap - Sort by circulating market cap of the token
-      Should be used together with `order` parameter.
-      """
+      description: description
     }
   end
+
+  @sort_field_descriptions %{
+    "balance" => "Sort by account balance",
+    "block_number" => "Sort by block number",
+    "circulating_market_cap" => "Sort by circulating market cap of the token",
+    "fee" => "Sort by transaction fee",
+    "fiat_value" => "Sort by fiat value",
+    "holders_count" => "Sort by number of token holders",
+    "key0" => "Sort by MUD record key0",
+    "key1" => "Sort by MUD record key1",
+    "key_bytes" => "Sort by MUD record key_bytes",
+    "total_gas_used" => "Sort by total gas used",
+    "transactions_count" => "Sort by number of transactions",
+    "value" => "Sort by transaction value"
+  }
+
+  defp sort_description(sort_fields) do
+    field_descriptions =
+      sort_fields
+      |> Enum.map_join("\n", fn field -> "* #{field} - #{sort_field_description(field)}" end)
+
+    """
+    Sort results by:
+    #{field_descriptions}
+    Should be used together with `order` parameter.
+    """
+  end
+
+  defp sort_field_description(field), do: Map.get(@sort_field_descriptions, field, "Sort by #{field}")
 
   @doc """
   Returns a parameter definition for sorting order (asc/desc).
@@ -951,6 +989,24 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
+  Returns a parameter definition for a UUID in the path.
+  """
+  @spec uuid_param() :: Parameter.t()
+  def uuid_param do
+    %Parameter{
+      name: :uuid_param,
+      in: :path,
+      schema: %Schema{
+        type: :string,
+        format: :uuid,
+        pattern: ~r/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      },
+      required: true,
+      description: "UUID for CSV export"
+    }
+  end
+
+  @doc """
   Returns a list of base parameters (api_key and key).
   """
   @spec base_params() :: [Parameter.t()]
@@ -1049,7 +1105,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       in: :query,
       schema: %Schema{type: :integer},
       required: false,
-      description: "Transaction index for paging"
+      description: "Item index for paging"
     },
     "index_nullable" => %Parameter{
       name: :index,
@@ -1057,13 +1113,6 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       schema: %Schema{anyOf: [%Schema{type: :integer}, EmptyString, NullString]},
       required: false,
       description: "Transaction index for paging"
-    },
-    "block_index" => %Parameter{
-      name: :block_index,
-      in: :query,
-      schema: %Schema{type: :integer},
-      required: false,
-      description: "Block index for paging"
     },
     "inserted_at" => %Parameter{
       name: :inserted_at,
@@ -1220,6 +1269,13 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       required: false,
       description: "Smart-contract ID for paging"
     },
+    "number" => %Parameter{
+      name: :number,
+      in: :query,
+      schema: %Schema{type: :integer},
+      required: false,
+      description: "Number for paging"
+    },
     "fetched_coin_balance" => %Parameter{
       name: :fetched_coin_balance,
       in: :query,
@@ -1269,6 +1325,13 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       schema: IntegerStringNullable,
       required: false,
       description: "Amount for paging"
+    },
+    "account_address_hash" => %Parameter{
+      name: :account_address_hash,
+      in: :query,
+      schema: AddressHash,
+      required: false,
+      description: "Account address hash for paging"
     },
     "associated_account_address_hash" => %Parameter{
       name: :associated_account_address_hash,

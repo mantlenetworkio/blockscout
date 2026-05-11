@@ -13,7 +13,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
       async_import_block_rewards: 2,
       async_import_celo_epoch_block_operations: 2,
       async_import_celo_accounts: 2,
-      async_import_coin_balances: 1,
+      async_import_coin_balances: 2,
       async_import_created_contract_codes: 2,
       async_import_filecoin_addresses_info: 2,
       async_import_internal_transactions: 2,
@@ -133,12 +133,12 @@ defmodule Indexer.Block.Catchup.Fetcher do
 
   defp async_import_remaining_block_data(
          imported,
-         %{block_rewards: %{errors: block_reward_errors}}
+         %{block_rewards: %{errors: block_reward_errors}} = options
        ) do
     realtime? = false
 
     async_import_block_rewards(block_reward_errors, realtime?)
-    async_import_coin_balances(imported)
+    async_import_coin_balances(imported, options)
     async_import_created_contract_codes(imported, realtime?)
     async_import_internal_transactions(imported, realtime?)
     async_import_tokens(imported, realtime?)
@@ -271,7 +271,13 @@ defmodule Indexer.Block.Catchup.Fetcher do
     String.match?(error_message, ~r/due to a timeout/) or String.match?(error_message, ~r/due to user request/)
   end
 
-  defp add_range_to_massive_blocks(range) do
+  @doc """
+  Adds block numbers or block numbers range into `massive_blocks` and clears them from `missing_block_ranges`
+  """
+  @spec add_range_to_massive_blocks(Range.t() | [non_neg_integer()]) :: any()
+  def add_range_to_massive_blocks([]), do: :ok
+
+  def add_range_to_massive_blocks(range) do
     clear_missing_ranges(range)
 
     range

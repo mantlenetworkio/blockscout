@@ -32,12 +32,16 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
   def should_fetch?(_records, 0), do: false
 
   def should_fetch?(records_from_db, limit) do
-    with true <- Enum.count(records_from_db) >= limit,
-         %{block_number: min_block_number} <- Enum.min_by(records_from_db, & &1.block_number),
-         true <- InternalTransaction.present_in_db?(min_block_number) do
+    if internal_transactions_fetching_disabled?() do
       false
     else
-      _ -> true
+      with true <- Enum.count(records_from_db) >= limit,
+           %{block_number: min_block_number} <- Enum.min_by(records_from_db, & &1.block_number),
+           true <- InternalTransaction.present_in_db?(min_block_number) do
+        false
+      else
+        _ -> not InternalTransactionsAddressPlaceholder.empty?()
+      end
     end
   end
 
@@ -57,33 +61,37 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
   """
   @spec fetch_latest(Keyword.t()) :: [InternalTransaction.t()]
   def fetch_latest(options) do
-    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+    if internal_transactions_fetching_disabled?() do
+      []
+    else
+      paging_options = Keyword.get(options, :paging_options, @default_paging_options)
 
-    from_block = Chain.from_block(options)
-    to_block = Chain.to_block(options)
+      from_block = Chain.from_block(options)
+      to_block = Chain.to_block(options)
 
-    to_block_number =
-      case {paging_options, to_block} do
-        {%PagingOptions{key: {block_number, _, _}}, _} -> block_number
-        {_, block_number} when is_integer(block_number) -> block_number
-        _ -> BlockNumber.get_max()
-      end
+      to_block_number =
+        case {paging_options, to_block} do
+          {%PagingOptions{key: {block_number, _, _}}, _} -> block_number
+          {_, block_number} when is_integer(block_number) -> block_number
+          _ -> BlockNumber.get_max()
+        end
 
-    sort_direction =
-      case Keyword.get(options, :sort_direction) do
-        :asc -> &<=/2
-        _ -> &>=/2
-      end
+      sort_direction =
+        case Keyword.get(options, :sort_direction) do
+          :asc -> &<=/2
+          _ -> &>=/2
+        end
 
-    index_internal_transaction_desc_order = Keyword.get(options, :index_internal_transaction_desc_order, true)
+      index_internal_transaction_desc_order = Keyword.get(options, :index_internal_transaction_desc_order, true)
 
-    to_block_number
-    |> fetch_enough(from_block || 0, paging_options.page_size, options)
-    |> Enum.sort_by(&{&1.block_number, &1.transaction_index, &1.index}, sort_direction)
-    |> page_internal_transaction(paging_options, %{
-      index_internal_transaction_desc_order: index_internal_transaction_desc_order
-    })
-    |> Enum.take(paging_options.page_size)
+      to_block_number
+      |> fetch_enough(from_block || 0, paging_options.page_size, options)
+      |> Enum.sort_by(&{&1.block_number, &1.transaction_index, &1.index}, sort_direction)
+      |> page_internal_transaction(paging_options, %{
+        index_internal_transaction_desc_order: index_internal_transaction_desc_order
+      })
+      |> Enum.take(paging_options.page_size)
+    end
   end
 
   @doc """
@@ -103,51 +111,57 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
   """
   @spec fetch_by_transaction(Transaction.t(), Keyword.t()) :: [InternalTransaction.t()]
   def fetch_by_transaction(transaction, options \\ []) do
-    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
-    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
-    json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
+    if internal_transactions_fetching_disabled?() do
+      []
+    else
+      necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+      paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+      json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
 
-    params = [
-      %{
-        block_number: transaction.block_number,
-        hash_data: to_string(transaction.hash),
-        transaction_index: transaction.index
-      }
-    ]
+      params = [
+        %{
+          block_number: transaction.block_number,
+          hash_data: to_string(transaction.hash),
+          transaction_index: transaction.index
+        }
+      ]
 
-    case EthereumJSONRPC.fetch_internal_transactions(params, json_rpc_named_arguments) do
-      {:ok, internal_transactions_params} ->
-        internal_transactions_params
-        |> Enum.map(&serialize/1)
-        |> different_from_parent_transaction()
-        |> Enum.sort_by(& &1.index)
-        |> add_block_hashes(transaction.block_hash)
-        |> join_associations(necessity_by_association)
-        |> page_internal_transaction(paging_options)
-        |> Enum.take(paging_options.page_size)
-        |> Repo.preload(:block)
-        |> InternalTransaction.preload_error()
+      case EthereumJSONRPC.fetch_internal_transactions(params, json_rpc_named_arguments) do
+        {:ok, internal_transactions_params} ->
+          internal_transactions_params
+          |> Enum.map(&serialize/1)
+          |> different_from_parent_transaction()
+          |> Enum.sort_by(& &1.index)
+          |> join_associations(necessity_by_association)
+          |> page_internal_transaction(paging_options)
+          |> Enum.take(paging_options.page_size)
+          |> Repo.preload(:block)
+          |> InternalTransaction.preload_error()
+          |> InternalTransaction.preload_transaction()
+          |> InternalTransaction.preload_addresses(options)
 
-      :ignore ->
-        [transaction.block_number]
-        |> fetch_block_internal_transactions()
-        |> Enum.map(&serialize/1)
-        |> Enum.filter(&(&1.transaction_hash == transaction.hash))
-        |> different_from_parent_transaction()
-        |> Enum.sort_by(& &1.index)
-        |> add_block_hashes(transaction.block_hash)
-        |> join_associations(necessity_by_association)
-        |> page_internal_transaction(paging_options)
-        |> Enum.take(paging_options.page_size)
-        |> Repo.preload(:block)
-        |> InternalTransaction.preload_error()
+        :ignore ->
+          [transaction.block_number]
+          |> fetch_block_internal_transactions()
+          |> Enum.map(&serialize/1)
+          |> Enum.filter(&(&1.block_number == transaction.block_number and &1.transaction_index == transaction.index))
+          |> different_from_parent_transaction()
+          |> Enum.sort_by(& &1.index)
+          |> join_associations(necessity_by_association)
+          |> page_internal_transaction(paging_options)
+          |> Enum.take(paging_options.page_size)
+          |> Repo.preload(:block)
+          |> InternalTransaction.preload_error()
+          |> InternalTransaction.preload_transaction()
+          |> InternalTransaction.preload_addresses(options)
 
-      error ->
-        Logger.error(
-          "Failed to fetch internal transactions for transaction #{inspect(transaction.hash)}: #{inspect(error)}"
-        )
+        error ->
+          Logger.error(
+            "Failed to fetch internal transactions for transaction #{inspect(transaction.hash)}: #{inspect(error)}"
+          )
 
-        []
+          []
+      end
     end
   end
 
@@ -176,24 +190,28 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
   end
 
   def fetch_by_block(%Block{} = block, options) do
-    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
-    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
-    type_filter = Keyword.get(options, :type)
-    call_type_filter = Keyword.get(options, :call_type)
-    unlimited? = Keyword.get(options, :unlimited)
+    if internal_transactions_fetching_disabled?() do
+      []
+    else
+      necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+      paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+      type_filter = Keyword.get(options, :type)
+      call_type_filter = Keyword.get(options, :call_type)
+      unlimited? = Keyword.get(options, :unlimited)
 
-    [block.number]
-    |> fetch_block_internal_transactions()
-    |> Enum.map(&serialize/1)
-    |> different_from_parent_transaction()
-    |> filter_by_type(type_filter, call_type_filter)
-    |> filter_by_call_type(call_type_filter)
-    |> page_block_internal_transaction(paging_options)
-    |> Enum.sort_by(&{&1.transaction_index, &1.index})
-    |> then(&if unlimited?, do: &1, else: Enum.take(&1, paging_options.page_size))
-    |> add_block_hashes(block.hash)
-    |> join_associations(necessity_by_association)
-    |> InternalTransaction.preload_error()
+      [block.number]
+      |> fetch_block_internal_transactions()
+      |> Enum.map(&serialize/1)
+      |> different_from_parent_transaction()
+      |> filter_by_type(type_filter, call_type_filter)
+      |> filter_by_call_type(call_type_filter)
+      |> page_block_internal_transaction(paging_options)
+      |> Enum.sort_by(&{&1.transaction_index, &1.index})
+      |> then(&if unlimited?, do: &1, else: Enum.take(&1, paging_options.page_size))
+      |> join_associations(necessity_by_association)
+      |> InternalTransaction.preload_error()
+      |> InternalTransaction.preload_transaction()
+    end
   end
 
   @doc """
@@ -219,61 +237,65 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
   """
   @spec fetch_by_address(Hash.Address.t(), Keyword.t()) :: [InternalTransaction.t()]
   def fetch_by_address(address_hash, options) do
-    necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
-    direction = Keyword.get(options, :direction)
+    if internal_transactions_fetching_disabled?() do
+      []
+    else
+      necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+      direction = Keyword.get(options, :direction)
 
-    from_block = Chain.from_block(options)
-    to_block = Chain.to_block(options)
+      from_block = Chain.from_block(options)
+      to_block = Chain.to_block(options)
 
-    paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+      paging_options = Keyword.get(options, :paging_options, @default_paging_options)
 
-    address_id = AddressIdToAddressHash.hash_to_id(address_hash)
+      address_id = AddressIdToAddressHash.hash_to_id(address_hash)
 
-    block_number_from_paging_options =
-      case paging_options do
-        %{key: {block_number, _, _}} -> block_number
-        _ -> nil
-      end
+      block_number_from_paging_options =
+        case paging_options do
+          %{key: {block_number, _, _}} -> block_number
+          _ -> nil
+        end
 
-    max_block_number =
-      case {to_block, block_number_from_paging_options} do
-        {nil, nil} -> nil
-        {nil, key} -> key
-        {to, nil} -> to
-        {to, key} -> min(to, key)
-      end
+      max_block_number =
+        case {to_block, block_number_from_paging_options} do
+          {nil, nil} -> nil
+          {nil, key} -> key
+          {to, nil} -> to
+          {to, key} -> min(to, key)
+        end
 
-    sum_mode =
-      case direction do
-        d when d in [:to, :to_address_hash] -> "tos"
-        d when d in [:from, :from_address_hash] -> "froms"
-        _ -> "both"
-      end
+      sum_mode =
+        case direction do
+          d when d in [:to, :to_address_hash] -> "tos"
+          d when d in [:from, :from_address_hash] -> "froms"
+          _ -> "both"
+        end
 
-    sort_direction = Keyword.get(options, :sort_direction, :desc)
+      sort_direction = Keyword.get(options, :sort_direction, :desc)
 
-    sort_func =
-      case sort_direction do
-        :asc -> &<=/2
-        _ -> &>=/2
-      end
+      sort_func =
+        case sort_direction do
+          :asc -> &<=/2
+          _ -> &>=/2
+        end
 
-    index_internal_transaction_desc_order = Keyword.get(options, :index_internal_transaction_desc_order, true)
+      index_internal_transaction_desc_order = Keyword.get(options, :index_internal_transaction_desc_order, true)
 
-    address_id
-    |> do_fetch_for_address(max_block_number, from_block, paging_options.page_size, sum_mode, sort_direction)
-    |> Enum.map(&serialize/1)
-    |> filter_by_address(address_hash, direction)
-    |> different_from_parent_transaction()
-    |> page_internal_transaction(paging_options, %{
-      index_internal_transaction_desc_order: index_internal_transaction_desc_order
-    })
-    |> Enum.sort_by(&{&1.block_number, &1.transaction_index, &1.index}, sort_func)
-    |> Enum.take(paging_options.page_size)
-    |> add_block_hashes()
-    |> join_associations(necessity_by_association)
-    |> Repo.preload(:block)
-    |> InternalTransaction.preload_error()
+      address_id
+      |> do_fetch_for_address(max_block_number, from_block, paging_options.page_size, sum_mode, sort_direction)
+      |> Enum.map(&serialize/1)
+      |> filter_by_address(address_hash, direction)
+      |> different_from_parent_transaction()
+      |> page_internal_transaction(paging_options, %{
+        index_internal_transaction_desc_order: index_internal_transaction_desc_order
+      })
+      |> Enum.sort_by(&{&1.block_number, &1.transaction_index, &1.index}, sort_func)
+      |> Enum.take(paging_options.page_size)
+      |> join_associations(necessity_by_association)
+      |> Repo.preload(:block)
+      |> InternalTransaction.preload_error()
+      |> InternalTransaction.preload_transaction()
+    end
   end
 
   defp do_fetch_for_address(address_id, to_block, from_block, limit, sum_mode, sort_direction, acc \\ [])
@@ -453,6 +475,21 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
       |> windows([q], w: [order_by: [{^order, :block_number}]])
       |> select([q], %{
         block_number: q.block_number,
+        value:
+          fragment(
+            """
+            CASE ?
+              WHEN 'froms' THEN ?
+              WHEN 'tos'   THEN ?
+              ELSE ? + ?
+            END
+            """,
+            ^sum_mode,
+            q.count_froms,
+            q.count_tos,
+            q.count_froms,
+            q.count_tos
+          ),
         running_sum:
           fragment(
             """
@@ -476,6 +513,7 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
       from(r in subquery(ranked_query),
         select: %{
           block_number: r.block_number,
+          value: r.value,
           running_sum: r.running_sum,
           cutoff_block:
             fragment(
@@ -489,8 +527,8 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
 
     condition =
       case order do
-        :desc -> dynamic([c], is_nil(c.cutoff_block) or c.block_number >= c.cutoff_block)
-        :asc -> dynamic([c], is_nil(c.cutoff_block) or c.block_number <= c.cutoff_block)
+        :desc -> dynamic([c], c.value > 0 and (is_nil(c.cutoff_block) or c.block_number >= c.cutoff_block))
+        :asc -> dynamic([c], c.value > 0 and (is_nil(c.cutoff_block) or c.block_number <= c.cutoff_block))
       end
 
     final_query =
@@ -523,53 +561,66 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
   defp fetch_block_internal_transactions([]), do: []
 
   defp fetch_block_internal_transactions(block_numbers) do
-    json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
-    variant = Keyword.fetch!(json_rpc_named_arguments, :variant)
-
-    if variant in InternalTransactionFetcher.block_traceable_variants() do
-      case EthereumJSONRPC.fetch_block_internal_transactions(block_numbers, json_rpc_named_arguments) do
-        {:ok, result} ->
-          result
-
-        error ->
-          Logger.error("Failed to fetch internal transactions for blocks #{inspect(block_numbers)}: #{inspect(error)}")
-          []
-      end
+    if internal_transactions_fetching_disabled?() do
+      []
     else
-      Enum.reduce(block_numbers, [], fn block_number, acc_list ->
-        block_number
-        |> Transaction.get_transactions_of_block_number()
-        |> InternalTransactionFetcher.filter_non_traceable_transactions()
-        |> Enum.map(
-          &%{
-            block_number: &1.block_number,
-            hash_data: to_string(&1.hash),
-            transaction_index: &1.index
-          }
-        )
-        |> case do
-          [] ->
-            {:ok, []}
+      json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
+      variant = Keyword.fetch!(json_rpc_named_arguments, :variant)
 
-          transactions ->
-            try do
-              EthereumJSONRPC.fetch_internal_transactions(transactions, json_rpc_named_arguments)
-            catch
-              :exit, error ->
-                {:error, error, __STACKTRACE__}
-            end
+      if variant in InternalTransactionFetcher.block_traceable_variants() do
+        case EthereumJSONRPC.fetch_block_internal_transactions(block_numbers, json_rpc_named_arguments) do
+          {:ok, result} ->
+            result
+
+          error ->
+            Logger.error(
+              "Failed to fetch internal transactions for blocks #{inspect(block_numbers)}: #{inspect(error)}"
+            )
+
+            []
         end
-        |> case do
-          {:ok, internal_transactions} ->
-            internal_transactions ++ acc_list
+      else
+        Enum.reduce(block_numbers, [], fn block_number, acc_list ->
+          block_number
+          |> Transaction.get_transactions_of_block_number()
+          |> Transaction.filter_non_traceable_transactions()
+          |> Enum.map(
+            &%{
+              block_number: &1.block_number,
+              hash_data: to_string(&1.hash),
+              transaction_index: &1.index
+            }
+          )
+          |> case do
+            [] ->
+              {:ok, []}
 
-          error_or_ignore ->
-            Logger.error("Failed to fetch internal transactions for block #{block_number}: #{inspect(error_or_ignore)}")
+            transactions ->
+              try do
+                EthereumJSONRPC.fetch_internal_transactions(transactions, json_rpc_named_arguments)
+              catch
+                :exit, error ->
+                  {:error, error, __STACKTRACE__}
+              end
+          end
+          |> case do
+            {:ok, internal_transactions} ->
+              internal_transactions ++ acc_list
 
-            acc_list
-        end
-      end)
+            error_or_ignore ->
+              Logger.error(
+                "Failed to fetch internal transactions for block #{block_number}: #{inspect(error_or_ignore)}"
+              )
+
+              acc_list
+          end
+        end)
+      end
     end
+  end
+
+  defp internal_transactions_fetching_disabled? do
+    Application.get_env(:indexer, __MODULE__, [])[:disabled?] == true
   end
 
   defp page_internal_transaction(_, _, _ \\ %{index_internal_transaction_desc_order: false})
@@ -698,25 +749,6 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
     end)
   end
 
-  defp add_block_hashes(internal_transactions, block_hash \\ nil) do
-    block_number_to_hash_map =
-      case block_hash do
-        nil ->
-          internal_transactions
-          |> Enum.map(& &1.transaction_hash)
-          |> Enum.uniq()
-          |> Transaction.by_hashes_query()
-          |> select([t], {t.block_number, t.block_hash})
-          |> Repo.all()
-          |> Map.new()
-
-        _ ->
-          %{}
-      end
-
-    Enum.map(internal_transactions, &%{&1 | block_hash: block_hash || block_number_to_hash_map[&1.block_number]})
-  end
-
   defp different_from_parent_transaction(internal_transactions) do
     Enum.reject(internal_transactions, &(&1.type == :call and &1.index == 0))
   end
@@ -725,11 +757,29 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
     %InternalTransaction{}
     |> InternalTransaction.changeset(internal_transaction_params)
     |> Ecto.Changeset.apply_changes()
+    |> Map.put(:transaction_hash, internal_transaction_params[:transaction_hash])
+    |> Map.put(:from_address_hash, convert_to_address_hash(internal_transaction_params[:from_address_hash]))
+    |> Map.put(:to_address_hash, convert_to_address_hash(internal_transaction_params[:to_address_hash]))
+    |> Map.put(
+      :created_contract_address_hash,
+      convert_to_address_hash(internal_transaction_params[:created_contract_address_hash])
+    )
+  end
+
+  defp convert_to_address_hash(nil), do: nil
+
+  defp convert_to_address_hash(hash_string) do
+    {:ok, hash} = Hash.Address.cast(hash_string)
+    hash
   end
 
   defp etherscan_serialize(internal_transaction) do
+    internal_transaction_fields =
+      Etherscan.internal_transaction_fields() ++
+        [:transaction_hash, :from_address_hash, :to_address_hash, :created_contract_address_hash, :error]
+
     internal_transaction
-    |> Map.take(Etherscan.internal_transaction_fields())
+    |> Map.take(internal_transaction_fields)
     |> Map.put(:block_timestamp, internal_transaction.block.timestamp)
   end
 end

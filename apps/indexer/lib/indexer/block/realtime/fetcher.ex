@@ -20,8 +20,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
       async_import_created_contract_codes: 2,
       async_import_filecoin_addresses_info: 2,
       async_import_internal_transactions: 2,
-      async_import_polygon_zkevm_bridge_l1_tokens: 1,
-      async_import_realtime_coin_balances: 1,
+      async_import_realtime_coin_balances: 2,
       async_import_replaced_transactions: 2,
       async_import_signed_authorizations_statuses: 2,
       async_import_token_balances: 2,
@@ -301,7 +300,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
 
       async_import_remaining_block_data(
         imported,
-        %{block_rewards: %{errors: block_reward_errors}}
+        Map.put(Map.take(options, @import_options), :block_rewards, %{errors: block_reward_errors})
       )
 
       ContractCreatorOnDemand.async_update_cache_of_contract_creator_on_demand(imported)
@@ -392,13 +391,6 @@ defmodule Indexer.Block.Realtime.Fetcher do
     Optimism.handle_realtime_l2_reorg(reorg_block_number, Indexer.Fetcher.Optimism.Interop.MessageFailed)
     Indexer.Fetcher.Optimism.TransactionBatch.handle_l2_reorg(reorg_block_number)
     Indexer.Fetcher.Optimism.Withdrawal.remove(reorg_block_number)
-  end
-
-  # Removes all rows from `polygon_zkevm_bridge` table
-  # previously written starting from the reorg block number
-  defp do_remove_assets_by_number(:polygon_zkevm, reorg_block) do
-    # credo:disable-for-next-line Credo.Check.Design.AliasUsage
-    Indexer.Fetcher.PolygonZkevm.BridgeL2.reorg_handle(reorg_block)
   end
 
   # Removes all rows from `shibarium_bridge` table
@@ -531,11 +523,11 @@ defmodule Indexer.Block.Realtime.Fetcher do
 
   defp async_import_remaining_block_data(
          imported,
-         %{block_rewards: %{errors: block_reward_errors}}
+         %{block_rewards: %{errors: block_reward_errors}} = options
        ) do
     realtime? = true
 
-    async_import_realtime_coin_balances(imported)
+    async_import_realtime_coin_balances(imported, options)
     async_import_block_rewards(block_reward_errors, realtime?)
     async_import_created_contract_codes(imported, realtime?)
     async_import_internal_transactions(imported, realtime?)
@@ -546,7 +538,6 @@ defmodule Indexer.Block.Realtime.Fetcher do
     async_import_uncles(imported, realtime?)
     async_import_replaced_transactions(imported, realtime?)
     async_import_blobs(imported, realtime?)
-    async_import_polygon_zkevm_bridge_l1_tokens(imported)
     async_import_celo_epoch_block_operations(imported, realtime?)
     async_import_celo_accounts(imported, realtime?)
     async_import_filecoin_addresses_info(imported, realtime?)

@@ -42,7 +42,7 @@ defmodule BlockScoutWeb.API.V2.SmartContractController do
 
   plug(OpenApiSpex.Plug.CastAndValidate, json_render_error_v2: true)
 
-  tags(["smart_contracts"])
+  tags(["smart-contracts"])
 
   operation :smart_contract,
     summary: "Retrieve detailed information about a verified smart contract",
@@ -271,14 +271,12 @@ defmodule BlockScoutWeb.API.V2.SmartContractController do
 
   @spec contract_creation_transaction_associations() :: [keyword()]
   defp contract_creation_transaction_associations do
-    include_internal_tx = Chain.include_contract_creation_internal_transaction_association?()
-
     case chain_type() do
       :filecoin ->
-        Address.contract_creation_transaction_with_from_address_associations(include_internal_tx)
+        [Address.contract_creation_transaction_with_from_address_association()]
 
       _ ->
-        Address.contract_creation_transaction_associations(include_internal_tx)
+        [Address.contract_creation_transaction_association()]
     end
   end
 
@@ -288,7 +286,8 @@ defmodule BlockScoutWeb.API.V2.SmartContractController do
       necessity_by_association: %{
         [smart_contract: :smart_contract_additional_sources] => :optional,
         contract_creation_transaction_associations() => :optional
-      }
+      },
+      preload_contract_creation_internal_transaction: true
     ]
     |> Keyword.merge(@api_true)
   end
@@ -299,7 +298,8 @@ defmodule BlockScoutWeb.API.V2.SmartContractController do
       necessity_by_association: %{
         [:token, :names, :proxy_implementations] => :optional,
         contract_creation_transaction_associations() => :optional
-      }
+      },
+      preload_contract_creation_internal_transaction: true
     ]
     |> Keyword.merge(@api_true)
   end

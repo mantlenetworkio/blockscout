@@ -25,6 +25,9 @@ defmodule Explorer.Factory do
   alias Explorer.Admin.Administrator
   alias Explorer.Chain.Beacon.{Blob, BlobTransaction, Deposit}
   alias Explorer.Chain.Block.{EmissionReward, Range, Reward}
+  alias Explorer.Chain.Scroll.Batch, as: ScrollBatch
+  alias Explorer.Chain.Scroll.BatchBundle, as: ScrollBatchBundle
+  alias Explorer.Chain.Scroll.Bridge, as: ScrollBridge
   alias Explorer.Chain.Stability.Validator, as: ValidatorStability
 
   alias Explorer.Chain.{
@@ -37,6 +40,7 @@ defmodule Explorer.Factory do
     Block,
     ContractMethod,
     Data,
+    FheOperation,
     Hash,
     InternalTransaction,
     InternalTransaction.DeleteQueue,
@@ -63,6 +67,7 @@ defmodule Explorer.Factory do
 
   alias Explorer.Chain.Optimism.Deposit, as: OptimismDeposit
 
+  alias Explorer.Chain.Celo.AggregatedElectionReward, as: CeloAggregatedElectionReward
   alias Explorer.Chain.Celo.ElectionReward, as: CeloElectionReward
   alias Explorer.Chain.Celo.Epoch, as: CeloEpoch
 
@@ -77,6 +82,7 @@ defmodule Explorer.Factory do
     AddressIdToAddressHash,
     EventNotification,
     InternalTransactionsAddressPlaceholder,
+    MassiveBlock,
     MissingBalanceOfToken,
     MissingBlockRange
   }
@@ -331,7 +337,7 @@ defmodule Explorer.Factory do
   def address_id_to_address_hash_factory do
     %AddressIdToAddressHash{
       address_id: sequence("address_id", & &1),
-      address_hash: address_hash()
+      address: build(:address)
     }
   end
 
@@ -776,18 +782,6 @@ defmodule Explorer.Factory do
     |> Repo.update!()
   end
 
-  def with_contract_creation(%InternalTransaction{} = internal_transaction, %Address{
-        contract_code: contract_code,
-        hash: contract_address_hash
-      }) do
-    internal_transaction
-    |> InternalTransaction.changeset(%{
-      contract_code: contract_code,
-      created_contract_address_hash: contract_address_hash
-    })
-    |> Repo.update!()
-  end
-
   def data(sequence_name) do
     unpadded =
       sequence_name
@@ -841,13 +835,16 @@ defmodule Explorer.Factory do
     }
   end
 
-  def internal_transaction_factory() do
+  def internal_transaction_factory(attrs) do
     gas = Enum.random(21_000..100_000)
     gas_used = Enum.random(0..gas)
 
+    all_attrs =
+      attrs
+      |> adjust_internal_transaction_addresses_attrs([:from_address, :to_address])
+      |> adjust_internal_transaction_error_attr()
+
     %InternalTransaction{
-      from_address: build(:address),
-      to_address: build(:address),
       call_type: :delegatecall,
       gas: gas,
       gas_used: gas_used,
@@ -861,18 +858,23 @@ defmodule Explorer.Factory do
       type: :call,
       value: sequence("internal_transaction_value", &Decimal.new(&1))
     }
+    |> merge_attributes(all_attrs)
+    |> evaluate_lazy_attributes()
   end
 
-  def internal_transaction_create_factory() do
+  def internal_transaction_create_factory(attrs) do
     gas = Enum.random(21_000..100_000)
     gas_used = Enum.random(0..gas)
 
     contract_code = Map.fetch!(contract_code_info(), :bytecode)
 
+    all_attrs =
+      attrs
+      |> adjust_internal_transaction_addresses_attrs([:from_address, :created_contract_address], contract_code)
+      |> adjust_internal_transaction_error_attr()
+
     %InternalTransaction{
       created_contract_code: contract_code,
-      created_contract_address: build(:address, contract_code: contract_code),
-      from_address: build(:address),
       gas: gas,
       gas_used: gas_used,
       # caller MUST supply `index`
@@ -884,9 +886,16 @@ defmodule Explorer.Factory do
       type: :create,
       value: sequence("internal_transaction_value", &Decimal.new(&1))
     }
+    |> merge_attributes(all_attrs)
+    |> evaluate_lazy_attributes()
   end
 
-  def internal_transaction_selfdestruct_factory() do
+  def internal_transaction_selfdestruct_factory(attrs) do
+    all_attrs =
+      attrs
+      |> adjust_internal_transaction_addresses_attrs([:from_address, :to_address])
+      |> adjust_internal_transaction_error_attr()
+
     %InternalTransaction{
       from_address: build(:address),
       trace_address: nil,
@@ -895,6 +904,8 @@ defmodule Explorer.Factory do
       type: :selfdestruct,
       value: sequence("internal_transaction_value", &Decimal.new(&1))
     }
+    |> merge_attributes(all_attrs)
+    |> evaluate_lazy_attributes()
   end
 
   def transaction_error_factory do
@@ -937,6 +948,12 @@ defmodule Explorer.Factory do
 
   def unique_token_factory do
     Map.replace(token_factory(), :name, sequence("Infinite Token"))
+  end
+
+  def massive_block_factory do
+    %MassiveBlock{
+      number: block_number()
+    }
   end
 
   def erc7984_token_factory do
@@ -1130,6 +1147,7 @@ defmodule Explorer.Factory do
   def transaction_factory do
     %Transaction{
       from_address: build(:address),
+      fhe_operations_count: 0,
       gas: Enum.random(21_000..100_000),
       gas_price: Enum.random(10..99) * 1_000_000_00,
       hash: transaction_hash(),
@@ -1367,6 +1385,59 @@ defmodule Explorer.Factory do
     }
   end
 
+  defp adjust_internal_transaction_addresses_attrs(attrs, addresses_fields, contract_code \\ nil) do
+    hash_fields = Enum.map(addresses_fields, &String.to_existing_atom("#{&1}_hash"))
+    {address_related_attrs, other_attrs} = Map.split(attrs, addresses_fields ++ hash_fields)
+
+    addresses_fields
+    |> Enum.reduce(address_related_attrs, fn address_field, acc ->
+      hash_field = String.to_existing_atom("#{address_field}_hash")
+
+      additional_fields =
+        case address_field do
+          :created_contract_address -> %{contract_code: contract_code}
+          _ -> %{}
+        end
+
+      address =
+        case Map.has_key?(acc, address_field) && Map.get(acc, address_field) do
+          nil ->
+            nil
+
+          false ->
+            address_params =
+              Map.merge(additional_fields, if(hash = Map.get(acc, hash_field), do: %{hash: hash}, else: %{}))
+
+            case Map.get(address_params, :hash) && Repo.get_by(Address, hash: address_params.hash) do
+              nil ->
+                built_address = build(:address, address_params)
+                insert(built_address)
+                built_address
+
+              _ ->
+                build(:address, address_params)
+            end
+
+          address ->
+            address
+        end
+
+      Map.merge(acc, %{
+        address_field => address,
+        hash_field => address && address.hash,
+        :"#{address_field}_mapping" => address && AddressIdToAddressHash.find_or_create(address.hash)
+      })
+    end)
+    |> Map.merge(other_attrs)
+  end
+
+  defp adjust_internal_transaction_error_attr(attrs) do
+    case Map.get(attrs, :error) do
+      nil -> attrs
+      error -> Map.put(attrs, :error_id, Map.get(attrs, :error_id) || TransactionError.find_or_create(error))
+    end
+  end
+
   defp block_hash_to_next_transaction_index(block_hash) do
     import Kernel, except: [+: 2]
 
@@ -1554,6 +1625,39 @@ defmodule Explorer.Factory do
     hash
   end
 
+  def scroll_bridge_factory do
+    %ScrollBridge{
+      type: :deposit,
+      index: sequence("scroll_bridge_index", & &1),
+      l1_transaction_hash: transaction_hash(),
+      l2_transaction_hash: transaction_hash(),
+      amount: Enum.random(1..100_000),
+      block_number: block_number(),
+      block_timestamp: DateTime.utc_now(),
+      message_hash: transaction_hash()
+    }
+  end
+
+  def scroll_batch_factory do
+    %ScrollBatch{
+      number: sequence("scroll_batch_index", & &1),
+      commit_transaction_hash: transaction_hash(),
+      commit_block_number: block_number(),
+      commit_timestamp: DateTime.utc_now(),
+      bundle_id: 0,
+      container: :in_calldata
+    }
+  end
+
+  def scroll_batch_bundle_factory do
+    %ScrollBatchBundle{
+      final_batch_number: 50,
+      finalize_transaction_hash: transaction_hash(),
+      finalize_block_number: block_number(),
+      finalize_timestamp: DateTime.utc_now()
+    }
+  end
+
   def random_bool, do: Enum.random([true, false])
 
   def celo_epoch_factory do
@@ -1567,10 +1671,19 @@ defmodule Explorer.Factory do
     }
   end
 
+  def celo_aggregated_election_reward_factory do
+    %CeloAggregatedElectionReward{
+      epoch_number: sequence("celo_aggregated_election_reward_epoch_number", & &1),
+      type: Enum.random(CeloElectionReward.types()),
+      sum: Enum.random(1..100_000),
+      count: Enum.random(0..100)
+    }
+  end
+
   def celo_election_reward_factory do
     %CeloElectionReward{
       amount: Enum.random(1..100_000),
-      type: Enum.random([:voter, :validator, :group, :delegated_payment]),
+      type: Enum.random(CeloElectionReward.types()),
       epoch_number: sequence("celo_election_reward_epoch_number", & &1),
       account_address_hash: insert(:address).hash,
       associated_account_address_hash: insert(:address).hash
@@ -1790,6 +1903,31 @@ defmodule Explorer.Factory do
       from_address: insert(:address),
       block: transaction.block,
       transaction: transaction
+    }
+  end
+
+  def fhe_operation_factory do
+    transaction = insert(:transaction) |> with_block()
+    block = transaction.block
+    caller = insert(:address)
+
+    %FheOperation{
+      transaction_hash: transaction.hash,
+      log_index: sequence("fhe_operation_log_index", & &1),
+      block_hash: block.hash,
+      block_number: block.number,
+      operation: sequence("fhe_operation", fn i -> "FheAdd#{i}" end),
+      operation_type: "arithmetic",
+      fhe_type: "Uint8",
+      is_scalar: false,
+      hcu_cost: sequence("fhe_operation_hcu_cost", fn i -> Kernel.+(100, i) end),
+      hcu_depth: sequence("fhe_operation_hcu_depth", fn i -> Kernel.+(1, rem(i, 5)) end),
+      caller: caller.hash,
+      result_handle: sequence("fhe_operation_result_handle", &<<&1::256>>),
+      input_handles: %{
+        "lhs" => "0x" <> Base.encode16(<<1::256>>, case: :lower),
+        "rhs" => "0x" <> Base.encode16(<<2::256>>, case: :lower)
+      }
     }
   end
 
