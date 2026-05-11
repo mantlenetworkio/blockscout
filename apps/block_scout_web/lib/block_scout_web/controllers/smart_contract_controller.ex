@@ -25,7 +25,7 @@ defmodule BlockScoutWeb.SmartContractController do
          true <- ajax?(conn),
          {:custom_abi, false} <- {:custom_abi, is_custom_abi},
          {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
-         {:ok, address} <- Chain.find_contract_address(address_hash, address_options) do
+         {:ok, address} <- Address.find_contract_address(address_hash, address_options) do
       implementation_address_hash_string = implementation_address_hash(contract_type, address)
 
       functions =
@@ -159,7 +159,9 @@ defmodule BlockScoutWeb.SmartContractController do
         :names => :optional,
         :smart_contract => :optional,
         :token => :optional,
-        Address.contract_creation_transaction_associations() => :optional
+        Address.contract_creation_transaction_associations(
+          Chain.include_contract_creation_internal_transaction_association?()
+        ) => :optional
       },
       ip: AccessHelper.conn_to_ip_string(conn)
     ]
@@ -169,7 +171,7 @@ defmodule BlockScoutWeb.SmartContractController do
 
     with true <- ajax?(conn),
          {:ok, address_hash} <- Chain.string_to_address_hash(params["id"]),
-         {:ok, address} <- Chain.find_contract_address(address_hash, address_options) do
+         {:ok, address} <- Address.find_contract_address(address_hash, address_options) do
       contract_type = if params["type"] == "proxy", do: :proxy, else: :regular
 
       args =

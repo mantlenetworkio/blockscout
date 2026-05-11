@@ -7,7 +7,7 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
   alias Explorer.Account.{Authentication, Identity}
   alias Explorer.{Helper, HttpClient}
   alias Explorer.ThirdPartyIntegrations.Auth0.Internal
-  alias Ueberauth.Auth
+  alias Explorer.ThirdPartyIntegrations.Dynamic
   alias Ueberauth.Strategy.Auth0.OAuth
 
   @behaviour Authentication
@@ -16,7 +16,8 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
 
   @spec enabled? :: boolean()
   def enabled? do
-    Application.get_env(:ueberauth, OAuth)[:domain] not in [nil, ""]
+    Application.get_env(:ueberauth, OAuth)[:domain] not in [nil, ""] and
+      !Application.get_env(:explorer, Dynamic)[:enabled]
   end
 
   @doc """
@@ -34,9 +35,9 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
     get_m2m_jwt_inner(Redix.command(:redix, ["GET", m2m_jwt_key()]))
   end
 
-  def get_m2m_jwt_inner({:ok, token}) when not is_nil(token), do: token
+  defp get_m2m_jwt_inner({:ok, token}) when not is_nil(token), do: token
 
-  def get_m2m_jwt_inner(_) do
+  defp get_m2m_jwt_inner(_) do
     config = Application.get_env(:ueberauth, OAuth)
 
     body = %{
@@ -56,7 +57,8 @@ defmodule Explorer.ThirdPartyIntegrations.Auth0 do
             nil
         end
 
-      _ ->
+      error ->
+        Logger.error("Error while fetching Auth0 M2M JWT: #{inspect(error)}")
         nil
     end
   end

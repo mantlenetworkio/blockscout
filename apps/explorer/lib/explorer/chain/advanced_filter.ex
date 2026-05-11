@@ -251,8 +251,6 @@ defmodule Explorer.Chain.AdvancedFilter do
   end
 
   defp to_advanced_filter(%InternalTransaction{} = internal_transaction) do
-    %{value: decimal_internal_transaction_value} = internal_transaction.value
-
     %__MODULE__{
       hash: internal_transaction.transaction.hash,
       created_from: :internal_transaction,
@@ -262,7 +260,7 @@ defmodule Explorer.Chain.AdvancedFilter do
       from_address_hash: internal_transaction.from_address_hash,
       to_address_hash: internal_transaction.to_address_hash,
       created_contract_address_hash: internal_transaction.created_contract_address_hash,
-      value: decimal_internal_transaction_value,
+      value: (internal_transaction.value && internal_transaction.value.value) || Decimal.new(0),
       fee:
         internal_transaction.transaction.gas_price && internal_transaction.gas_used &&
           Decimal.mult(internal_transaction.transaction.gas_price.value, internal_transaction.gas_used),
@@ -578,7 +576,7 @@ defmodule Explorer.Chain.AdvancedFilter do
 
     filtered_and_paginated_query =
       token_transfer_query
-      |> ExplorerHelper.maybe_hide_scam_addresses(:token_contract_address_hash, options)
+      |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
       |> limit_query(paging_options)
       |> query_function.(false)
       |> limit_query(paging_options)

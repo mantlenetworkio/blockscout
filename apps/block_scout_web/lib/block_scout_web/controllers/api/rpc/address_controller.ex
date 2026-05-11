@@ -157,21 +157,10 @@ defmodule BlockScoutWeb.API.RPC.AddressController do
   def txlistinternal(conn, params, transaction_param, :transaction) do
     with {:params, {:ok, options}} <- {:params, optional_params(params)},
          {:format, {:ok, transaction_hash}} <- to_transaction_hash(transaction_param),
-         {:ok, transaction} <- Chain.hash_to_transaction(transaction_hash) do
-      if PendingOperationsHelper.block_pending?(transaction.block_hash) do
-        render(conn, :pending_internal_transaction,
-          message: "Internal transactions for this transaction have not been processed yet",
-          data: []
-        )
-      else
-        case list_internal_transactions(transaction_hash, options) do
-          {:error, :not_found} ->
-            render(conn, :error, error: @no_internal_transactions_message, data: [])
-
-          {:ok, internal_transactions} ->
-            render(conn, :txlistinternal, %{internal_transactions: internal_transactions})
-        end
-      end
+         {:ok, transaction} <- Chain.hash_to_transaction(transaction_hash),
+         {:pending, false} <- {:pending, PendingOperationsHelper.block_pending?(transaction.block_hash)},
+         {:ok, internal_transactions} <- list_internal_transactions(transaction_hash, options) do
+      render(conn, :txlistinternal, %{internal_transactions: internal_transactions})
     else
       {:format, :error} ->
         render(conn, :error, error: "Invalid txhash format")
@@ -181,6 +170,12 @@ defmodule BlockScoutWeb.API.RPC.AddressController do
 
       {:params, {:error, :results_window_too_large}} ->
         render(conn, :error, error: @results_window_too_large_message, data: nil)
+
+      {:pending, true} ->
+        render(conn, :pending_internal_transaction,
+          message: "Internal transactions for this transaction have not been processed yet",
+          data: []
+        )
     end
   end
 
@@ -189,17 +184,10 @@ defmodule BlockScoutWeb.API.RPC.AddressController do
   def txlistinternal(conn, params, address_param, :address) do
     with {:params, {:ok, options}} <- {:params, optional_params(params)},
          {:format, {:ok, address_hash}} <- to_address_hash(address_param),
-         {:address, :ok} <- {:address, Address.check_address_exists(address_hash, @api_true)} do
-      start_block_number = parse_block_param(params, "startblock")
-      end_block_number = parse_block_param(params, "endblock")
-
-      case list_internal_transactions(address_hash, options) do
-        {:ok, internal_transactions} ->
-          render_internal_transactions(conn, internal_transactions, start_block_number, end_block_number)
-
-        {_, :not_found} ->
-          render_internal_transactions(conn, [], start_block_number, end_block_number)
-      end
+         {:address, :ok} <- {:address, Address.check_address_exists(address_hash, @api_true)},
+         {{:ok, internal_transactions}, _, _} <-
+           {list_internal_transactions(address_hash, options), options[:startblock], options[:endblock]} do
+      render_internal_transactions(conn, internal_transactions, options[:startblock], options[:endblock])
     else
       {:format, :error} ->
         render(conn, :error, error: @invalid_address_message)
@@ -209,25 +197,23 @@ defmodule BlockScoutWeb.API.RPC.AddressController do
 
       {:params, {:error, :results_window_too_large}} ->
         render(conn, :error, error: @results_window_too_large_message, data: nil)
+
+      {{:error, :not_found}, start_block_number, end_block_number} ->
+        render_internal_transactions(conn, [], start_block_number, end_block_number)
     end
   end
 
   def txlistinternal(conn, params, :no_param) do
-    start_block_number = parse_block_param(params, "startblock")
-    end_block_number = parse_block_param(params, "endblock")
-
-    case optional_params(params) do
-      {:ok, options} ->
-        case list_internal_transactions(:all, options) do
-          {:ok, internal_transactions} ->
-            render_internal_transactions(conn, internal_transactions, start_block_number, end_block_number)
-
-          {_, :not_found} ->
-            render_internal_transactions(conn, [], start_block_number, end_block_number)
-        end
-
+    with {:ok, options} <- optional_params(params),
+         {{:ok, internal_transactions}, _, _} <-
+           {list_internal_transactions(:all, options), options[:startblock], options[:endblock]} do
+      render_internal_transactions(conn, internal_transactions, options[:startblock], options[:endblock])
+    else
       {:error, :results_window_too_large} ->
         render(conn, :error, error: @results_window_too_large_message, data: nil)
+
+      {{:error, :not_found}, start_block_number, end_block_number} ->
+        render_internal_transactions(conn, [], start_block_number, end_block_number)
     end
   end
 
@@ -253,16 +239,6 @@ defmodule BlockScoutWeb.API.RPC.AddressController do
     end
   end
 
-  defp parse_block_param(params, block_key) do
-    params
-    |> Map.get(block_key, "")
-    |> Integer.parse()
-    |> case do
-      {num, ""} -> num
-      _ -> nil
-    end
-  end
-
   def tokentx(conn, params) do
     do_tokentx(conn, params, :erc20)
   end
@@ -277,6 +253,10 @@ defmodule BlockScoutWeb.API.RPC.AddressController do
 
   def token404tx(conn, params) do
     do_tokentx(conn, params, :erc404)
+  end
+
+  def token7984tx(conn, params) do
+    do_tokentx(conn, params, :erc7984)
   end
 
   defp do_tokentx(conn, params, transfers_type) do

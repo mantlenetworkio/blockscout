@@ -12,8 +12,8 @@ defmodule Indexer.PendingTransactionsSanitizer do
   import EthereumJSONRPC.Receipt, only: [to_elixir: 1]
 
   alias Ecto.Changeset
-  alias Explorer.{Chain, Repo}
   alias Explorer.Chain.{Block, Transaction}
+  alias Explorer.Repo
 
   defstruct interval: nil,
             json_rpc_named_arguments: []
@@ -61,9 +61,9 @@ defmodule Indexer.PendingTransactionsSanitizer do
     {:noreply, state}
   end
 
-  defp sanitize_pending_transactions(json_rpc_named_arguments) do
+  def sanitize_pending_transactions(json_rpc_named_arguments) do
     receipts_batch_size = Application.get_env(:indexer, :receipts_batch_size)
-    pending_transactions_list_from_db = Chain.pending_transactions_list()
+    pending_transactions_list_from_db = Transaction.pending_transactions_list()
     id_to_params = id_to_params(pending_transactions_list_from_db)
 
     with {:ok, responses} <-
@@ -147,7 +147,7 @@ defmodule Indexer.PendingTransactionsSanitizer do
   end
 
   defp fetch_block_and_invalidate(block_hash, pending_transaction, transaction) do
-    case Chain.fetch_block_by_hash(block_hash) do
+    case Block.fetch_block_by_hash(block_hash) do
       %{number: number, consensus: consensus} = block ->
         Logger.debug(
           "Corresponding number of the block with hash #{block_hash} to invalidate is #{number} and consensus #{consensus}",
@@ -165,24 +165,33 @@ defmodule Indexer.PendingTransactionsSanitizer do
   end
 
   defp invalidate_block(block, pending_transaction, transaction) do
+    transaction_info = to_elixir(transaction)
+
+    pending_transaction
+    |> Transaction.changeset(%{
+      gas_price: transaction_info["effectiveGasPrice"] || pending_transaction.gas_price,
+      created_contract_address_hash: transaction_info["contractAddress"]
+    })
+    |> Changeset.put_change(:cumulative_gas_used, transaction_info["cumulativeGasUsed"])
+    |> Changeset.put_change(:gas_used, transaction_info["gasUsed"])
+    |> Changeset.put_change(:index, transaction_info["transactionIndex"])
+    |> Changeset.put_change(:status, transaction_info["status"])
+    |> Changeset.put_change(:block_number, block.number)
+    |> Changeset.put_change(:block_hash, block.hash)
+    |> Changeset.put_change(:block_timestamp, block.timestamp)
+    |> Changeset.put_change(:block_consensus, block.consensus)
+    |> Repo.update()
+    |> case do
+      {:ok, _result} ->
+        :ok
+
+      {:error, error} ->
+        Logger.error("Failed to update pending transaction with hash #{pending_transaction.hash}: #{inspect(error)}")
+    end
+
     if block.consensus do
       Block.set_refetch_needed(block.number)
     else
-      transaction_info = to_elixir(transaction)
-
-      changeset =
-        pending_transaction
-        |> Transaction.changeset()
-        |> Changeset.put_change(:cumulative_gas_used, transaction_info["cumulativeGasUsed"])
-        |> Changeset.put_change(:gas_used, transaction_info["gasUsed"])
-        |> Changeset.put_change(:index, transaction_info["transactionIndex"])
-        |> Changeset.put_change(:block_number, block.number)
-        |> Changeset.put_change(:block_hash, block.hash)
-        |> Changeset.put_change(:block_timestamp, block.timestamp)
-        |> Changeset.put_change(:block_consensus, false)
-
-      Repo.update(changeset)
-
       Logger.debug(
         "Pending transaction with hash #{pending_transaction.hash} assigned to block ##{block.number} with hash #{block.hash}"
       )

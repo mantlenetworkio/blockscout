@@ -10,6 +10,7 @@ defmodule Explorer.Etherscan do
   alias Explorer.{Chain, Repo}
   alias Explorer.Chain.{Address, Block, DenormalizationHelper, Hash, InternalTransaction, TokenTransfer, Transaction}
   alias Explorer.Chain.Address.{CurrentTokenBalance, TokenBalance}
+  alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.Transaction.History.TransactionStats
   alias Explorer.Etherscan.Logs
 
@@ -92,9 +93,11 @@ defmodule Explorer.Etherscan do
     input
     type
     call_type
+    call_type_enum
     gas
     gas_used
     error
+    error_id
   )a
 
   @doc """
@@ -154,9 +157,18 @@ defmodule Explorer.Etherscan do
 
     query
     |> InternalTransaction.where_is_different_from_parent_transaction()
-    |> InternalTransaction.where_nonpending_block()
+    |> InternalTransaction.where_nonpending_operation()
     |> InternalTransaction.include_zero_value(options.include_zero_value)
+    |> order_by(
+      [q],
+      [
+        {^options.order_by_direction, q.block_number},
+        {^options.order_by_direction, q.transaction_index},
+        {^options.order_by_direction, q.index}
+      ]
+    )
     |> Repo.replica().all()
+    |> InternalTransaction.preload_error()
   end
 
   def list_internal_transactions(
@@ -167,6 +179,16 @@ defmodule Explorer.Etherscan do
 
     options
     |> options_to_directions()
+    |> then(fn directions ->
+      if BackgroundMigrations.get_empty_internal_transactions_data_finished() and
+           Enum.member?(directions, :to_address_hash) do
+        directions
+        |> Kernel.--([:created_contract_address_hash, :to_address_hash])
+        |> Enum.concat([:to])
+      else
+        directions
+      end
+    end)
     |> Enum.map(fn direction ->
       options
       |> consensus_internal_transactions_with_transactions_and_blocks_query()
@@ -175,7 +197,7 @@ defmodule Explorer.Etherscan do
       |> InternalTransaction.include_zero_value(options.include_zero_value)
       |> where_start_block_match_internal_transaction(options)
       |> where_end_block_match_internal_transaction(options)
-      |> InternalTransaction.where_nonpending_block()
+      |> InternalTransaction.where_nonpending_operation()
       |> Chain.wrapped_union_subquery()
     end)
     |> Enum.reduce(fn query, acc ->
@@ -193,6 +215,7 @@ defmodule Explorer.Etherscan do
     |> offset(^options_to_offset(options))
     |> limit(^options.page_size)
     |> Repo.replica().all()
+    |> InternalTransaction.preload_error()
   end
 
   def list_internal_transactions(
@@ -210,6 +233,7 @@ defmodule Explorer.Etherscan do
     |> where_start_block_match_internal_transaction(options)
     |> where_end_block_match_internal_transaction(options)
     |> Repo.replica().all()
+    |> InternalTransaction.preload_error()
   end
 
   defp consensus_internal_transactions_with_transactions_and_blocks_query(options) do
@@ -325,6 +349,9 @@ defmodule Explorer.Etherscan do
 
       :zrc2 ->
         list_zrc2_token_transfers(address_hash, contract_address_hash, options)
+
+      :erc7984 ->
+        list_erc7984_token_transfers(address_hash, contract_address_hash, options)
     end
   end
 
@@ -461,7 +488,7 @@ defmodule Explorer.Etherscan do
     |> Enum.map(fn direction ->
       query
       |> where_address_match(address_hash, direction)
-      |> Chain.pending_transactions_query()
+      |> Transaction.pending_transactions_query()
       |> order_by([transaction], desc: transaction.inserted_at, desc: transaction.hash)
       |> Chain.wrapped_union_subquery()
     end)
@@ -606,6 +633,12 @@ defmodule Explorer.Etherscan do
 
   defp list_erc404_token_transfers(address_hash, contract_address_hash, options) do
     "ERC-404"
+    |> base_token_transfers_query(address_hash, contract_address_hash, options)
+    |> Repo.replica().all()
+  end
+
+  defp list_erc7984_token_transfers(address_hash, contract_address_hash, options) do
+    "ERC-7984"
     |> base_token_transfers_query(address_hash, contract_address_hash, options)
     |> Repo.replica().all()
   end

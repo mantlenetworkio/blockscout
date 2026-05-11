@@ -3,7 +3,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
   use Utils.CompileTimeEnvHelper, bridged_tokens_enabled: [:explorer, [Explorer.Chain.BridgedToken, :enabled]]
   use OpenApiSpex.ControllerSpecs
 
-  alias BlockScoutWeb.AccessHelper
+  alias BlockScoutWeb.{AccessHelper, AuthenticationHelper}
   alias BlockScoutWeb.API.V2.{AddressView, TransactionView}
   alias BlockScoutWeb.Schemas.API.V2.ErrorResponses.NotFoundResponse
   alias Explorer.{Chain, PagingOptions}
@@ -118,7 +118,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, true} <- {:not_found, Token.by_contract_address_hash_exists?(address_hash, @api_true)} do
-      {transfers_count, holders_count} = Chain.fetch_token_counters(address_hash, 5_000)
+      {transfers_count, holders_count} = Token.fetch_token_counters(address_hash, 5_000)
 
       json(conn, %{transfers_count: to_string(transfers_count), token_holders_count: to_string(holders_count)})
     end
@@ -746,10 +746,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     address_hash_string = params[:address_hash_param]
     ip = AccessHelper.conn_to_ip_string(conn)
 
-    with {:sensitive_endpoints_api_key, api_key} when not is_nil(api_key) <-
-           {:sensitive_endpoints_api_key, Application.get_env(:block_scout_web, :sensitive_endpoints_api_key)},
-         {:api_key, ^api_key} <-
-           {:api_key, get_api_key(conn)},
+    with :ok <- AuthenticationHelper.validate_sensitive_endpoints_api_key(get_api_key(conn)),
          {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, {:ok, token}} <- {:not_found, Chain.token_from_address_hash(address_hash, @api_true)},

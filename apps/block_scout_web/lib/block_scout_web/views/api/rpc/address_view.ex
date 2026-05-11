@@ -74,8 +74,9 @@ defmodule BlockScoutWeb.API.RPC.AddressView do
     EthRPCView.render("error.json", %{error: message, id: 0})
   end
 
-  def render("pending_internal_transaction.json", assigns) do
-    RPCView.render("pending_internal_transaction.json", assigns)
+  def render("pending_internal_transaction.json", %{data: data} = assigns) do
+    prepared_internal_transactions = Enum.map(data, &prepare_internal_transaction/1)
+    RPCView.render("pending_internal_transaction.json", Map.put(assigns, :data, prepared_internal_transactions))
   end
 
   def render("error.json", assigns) do
@@ -138,24 +139,22 @@ defmodule BlockScoutWeb.API.RPC.AddressView do
     }
   end
 
-  @doc """
-  Prepares an internal transaction for API response.
-  """
+  # Prepares an internal transaction for API response.
   @spec prepare_internal_transaction(InternalTransaction.t()) :: map()
-  def prepare_internal_transaction(internal_transaction) do
+  defp prepare_internal_transaction(internal_transaction) do
     %{
       "blockNumber" => "#{internal_transaction.block_number}",
       "timeStamp" => "#{DateTime.to_unix(internal_transaction.block_timestamp)}",
       "from" => "#{internal_transaction.from_address_hash}",
       "to" => "#{internal_transaction.to_address_hash}",
-      "value" => "#{internal_transaction.value.value}",
+      "value" => "#{(internal_transaction.value && internal_transaction.value.value) || 0}",
       "contractAddress" => "#{internal_transaction.created_contract_address_hash}",
       "transactionHash" => to_string(internal_transaction.transaction_hash),
       "index" => to_string(internal_transaction.index),
       "input" => "#{internal_transaction.input}",
       "type" => "#{internal_transaction.type}",
-      "callType" => "#{internal_transaction.call_type}",
-      "gas" => "#{internal_transaction.gas}",
+      "callType" => "#{InternalTransaction.call_type(internal_transaction)}",
+      "gas" => to_string(internal_transaction.gas || 0),
       "gasUsed" => "#{internal_transaction.gas_used}",
       "isError" => if(internal_transaction.error, do: "1", else: "0"),
       "errCode" => "#{internal_transaction.error}"
@@ -235,6 +234,12 @@ defmodule BlockScoutWeb.API.RPC.AddressView do
     token_transfer
     |> prepare_common_token_transfer(max_block_number, decoded_input)
     |> Map.put_new(:value, to_string(token_transfer.amount))
+  end
+
+  defp prepare_token_transfer(%{token_type: "ERC-7984"} = token_transfer, max_block_number, decoded_input) do
+    token_transfer
+    |> prepare_common_token_transfer(max_block_number, decoded_input)
+    |> Map.put_new(:value, nil)
   end
 
   defp prepare_token_transfer(token_transfer, max_block_number, decoded_input) do

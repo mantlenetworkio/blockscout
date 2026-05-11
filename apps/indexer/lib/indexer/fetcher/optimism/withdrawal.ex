@@ -14,7 +14,8 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
   import Explorer.Helper, only: [decode_data: 2, parse_integer: 1]
 
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.Log
+  alias Explorer.Chain.Cache.Counters.LastFetchedCounter
+  alias Explorer.Chain.{Data, Hash, Log}
   alias Explorer.Chain.Optimism.Withdrawal, as: OptimismWithdrawal
   alias Indexer.Fetcher.Optimism
   alias Indexer.Helper
@@ -42,7 +43,24 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
     {:ok, %{}, {:continue, args[:json_rpc_named_arguments]}}
   end
 
+  # Initialization function which is used instead of `init` to avoid Supervisor's stop in case of any critical issues
+  # during initialization. It checks the values of env variables, gets last L2 block number to start the scanning from,
+  # and calculates an average block check interval (for realtime part of the logic).
+  #
+  # When the initialization succeeds, the `:continue` message is sent to GenServer to start the catchup loop
+  # retrieving and saving the withdrawal events.
+  #
+  # ## Parameters
+  # - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection to L2 RPC node.
+  # - `state`: Initial state of the fetcher (empty map when starting).
+  #
+  # ## Returns
+  # - `{:noreply, state}` when the initialization is successful and the fetching can start. The `state` contains
+  #                       necessary parameters needed for the fetching.
+  # - `{:stop, :normal, %{}}` in case of error.
   @impl GenServer
+  @spec handle_continue(EthereumJSONRPC.json_rpc_named_arguments(), map()) ::
+          {:noreply, map()} | {:stop, :normal, map()}
   def handle_continue(json_rpc_named_arguments, state) do
     Logger.metadata(fetcher: @fetcher_name)
 
@@ -108,6 +126,15 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
     end
   end
 
+  # Performs the catchup handling loop for the specified block range. The block range is split into chunks.
+  # Max size of a chunk is defined by INDEXER_OPTIMISM_L2_ETH_GET_LOGS_RANGE_SIZE env variable.
+  #
+  # ## Parameters
+  # - `:continue`: The GenServer message.
+  # - `state`: The current state of the fetcher containing block range, max chunk size, etc.
+  #
+  # ## Returns
+  # - `{:stop, :normal, state}` tuple.
   @impl GenServer
   def handle_info(
         :continue,
@@ -142,7 +169,14 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
     if not safe_block_is_latest do
       # find and fill all events between "safe" and "latest" block (excluding "safe")
       {:ok, latest_block} = Helper.get_block_number_by_tag("latest", json_rpc_named_arguments)
-      fill_block_range(safe_block + 1, latest_block, message_passer, json_rpc_named_arguments, eth_get_logs_range_size)
+
+      fill_block_range(
+        safe_block + 1,
+        latest_block,
+        message_passer,
+        json_rpc_named_arguments,
+        eth_get_logs_range_size
+      )
     end
 
     {:stop, :normal, state}
@@ -154,10 +188,44 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
     {:noreply, state}
   end
 
+  @doc """
+  Removes all withdrawals created starting from the given block.
+
+  ## Parameters
+  - `starting_block`: The starting block number.
+
+  ## Returns
+  - Nothing.
+  """
+  @spec remove(non_neg_integer()) :: any()
   def remove(starting_block) do
     Repo.delete_all(from(w in OptimismWithdrawal, where: w.l2_block_number >= ^starting_block))
+    LastFetchedCounter.delete(@counter_type)
   end
 
+  @doc """
+  Prepares a Withdrawal map to write into database.
+
+  ## Parameters
+  - `second_topic`: The second topic of the MessagePassed event containing the withdrawal message nonce.
+  - `data`: The data of the MessagePassed event. The data encodes the withdrawal value, gas limit, data, and hash.
+  - `l2_transaction_hash`: The hash of the transaction containing the MessagePassed event.
+  - `l2_block_number`: The number of the block containing the MessagePassed event.
+
+  ## Returns
+  - The Withdrawal map ready to be imported to the database.
+  """
+  @spec event_to_withdrawal(
+          Hash.t() | String.t(),
+          Data.t() | String.t(),
+          Hash.t() | String.t(),
+          non_neg_integer() | String.t()
+        ) :: %{
+          :msg_nonce => Decimal.t(),
+          :hash => String.t(),
+          :l2_transaction_hash => Hash.t() | String.t(),
+          :l2_block_number => non_neg_integer()
+        }
   def event_to_withdrawal(second_topic, data, l2_transaction_hash, l2_block_number) do
     hash = parse_message_passed_data(data)
 
@@ -263,7 +331,7 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
             [message_passed_event],
             json_rpc_named_arguments,
             0,
-            3
+            Helper.infinite_retries_number()
           )
 
         Enum.map(result, fn event ->

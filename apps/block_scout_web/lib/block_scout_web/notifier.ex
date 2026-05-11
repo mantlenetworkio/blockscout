@@ -224,7 +224,7 @@ defmodule BlockScoutWeb.Notifier do
   def handle_event({:chain_event, :internal_transactions, :realtime, internal_transactions}) do
     internal_transactions
     |> Stream.map(
-      &(InternalTransaction.where_nonpending_block()
+      &(InternalTransaction.where_nonpending_operation()
         |> Repo.get_by(transaction_hash: &1.transaction_hash, index: &1.index)
         |> Repo.preload([:from_address, :to_address, :block]))
     )
@@ -302,7 +302,7 @@ defmodule BlockScoutWeb.Notifier do
     Endpoint.broadcast(
       "token_instances:#{token_contract_address_hash_string}",
       "fetched_token_instance_metadata",
-      %{token_id: token_id, fetched_metadata: fetched_token_instance_metadata}
+      %{token_id: to_string(token_id), fetched_metadata: fetched_token_instance_metadata}
     )
   end
 
@@ -313,7 +313,7 @@ defmodule BlockScoutWeb.Notifier do
     Endpoint.broadcast(
       "token_instances:#{token_contract_address_hash_string}",
       "not_fetched_token_instance_metadata",
-      %{token_id: token_id, reason: reason}
+      %{token_id: to_string(token_id), reason: reason}
     )
   end
 
@@ -507,7 +507,7 @@ defmodule BlockScoutWeb.Notifier do
   defp broadcast_address_coin_balance(%{address_hash: address_hash, block_number: block_number}) do
     coin_balance = CoinBalance.get_coin_balance(address_hash, block_number, @api_true)
 
-    if coin_balance.delta && !Decimal.eq?(coin_balance.delta, Decimal.new(0)) do
+    if coin_balance && coin_balance.delta && !Decimal.eq?(coin_balance.delta, Decimal.new(0)) do
       # TODO: delete duplicated event when old UI becomes deprecated
       Endpoint.broadcast("addresses_old:#{address_hash}", "coin_balance", %{
         block_number: block_number,
@@ -515,7 +515,7 @@ defmodule BlockScoutWeb.Notifier do
       })
     end
 
-    if coin_balance.value && coin_balance.delta && !Decimal.eq?(coin_balance.delta, Decimal.new(0)) do
+    if coin_balance && coin_balance.value && coin_balance.delta && !Decimal.eq?(coin_balance.delta, Decimal.new(0)) do
       rendered_coin_balance = AddressView.render("coin_balance.json", %{coin_balance: coin_balance})
 
       Endpoint.broadcast("addresses:#{address_hash}", "coin_balance", %{

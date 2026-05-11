@@ -15,7 +15,8 @@ defmodule Indexer.Supervisor do
     BridgedTokens.SetAmbBridgedMetadataForTokens,
     BridgedTokens.SetOmniBridgedMetadataForTokens,
     PendingOpsCleaner,
-    PendingTransactionsSanitizer
+    PendingTransactionsSanitizer,
+    TokenTransferBlockConsensusSanitizer
   }
 
   alias Indexer.Block.Catchup, as: BlockCatchup
@@ -113,6 +114,7 @@ defmodule Indexer.Supervisor do
       )
       |> Enum.into(%{})
       |> Map.put(:memory_monitor, memory_monitor)
+      |> Map.put(:task_supervisor, nil)
       |> Map.put_new(:realtime_overrides, %{})
 
     %{
@@ -377,6 +379,9 @@ defmodule Indexer.Supervisor do
 
       :blackfort ->
         [{ValidatorBlackfort, []} | fetchers]
+
+      :rsk ->
+        [TokenTransferBlockConsensusSanitizer | fetchers]
 
       _ ->
         fetchers

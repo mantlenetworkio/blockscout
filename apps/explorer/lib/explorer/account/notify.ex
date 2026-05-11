@@ -5,7 +5,7 @@ defmodule Explorer.Account.Notify do
 
   alias Explorer.Account
   alias Explorer.Account.Notifier.Notify
-  alias Explorer.ThirdPartyIntegrations.{Auth0, Keycloak}
+  alias Explorer.ThirdPartyIntegrations.{Auth0, Dynamic, Keycloak}
 
   require Logger
 
@@ -30,7 +30,8 @@ defmodule Explorer.Account.Notify do
   end
 
   defp check_authentication_provider do
-    Auth0.enabled?() || Keycloak.enabled?() || raise "No authentication provider configured"
+    Auth0.enabled?() || Keycloak.enabled?() || Dynamic.enabled?() ||
+      raise "No authentication provider configured"
   end
 
   defp check_sendgrid do
