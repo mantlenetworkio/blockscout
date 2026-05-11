@@ -63,6 +63,15 @@ defmodule Explorer.Chain.Address.MetadataPreloader do
   end
 
   @doc """
+  Preloads ENS name to Block.t()
+  """
+  @spec preload_ens_to_block(Block.t()) :: Block.t()
+  def preload_ens_to_block(block) do
+    [block_with_ens] = preload_ens_to_list([block])
+    block_with_ens
+  end
+
+  @doc """
   Preloads ENS names to list of supported entities
   """
   @spec preload_ens_to_list([supported_types]) :: [supported_types]

@@ -408,7 +408,7 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
     if start_block <= end_block do
       fill_block_range(start_block, end_block, message_passer, json_rpc_named_arguments, eth_get_logs_range_size, true)
       fill_msg_nonce_gaps(start_block, message_passer, json_rpc_named_arguments, eth_get_logs_range_size, false)
-      {last_l2_block_number, _, _} = get_last_l2_item()
+      {last_l2_block_number, _, _} = get_last_l2_item(json_rpc_named_arguments)
 
       fill_block_range(
         max(start_block, last_l2_block_number),

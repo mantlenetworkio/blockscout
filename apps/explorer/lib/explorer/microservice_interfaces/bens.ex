@@ -6,7 +6,7 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   alias Explorer.{Chain, HttpClient}
   alias Explorer.Chain.Address.MetadataPreloader
 
-  alias Explorer.Chain.{Address, Transaction}
+  alias Explorer.Chain.{Address, Block, Transaction}
 
   alias Explorer.Utility.Microservice
 
