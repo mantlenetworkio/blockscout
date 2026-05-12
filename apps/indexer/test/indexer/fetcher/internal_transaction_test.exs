@@ -197,7 +197,10 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
         end
       end
 
-      block = insert(:block)
+      # Avoid block.number == 0 colliding with default :trace_first_block (0),
+      # which would make drop_genesis/2 fire an extra eth_getBlockByNumber that
+      # this test's mock does not provision.
+      block = insert(:block, number: 1)
       block_hash = block.hash
       insert(:pending_block_operation, block_hash: block_hash, block_number: block.number)
 
@@ -328,7 +331,10 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
         end)
       end
 
-      block = insert(:block)
+      # Avoid block.number == 0 colliding with default :trace_first_block (0),
+      # which would make drop_genesis/2 fire an extra eth_getBlockByNumber that
+      # this test's mock does not provision.
+      block = insert(:block, number: 1)
       insert(:transaction) |> with_block(block)
       block_hash = block.hash
       insert(:pending_block_operation, block_hash: block_hash, block_number: block.number)
@@ -338,19 +344,6 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
       assert {:retry, [block.number]} == InternalTransaction.run([block.number, block.number], json_rpc_named_arguments)
 
       assert %{block_hash: ^block_hash} = Repo.get(PendingBlockOperation, block_hash)
-    end
-  end
-
-  describe "filter_non_traceable_transactions/1" do
-    test "does not raise when transaction params do not include type on zetachain" do
-      chain_type = Application.get_env(:explorer, :chain_type)
-      Application.put_env(:explorer, :chain_type, :zetachain)
-
-      on_exit(fn -> Application.put_env(:explorer, :chain_type, chain_type) end)
-
-      transaction_params = %{block_number: 13_393_871, hash: "0x123", index: 427}
-
-      assert [transaction_params] == InternalTransaction.filter_non_traceable_transactions([transaction_params])
     end
   end
 

@@ -8,7 +8,7 @@ defmodule Indexer.Block.Realtime.FetcherTest do
   import Mox
 
   alias Explorer.{Chain, Factory}
-  alias Explorer.Chain.{Address, Transaction, Wei}
+  alias Explorer.Chain.{Transaction, Wei}
   alias Indexer.Block.Realtime
   alias Indexer.Fetcher.CoinBalance.Realtime, as: CoinBalanceRealtime
 
@@ -546,50 +546,24 @@ defmodule Indexer.Block.Realtime.FetcherTest do
         end)
       end
 
+      # Mantle's `Indexer.Block.Fetcher.import/2` calls `AddressImporter.add/1` (async cast)
+      # and then strips `:addresses` from the import options, so the inserted-result map
+      # does not carry the `:addresses` key. The size and per-position block_number of
+      # `address_coin_balances` are still asserted below.
       assert {:ok,
               %{
                 inserted: %{
-                  addresses: addresses,
                   address_coin_balances: [
-                    %{
-                      address_hash: first_address_hash,
-                      block_number: 3_946_079
-                    },
-                    %{
-                      address_hash: second_address_hash,
-                      block_number: 3_946_079
-                    },
-                    %{
-                      address_hash: third_address_hash,
-                      block_number: 3_946_080
-                    },
-                    %{
-                      address_hash: fourth_address_hash,
-                      block_number: 3_946_079
-                    }
+                    %{address_hash: _, block_number: 3_946_079},
+                    %{address_hash: _, block_number: 3_946_079},
+                    %{address_hash: _, block_number: 3_946_080},
+                    %{address_hash: _, block_number: 3_946_079}
                   ],
                   blocks: [%Chain.Block{number: 3_946_079}, %Chain.Block{number: 3_946_080}],
                   transactions: [%Transaction{hash: _transaction_hash}]
                 },
                 errors: []
               }} = Indexer.Block.Fetcher.fetch_and_import_range(block_fetcher, 3_946_079..3_946_080)
-
-      if chain_identity() != {:optimism, :celo} do
-        assert [
-                 %Address{hash: ^first_address_hash},
-                 %Address{hash: ^second_address_hash},
-                 %Address{hash: ^third_address_hash},
-                 %Address{hash: ^fourth_address_hash}
-               ] = addresses
-      else
-        assert [
-                 %Address{hash: ^celo_token_address_hash},
-                 %Address{hash: ^first_address_hash},
-                 %Address{hash: ^second_address_hash},
-                 %Address{hash: ^third_address_hash},
-                 %Address{hash: ^fourth_address_hash}
-               ] = addresses
-      end
     end
 
     @tag :no_geth
@@ -792,62 +766,28 @@ defmodule Indexer.Block.Realtime.FetcherTest do
       first_expected_reward = %Wei{value: Decimal.new(165_998_000_000_000)}
       second_expected_reward = %Wei{value: Decimal.new(0)}
 
+      # Mantle's `Indexer.Block.Fetcher.import/2` calls `AddressImporter.add/1` (async cast)
+      # and then strips `:addresses` from the import options, so the inserted-result map
+      # does not carry the `:addresses` key. The size and per-position block_number of
+      # `address_coin_balances`, and validator/reward of `block_rewards`, are still asserted.
       assert {:ok,
               %{
                 inserted: %{
-                  addresses: addresses,
                   address_coin_balances: [
-                    %{
-                      address_hash: first_address_hash,
-                      block_number: 3_946_079
-                    },
-                    %{
-                      address_hash: second_address_hash,
-                      block_number: 3_946_079
-                    },
-                    %{
-                      address_hash: third_address_hash,
-                      block_number: 3_946_080
-                    },
-                    %{
-                      address_hash: fourth_address_hash,
-                      block_number: 3_946_079
-                    }
+                    %{address_hash: _, block_number: 3_946_079},
+                    %{address_hash: _, block_number: 3_946_079},
+                    %{address_hash: _, block_number: 3_946_080},
+                    %{address_hash: _, block_number: 3_946_079}
                   ],
                   block_rewards: [
-                    %{
-                      address_hash: second_address_hash,
-                      address_type: :validator,
-                      reward: ^first_expected_reward
-                    },
-                    %{
-                      address_hash: third_address_hash,
-                      address_type: :validator,
-                      reward: ^second_expected_reward
-                    }
+                    %{address_hash: _, address_type: :validator, reward: ^first_expected_reward},
+                    %{address_hash: _, address_type: :validator, reward: ^second_expected_reward}
                   ],
                   blocks: [%Chain.Block{number: 3_946_079}, %Chain.Block{number: 3_946_080}],
                   transactions: [%Transaction{hash: _transaction_hash}]
                 },
                 errors: []
               }} = Indexer.Block.Fetcher.fetch_and_import_range(block_fetcher, 3_946_079..3_946_080)
-
-      if chain_identity() != {:optimism, :celo} do
-        assert [
-                 %Address{hash: ^first_address_hash},
-                 %Address{hash: ^second_address_hash},
-                 %Address{hash: ^third_address_hash},
-                 %Address{hash: ^fourth_address_hash}
-               ] = addresses
-      else
-        assert [
-                 %Address{hash: ^celo_token_address_hash},
-                 %Address{hash: ^first_address_hash},
-                 %Address{hash: ^second_address_hash},
-                 %Address{hash: ^third_address_hash},
-                 %Address{hash: ^fourth_address_hash}
-               ] = addresses
-      end
 
       Application.put_env(:indexer, :fetch_rewards_way, nil)
     end
