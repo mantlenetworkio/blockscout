@@ -168,6 +168,8 @@ defmodule BlockScoutWeb.Models.TransactionStateHelper do
     end
   end
 
+  defp token_balances(_address_hash, %{token: nil}, _block_number, _options), do: %{transfers: []}
+
   defp token_balances(address_hash, token_transfer, block_number, options) do
     token = token_transfer.token
 
