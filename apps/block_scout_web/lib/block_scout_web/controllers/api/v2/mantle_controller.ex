@@ -20,8 +20,10 @@ defmodule BlockScoutWeb.API.V2.MantleController do
   @default_page_size 50
   @max_page_size 200
 
+  @address_preloads [:scam_badge, :names, :proxy_implementations]
+
   @block_preloads [
-    {:miner, [:names, :smart_contract]},
+    {:miner, @address_preloads},
     :transactions,
     :rewards,
     :withdrawals,
@@ -30,9 +32,9 @@ defmodule BlockScoutWeb.API.V2.MantleController do
   ]
 
   @transaction_preloads [
-    {:from_address, [:names, :smart_contract]},
-    {:to_address, [:names, :smart_contract]},
-    {:created_contract_address, [:names, :smart_contract]},
+    {:from_address, @address_preloads},
+    {:to_address, @address_preloads},
+    {:created_contract_address, @address_preloads},
     :block
   ]
 
