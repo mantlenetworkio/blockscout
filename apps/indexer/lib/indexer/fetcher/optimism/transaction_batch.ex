@@ -282,99 +282,118 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     chunks_number = ceil((end_block - start_block + 1) / chunk_size)
     chunk_range = Range.new(0, max(chunks_number - 1, 0), 1)
 
-    {last_written_block, new_incomplete_channels} =
+    # Seed the parent_hash chain check with the last block hash we persisted on the previous
+    # successful chunk. The check defends against L1 reorgs that `RollupL1ReorgMonitor` misses
+    # (e.g. same-height reorgs where head number doesn't go down). When `BlobRetryQueue`
+    # forced a rewind, the persisted hash is for a *later* block than our new `start_block`
+    # and would false-positive, so we pass `@empty_hash` to skip the very first chunk's check.
+    initial_prev_chunk_last_hash =
+      if is_nil(retried_min_block) do
+        Optimism.get_last_block_hash(@counter_type)
+      else
+        @empty_hash
+      end
+
+    {last_written_block, new_incomplete_channels, _final_prev_chunk_last_hash} =
       chunk_range
-      |> Enum.reduce_while({start_block - 1, incomplete_channels}, fn current_chunk, {_, incomplete_channels_acc} ->
-        chunk_start = start_block + chunk_size * current_chunk
-        chunk_end = min(chunk_start + chunk_size - 1, end_block)
+      |> Enum.reduce_while(
+        {start_block - 1, incomplete_channels, initial_prev_chunk_last_hash},
+        fn current_chunk, {_, incomplete_channels_acc, prev_chunk_last_hash} ->
+          chunk_start = start_block + chunk_size * current_chunk
+          chunk_end = min(chunk_start + chunk_size - 1, end_block)
 
-        {new_incomplete_channels, last_block_hash} =
-          if chunk_end >= chunk_start do
-            Helper.log_blocks_chunk_handling(
-              chunk_start,
-              chunk_end,
-              start_block,
-              end_block,
-              nil,
-              :L1
-            )
-
-            {:ok, new_incomplete_channels, batches, sequences, blobs, last_block_hash} =
-              get_transaction_batches(
-                Range.new(chunk_start, chunk_end),
-                batch_inbox,
-                batch_submitter,
-                {genesis_block_l2, block_duration},
-                incomplete_channels_acc,
-                {json_rpc_named_arguments, json_rpc_named_arguments_l2},
-                {eip4844_blobs_api_url, eip4844_blobs_api_fallback_url, celestia_blobs_api_url, eigenda_blobs_api_url,
-                 alt_da_server_url, chain_id_l1},
-                Helper.infinite_retries_number()
+          {new_incomplete_channels, last_block_hash} =
+            if chunk_end >= chunk_start do
+              Helper.log_blocks_chunk_handling(
+                chunk_start,
+                chunk_end,
+                start_block,
+                end_block,
+                nil,
+                :L1
               )
 
-            {batches, sequences, blobs} = remove_duplicates(batches, sequences, blobs)
+              {:ok, new_incomplete_channels, batches, sequences, blobs, last_block_hash} =
+                get_transaction_batches(
+                  Range.new(chunk_start, chunk_end),
+                  batch_inbox,
+                  batch_submitter,
+                  {genesis_block_l2, block_duration},
+                  incomplete_channels_acc,
+                  {json_rpc_named_arguments, json_rpc_named_arguments_l2},
+                  {eip4844_blobs_api_url, eip4844_blobs_api_fallback_url, celestia_blobs_api_url,
+                   eigenda_blobs_api_url, alt_da_server_url, chain_id_l1},
+                  prev_chunk_last_hash,
+                  Helper.infinite_retries_number()
+                )
 
-            {:ok, _} =
-              Chain.import(%{
-                optimism_frame_sequences: %{params: sequences},
-                timeout: :infinity
-              })
+              {batches, sequences, blobs} = remove_duplicates(batches, sequences, blobs)
 
-            {:ok, inserted} =
-              Chain.import(%{
-                optimism_frame_sequence_blobs: %{params: blobs},
-                optimism_transaction_batches: %{params: batches},
-                timeout: :infinity
-              })
+              {:ok, _} =
+                Chain.import(%{
+                  optimism_frame_sequences: %{params: sequences},
+                  timeout: :infinity
+                })
 
-            removed_sequence_ids = remove_prev_frame_sequences(inserted)
-            sequences = Enum.reject(sequences, fn s -> s.id in removed_sequence_ids end)
-            set_frame_sequences_view_ready(sequences)
+              {:ok, inserted} =
+                Chain.import(%{
+                  optimism_frame_sequence_blobs: %{params: blobs},
+                  optimism_transaction_batches: %{params: batches},
+                  timeout: :infinity
+                })
 
-            last_batch =
-              sequences
-              |> Enum.max_by(& &1.id, fn -> nil end)
+              removed_sequence_ids = remove_prev_frame_sequences(inserted)
+              sequences = Enum.reject(sequences, fn s -> s.id in removed_sequence_ids end)
+              set_frame_sequences_view_ready(sequences)
 
-            # credo:disable-for-next-line
-            if last_batch do
-              Instrumenter.set_latest_batch(last_batch.id, last_batch.l1_timestamp)
+              last_batch =
+                sequences
+                |> Enum.max_by(& &1.id, fn -> nil end)
+
+              # credo:disable-for-next-line
+              if last_batch do
+                Instrumenter.set_latest_batch(last_batch.id, last_batch.l1_timestamp)
+              end
+
+              Publisher.broadcast(
+                %{
+                  new_optimism_batches:
+                    Enum.map(sequences, &FrameSequence.batch_by_number(&1.id, include_blobs?: false))
+                },
+                :realtime
+              )
+
+              Helper.log_blocks_chunk_handling(
+                chunk_start,
+                chunk_end,
+                start_block,
+                end_block,
+                "#{Enum.count(sequences)} batch(es) containing #{Enum.count(batches)} block(s).",
+                :L1
+              )
+
+              {new_incomplete_channels, last_block_hash}
+            else
+              {incomplete_channels_acc, nil}
             end
 
-            Publisher.broadcast(
-              %{
-                new_optimism_batches: Enum.map(sequences, &FrameSequence.batch_by_number(&1.id, include_blobs?: false))
-              },
-              :realtime
-            )
+          reorg_block = RollupReorgMonitorQueue.pop(__MODULE__)
 
-            Helper.log_blocks_chunk_handling(
-              chunk_start,
-              chunk_end,
-              start_block,
-              end_block,
-              "#{Enum.count(sequences)} batch(es) containing #{Enum.count(batches)} block(s).",
-              :L1
-            )
+          if !is_nil(reorg_block) && reorg_block > 0 do
+            new_incomplete_channels = handle_l1_reorg(reorg_block, new_incomplete_channels)
 
-            {new_incomplete_channels, last_block_hash}
+            Optimism.set_last_block_hash(@empty_hash, @counter_type)
+
+            {:halt,
+             {if(reorg_block <= chunk_end, do: reorg_block - 1, else: chunk_end), new_incomplete_channels,
+              @empty_hash}}
           else
-            {incomplete_channels_acc, nil}
+            Optimism.set_last_block_hash(last_block_hash, @counter_type)
+
+            {:cont, {chunk_end, new_incomplete_channels, last_block_hash || prev_chunk_last_hash}}
           end
-
-        reorg_block = RollupReorgMonitorQueue.pop(__MODULE__)
-
-        if !is_nil(reorg_block) && reorg_block > 0 do
-          new_incomplete_channels = handle_l1_reorg(reorg_block, new_incomplete_channels)
-
-          Optimism.set_last_block_hash(@empty_hash, @counter_type)
-
-          {:halt, {if(reorg_block <= chunk_end, do: reorg_block - 1, else: chunk_end), new_incomplete_channels}}
-        else
-          Optimism.set_last_block_hash(last_block_hash, @counter_type)
-
-          {:cont, {chunk_end, new_incomplete_channels}}
         end
-      end)
+      )
 
     new_start_block = last_written_block + 1
     new_end_block = Helper.fetch_latest_l1_block_number(json_rpc_named_arguments)
@@ -549,41 +568,64 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
          incomplete_channels,
          {json_rpc_named_arguments, json_rpc_named_arguments_l2},
          blobs_api_url,
+         prev_chunk_last_hash,
          retries_left
        ) do
     case fetch_blocks_by_range(block_range, json_rpc_named_arguments) do
       {:ok, %Blocks{transactions_params: transactions_params, blocks_params: blocks_params, errors: []}} ->
+        chunk_start = Enum.min(block_range)
+
         last_block_hash =
           block_range
           |> Enum.max()
           |> get_block_hash_by_number(blocks_params)
 
-        transactions_filtered = transactions_filter(transactions_params, batch_submitter, batch_inbox)
-
-        case validate_eip4844_blob_hashes(transactions_filtered) do
+        case validate_chain_continuity(chunk_start, blocks_params, prev_chunk_last_hash) do
           :ok ->
-            transactions_filtered
-            |> get_transaction_batches_inner(
-              blocks_params,
-              {genesis_block_l2, block_duration},
-              incomplete_channels,
-              json_rpc_named_arguments_l2,
-              blobs_api_url
-            )
-            |> (&Tuple.insert_at(&1, tuple_size(&1), last_block_hash)).()
+            transactions_filtered = transactions_filter(transactions_params, batch_submitter, batch_inbox)
 
-          {:error, message} ->
-            retry_get_transaction_batches(
-              block_range,
-              batch_inbox,
-              batch_submitter,
-              {genesis_block_l2, block_duration},
-              incomplete_channels,
-              {json_rpc_named_arguments, json_rpc_named_arguments_l2},
-              blobs_api_url,
-              retries_left,
-              message
+            case validate_eip4844_blob_hashes(transactions_filtered) do
+              :ok ->
+                transactions_filtered
+                |> get_transaction_batches_inner(
+                  blocks_params,
+                  {genesis_block_l2, block_duration},
+                  incomplete_channels,
+                  json_rpc_named_arguments_l2,
+                  blobs_api_url
+                )
+                |> (&Tuple.insert_at(&1, tuple_size(&1), last_block_hash)).()
+
+              {:error, message} ->
+                retry_get_transaction_batches(
+                  block_range,
+                  batch_inbox,
+                  batch_submitter,
+                  {genesis_block_l2, block_duration},
+                  incomplete_channels,
+                  {json_rpc_named_arguments, json_rpc_named_arguments_l2},
+                  blobs_api_url,
+                  prev_chunk_last_hash,
+                  retries_left,
+                  message
+                )
+            end
+
+          {:reorg, divergence_block} ->
+            Logger.warning(
+              "L1 reorg detected by chain-continuity check at L1 block ##{chunk_start}: " <>
+                "stored last_block_hash=#{prev_chunk_last_hash} matches neither the hash nor the parent_hash " <>
+                "of block ##{chunk_start}. Rewinding to ##{divergence_block} via RollupReorgMonitorQueue."
             )
+
+            RollupReorgMonitorQueue.push(divergence_block, __MODULE__)
+
+            # Return empty results so the caller's Chain.import calls are no-ops; the very next
+            # `RollupReorgMonitorQueue.pop(__MODULE__)` will surface our pushed divergence_block
+            # and the existing :halt branch will rewind + reset last_block_hash. The returned
+            # `last_block_hash` is therefore inconsequential — pick the chunk's tail to keep the
+            # tuple shape consistent.
+            {:ok, incomplete_channels, [], [], [], last_block_hash}
         end
 
       {_, message_or_errors} ->
@@ -601,6 +643,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
           incomplete_channels,
           {json_rpc_named_arguments, json_rpc_named_arguments_l2},
           blobs_api_url,
+          prev_chunk_last_hash,
           retries_left,
           message
         )
@@ -615,6 +658,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
          incomplete_channels,
          {json_rpc_named_arguments, json_rpc_named_arguments_l2},
          blobs_api_url,
+         prev_chunk_last_hash,
          retries_left,
          message
        ) do
@@ -636,9 +680,81 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
         incomplete_channels,
         {json_rpc_named_arguments, json_rpc_named_arguments_l2},
         blobs_api_url,
+        prev_chunk_last_hash,
         retries_left
       )
     end
+  end
+
+  @doc """
+  Validates that the chunk we just fetched is still rooted in the L1 chain we last persisted.
+
+  This is the second-line defense against L1 reorgs that `RollupL1ReorgMonitor` cannot detect
+  because they don't reduce the latest block number (e.g. a same-height hash flip on the head
+  block).
+
+  The check accepts the chunk as continuous when either of the two valid relationships holds
+  between the persisted `expected_hash` (= the hash of the last block of the last fully-processed
+  chunk, written by `Optimism.set_last_block_hash/2`) and the first block of the new chunk:
+
+  1. **Forward step**: `block(chunk_start).parent_hash == expected_hash`. The normal in-process
+     case where `start_block = last_chunk_end + 1`.
+  2. **Boundary re-scan**: `block(chunk_start).hash == expected_hash`. The post-restart case
+     where `handle_continue` seeds `start_block = max(start_block_l1, last_l1_block_number)`
+     (note: not +1, so the very first chunk re-scans the persisted tail block).
+
+  If **neither** relationship holds the canonical L1 chain has diverged at or before
+  `chunk_start`, and we surface a `:reorg`.
+
+  ## Parameters
+  - `chunk_start`: The smallest L1 block number in the upcoming chunk.
+  - `blocks_params`: The list of `EthereumJSONRPC.Block.params` we just fetched for this chunk.
+  - `expected_hash`: The hash we last persisted in the OP counter. `nil` or the all-zero
+    `@empty_hash` skips the check (initial start, post-reorg reset, or `BlobRetryQueue` rewind
+    seeded the accumulator with `@empty_hash`).
+
+  ## Returns
+  - `:ok` — chain is continuous, or check was skipped because no expected hash was provided.
+  - `{:reorg, divergence_block}` — mismatch; `divergence_block` is the block at or before which
+    the reorg occurred (conservatively `chunk_start - 1`, clamped to 0). Caller should rewind.
+  """
+  @spec validate_chain_continuity(non_neg_integer(), [map()], binary() | nil) ::
+          :ok | {:reorg, non_neg_integer()}
+  def validate_chain_continuity(_chunk_start, _blocks_params, nil), do: :ok
+  def validate_chain_continuity(_chunk_start, _blocks_params, @empty_hash), do: :ok
+
+  def validate_chain_continuity(chunk_start, blocks_params, expected_hash) when is_binary(expected_hash) do
+    case get_block_by_number(chunk_start, blocks_params) do
+      nil ->
+        # Block missing from the fetched response — shouldn't happen for a chunk we just
+        # successfully fetched. Be defensive: treat as :ok rather than false-positive.
+        :ok
+
+      block ->
+        expected_down = String.downcase(expected_hash)
+        block_hash = block |> Map.get(:hash, "") |> to_string() |> String.downcase()
+        parent_hash = block |> Map.get(:parent_hash, "") |> to_string() |> String.downcase()
+
+        cond do
+          # Boundary re-scan: this chunk starts at the very block whose hash we persisted.
+          # Common right after pod restart, when `start_block` is seeded to `last_l1_block_number`
+          # (not +1). The persisted block is still canonical, so the chain is continuous.
+          block_hash != "" and block_hash == expected_down ->
+            :ok
+
+          # Forward step: the chunk starts at last_chunk_end + 1, so its parent IS the block we
+          # last persisted. Standard in-process tick.
+          parent_hash != "" and parent_hash == expected_down ->
+            :ok
+
+          true ->
+            {:reorg, max(chunk_start - 1, 0)}
+        end
+    end
+  end
+
+  defp get_block_by_number(block_number, blocks_params) do
+    Enum.find(blocks_params, fn b -> b.number == block_number end)
   end
 
   # Tries to resolve each blob through a three-layer chain:

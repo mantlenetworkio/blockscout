@@ -340,6 +340,32 @@ defmodule Indexer.Fetcher.Optimism do
   end
 
   @doc """
+    Reads the stored last block hash for the given counter type from `last_fetched_counters`
+    and returns it as a `0x`-prefixed 64-nibble hex string. Returns the all-zero `@empty_hash`
+    when the counter has never been set (the column defaults to 0).
+
+    Pairs with `set_last_block_hash/2`. Unlike
+    `get_last_block_number_from_last_fetched_counter/2`, this function does not issue any RPC
+    request — it returns the raw persisted hash so callers can do their own consistency checks
+    (e.g. comparing it to the parent hash of the next block to detect a same-height L1 reorg).
+
+    ## Parameters
+    - `counter_type`: The counter type to read.
+
+    ## Returns
+    - A `0x`-prefixed 64-nibble hex string. May be `@empty_hash` if unset.
+  """
+  @spec get_last_block_hash(binary()) :: binary()
+  def get_last_block_hash(counter_type) do
+    "0x" <>
+      (counter_type
+       |> LastFetchedCounter.get()
+       |> Decimal.to_integer()
+       |> Integer.to_string(16)
+       |> String.pad_leading(64, "0"))
+  end
+
+  @doc """
     Takes the last block hash from the `last_fetched_counters` table for the given counter type,
     gets its number using RPC request, and returns the number. Returns `nil` if the last block hash is not defined in the `last_fetched_counters` table,
     or the block hash is not valid anymore (due to a reorg), or the block number cannot be retrieved from RPC.
@@ -360,13 +386,7 @@ defmodule Indexer.Fetcher.Optimism do
   def get_last_block_number_from_last_fetched_counter(nil, _), do: nil
 
   def get_last_block_number_from_last_fetched_counter(json_rpc_named_arguments, counter_type) do
-    last_block_hash =
-      "0x" <>
-        (counter_type
-         |> LastFetchedCounter.get()
-         |> Decimal.to_integer()
-         |> Integer.to_string(16)
-         |> String.pad_leading(64, "0"))
+    last_block_hash = get_last_block_hash(counter_type)
 
     if last_block_hash != @empty_hash do
       case get_block_by_hash(last_block_hash, json_rpc_named_arguments) do

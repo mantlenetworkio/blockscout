@@ -98,5 +98,88 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
         assert :ok = TransactionBatch.validate_eip4844_blob_hashes([transaction])
       end
     end
+
+    describe "validate_chain_continuity/3" do
+      # `@prev_tail_hash` is what the OP counter stored at the end of the previous chunk;
+      # it can be (a) the parent of the new chunk's first block in the normal forward step,
+      # or (b) the first block of the new chunk itself in the restart re-scan path where
+      # `start_block` is seeded to `last_l1_block_number` (not +1).
+      @prev_tail_hash "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      @empty_hash "0x0000000000000000000000000000000000000000000000000000000000000000"
+
+      test "returns :ok when expected_hash is nil (initial seed / no prior chunk)" do
+        blocks_params = [%{number: 2_800_657, hash: "0xhash_657", parent_hash: "0xanything"}]
+        assert :ok = TransactionBatch.validate_chain_continuity(2_800_657, blocks_params, nil)
+      end
+
+      test "returns :ok when expected_hash is the all-zero empty hash" do
+        blocks_params = [%{number: 2_800_657, hash: "0xhash_657", parent_hash: "0xanything"}]
+        assert :ok = TransactionBatch.validate_chain_continuity(2_800_657, blocks_params, @empty_hash)
+      end
+
+      test "forward step: returns :ok when block.parent_hash matches stored hash" do
+        # Normal in-process tick: start_block = last_chunk_end + 1, so the new chunk's first
+        # block has the stored hash as its parent.
+        blocks_params = [
+          %{number: 2_800_656, hash: "0xirrelevant", parent_hash: "0xprev_prev"},
+          %{number: 2_800_657, hash: "0xhash_657", parent_hash: @prev_tail_hash},
+          %{number: 2_800_658, hash: "0xhash_658", parent_hash: "0xhash_657"}
+        ]
+
+        assert :ok = TransactionBatch.validate_chain_continuity(2_800_657, blocks_params, @prev_tail_hash)
+      end
+
+      test "restart re-scan: returns :ok when block.hash itself matches stored hash" do
+        # After pod restart, handle_continue seeds `start_block = max(start_block_l1,
+        # last_l1_block_number)` — i.e. the very block whose hash we stored. The first chunk
+        # re-scans that boundary block; its `.hash` (not its `.parent_hash`) must equal the
+        # stored hash. This case is the reviewer-flagged false-positive scenario.
+        blocks_params = [
+          %{number: 2_800_657, hash: @prev_tail_hash, parent_hash: "0xprev_block_hash"},
+          %{number: 2_800_658, hash: "0xhash_658", parent_hash: @prev_tail_hash}
+        ]
+
+        assert :ok = TransactionBatch.validate_chain_continuity(2_800_657, blocks_params, @prev_tail_hash)
+      end
+
+      test "matches case-insensitively on both relationships" do
+        upper = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+
+        # parent_hash match, case-flipped
+        forward = [%{number: 2_800_657, hash: "0xhash_657", parent_hash: @prev_tail_hash}]
+        assert :ok = TransactionBatch.validate_chain_continuity(2_800_657, forward, upper)
+
+        # block.hash match, case-flipped
+        restart = [%{number: 2_800_657, hash: @prev_tail_hash, parent_hash: "0xprev"}]
+        assert :ok = TransactionBatch.validate_chain_continuity(2_800_657, restart, upper)
+      end
+
+      test "returns {:reorg, chunk_start - 1} when neither hash nor parent_hash matches" do
+        blocks_params = [%{number: 2_800_657, hash: "0xdifferent_hash", parent_hash: "0xdifferent_parent"}]
+
+        assert {:reorg, 2_800_656} =
+                 TransactionBatch.validate_chain_continuity(2_800_657, blocks_params, @prev_tail_hash)
+      end
+
+      test "clamps divergence_block to 0 when chunk_start is 0 (genesis edge case)" do
+        blocks_params = [%{number: 0, hash: "0xother", parent_hash: "0xdifferent"}]
+
+        assert {:reorg, 0} = TransactionBatch.validate_chain_continuity(0, blocks_params, @prev_tail_hash)
+      end
+
+      test "returns :ok defensively when the chunk-start block is missing from blocks_params" do
+        blocks_params = [%{number: 2_800_658, hash: "0xanything", parent_hash: "0xanything"}]
+
+        assert :ok = TransactionBatch.validate_chain_continuity(2_800_657, blocks_params, @prev_tail_hash)
+      end
+
+      test "tolerates missing :hash field by falling back to parent_hash check" do
+        # Defensive: even if some upstream stripped :hash from the block params, a valid
+        # parent_hash should still let the forward step succeed.
+        blocks_params = [%{number: 2_800_657, parent_hash: @prev_tail_hash}]
+
+        assert :ok = TransactionBatch.validate_chain_continuity(2_800_657, blocks_params, @prev_tail_hash)
+      end
+    end
   end
 end

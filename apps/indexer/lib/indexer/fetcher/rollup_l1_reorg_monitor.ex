@@ -13,6 +13,7 @@ defmodule Indexer.Fetcher.RollupL1ReorgMonitor do
 
   require Logger
 
+  alias EthereumJSONRPC.Blocks
   alias Explorer.Chain.Cache.LatestL1BlockNumber
   alias Indexer.Helper
   alias Indexer.RollupReorgMonitorQueue
@@ -119,7 +120,8 @@ defmodule Indexer.Fetcher.RollupL1ReorgMonitor do
          block_check_interval: block_check_interval,
          json_rpc_named_arguments: json_rpc_named_arguments,
          modules: modules_using_reorg_monitor,
-         prev_latest: 0
+         prev_latest: 0,
+         prev_latest_hash: nil
        }}
     end
   end
@@ -149,21 +151,132 @@ defmodule Indexer.Fetcher.RollupL1ReorgMonitor do
           block_check_interval: block_check_interval,
           json_rpc_named_arguments: json_rpc_named_arguments,
           modules: modules,
-          prev_latest: prev_latest
+          prev_latest: prev_latest,
+          prev_latest_hash: prev_latest_hash
         } = state
       ) do
-    {:ok, latest} = Helper.get_block_number_by_tag("latest", json_rpc_named_arguments, Helper.infinite_retries_number())
+    new_state =
+      case fetch_latest_block(json_rpc_named_arguments) do
+        {:ok, latest_block} ->
+          handle_latest_block(latest_block, modules, prev_latest, prev_latest_hash, json_rpc_named_arguments)
+          %{state | prev_latest: latest_block.number, prev_latest_hash: latest_block.hash}
 
-    LatestL1BlockNumber.set_block_number(latest)
+        {:error, reason} ->
+          # Even with infinite_retries_number this branch can fire if the underlying call
+          # returns a non-retryable {:error, _}. Keep the previous snapshot so the next tick
+          # can re-verify the same prev_latest, and avoid crashing the monitor GenServer.
+          Logger.error("Reorg monitor: cannot fetch latest L1 block — skipping this tick. Reason: #{inspect(reason)}")
 
-    if latest < prev_latest do
-      Logger.warning("Reorg detected: previous latest block ##{prev_latest}, current latest block ##{latest}.")
-      Enum.each(modules, &RollupReorgMonitorQueue.push(latest, &1))
-    end
+          state
+      end
 
     Process.send_after(self(), :reorg_monitor, block_check_interval)
 
-    {:noreply, %{state | prev_latest: latest}}
+    {:noreply, new_state}
+  end
+
+  @spec handle_latest_block(
+          map(),
+          [module()],
+          non_neg_integer(),
+          binary() | nil,
+          EthereumJSONRPC.json_rpc_named_arguments()
+        ) ::
+          :ok
+  defp handle_latest_block(latest_block, modules, prev_latest, prev_latest_hash, json_rpc_named_arguments) do
+    latest = latest_block.number
+
+    LatestL1BlockNumber.set_block_number(latest)
+
+    previous_latest_block = %{number: prev_latest, hash: prev_latest_hash}
+    current_previous_latest_block = fetch_current_previous_latest_block(prev_latest, latest, json_rpc_named_arguments)
+
+    case reorg_block_to_enqueue(previous_latest_block, latest_block, current_previous_latest_block) do
+      nil ->
+        :ok
+
+      reorg_block when latest < prev_latest ->
+        Logger.warning("Reorg detected: previous latest block ##{prev_latest}, current latest block ##{latest}.")
+        Enum.each(modules, &RollupReorgMonitorQueue.push(reorg_block, &1))
+
+      reorg_block ->
+        Logger.warning(
+          "Reorg detected: L1 block ##{prev_latest} hash changed from #{prev_latest_hash} to #{current_previous_latest_block.hash}."
+        )
+
+        Enum.each(modules, &RollupReorgMonitorQueue.push(reorg_block, &1))
+    end
+
+    :ok
+  end
+
+  @doc false
+  @spec reorg_block_to_enqueue(map(), map(), map() | nil) :: non_neg_integer() | nil
+  def reorg_block_to_enqueue(%{number: prev_latest}, %{number: latest}, _current_previous_latest)
+      when latest < prev_latest do
+    latest
+  end
+
+  def reorg_block_to_enqueue(
+        %{number: prev_latest, hash: prev_latest_hash},
+        %{number: latest},
+        %{hash: current_previous_latest_hash}
+      )
+      when latest >= prev_latest and is_binary(prev_latest_hash) and is_binary(current_previous_latest_hash) do
+    if String.downcase(prev_latest_hash) != String.downcase(current_previous_latest_hash) do
+      prev_latest
+    end
+  end
+
+  def reorg_block_to_enqueue(_previous_latest, _latest, _current_previous_latest), do: nil
+
+  defp fetch_latest_block(json_rpc_named_arguments) do
+    error_message = &"Cannot fetch latest L1 block. Error: #{inspect(&1)}"
+
+    Helper.repeated_call(
+      &fetch_latest_block_once/1,
+      [json_rpc_named_arguments],
+      error_message,
+      Helper.infinite_retries_number()
+    )
+  end
+
+  defp fetch_latest_block_once(json_rpc_named_arguments) do
+    case EthereumJSONRPC.fetch_block_by_tag("latest", json_rpc_named_arguments) do
+      {:ok, %Blocks{blocks_params: [block], errors: []}} -> {:ok, block}
+      {:ok, %Blocks{errors: [error | _]}} -> {:error, error}
+      {:ok, _} -> {:error, :not_found}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp fetch_current_previous_latest_block(0, _latest, _json_rpc_named_arguments), do: nil
+  defp fetch_current_previous_latest_block(_prev_latest, latest, _json_rpc_named_arguments) when latest == 0, do: nil
+
+  defp fetch_current_previous_latest_block(prev_latest, latest, _json_rpc_named_arguments) when latest < prev_latest,
+    do: nil
+
+  defp fetch_current_previous_latest_block(prev_latest, _latest, json_rpc_named_arguments) do
+    error_message = &"Cannot fetch previous latest L1 block ##{prev_latest}. Error: #{inspect(&1)}"
+
+    case Helper.repeated_call(
+           &fetch_block_by_number/2,
+           [prev_latest, json_rpc_named_arguments],
+           error_message,
+           Helper.infinite_retries_number()
+         ) do
+      {:ok, block} -> block
+      {:error, _} -> nil
+    end
+  end
+
+  defp fetch_block_by_number(block_number, json_rpc_named_arguments) do
+    case EthereumJSONRPC.fetch_blocks_by_numbers([block_number], json_rpc_named_arguments, false) do
+      {:ok, %Blocks{blocks_params: [block], errors: []}} -> {:ok, block}
+      {:ok, %Blocks{errors: [error | _]}} -> {:error, error}
+      {:ok, _} -> {:error, :not_found}
+      {:error, _} = error -> error
+    end
   end
 
   @doc """
