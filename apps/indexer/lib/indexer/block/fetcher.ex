@@ -36,7 +36,7 @@ defmodule Indexer.Block.Fetcher do
   alias Indexer.Fetcher.TokenInstance.Realtime, as: TokenInstanceRealtime
   alias Indexer.Fetcher.Zilliqa.Zrc2Tokens
 
-  alias Indexer.{Prometheus, Tracer}
+  alias Indexer.{Prometheus, TokenBalances, Tracer}
 
   alias Indexer.Fetcher.{
     AddressImporter,
@@ -242,11 +242,15 @@ defmodule Indexer.Block.Fetcher do
            addresses: %{params: addresses},
            address_coin_balances: %{params: coin_balances_params_set},
            address_token_balances: %{params: address_token_balances},
+           address_current_token_balances: %{
+             params: address_token_balances |> MapSet.to_list() |> TokenBalances.to_address_current_token_balances()
+           },
            blocks: %{params: blocks},
            block_second_degree_relations: %{params: block_second_degree_relations_params},
            block_rewards: %{errors: beneficiaries_errors, params: beneficiaries_with_gas_payment},
            logs: %{params: logs},
            token_transfers: %{params: token_transfers},
+           tokens: %{params: tokens},
            transactions: %{params: transactions_with_receipts},
            withdrawals: %{params: withdrawals_params},
            token_instances: %{params: token_instances},

@@ -29,6 +29,24 @@ defmodule Indexer.Block.FetcherTest do
 
   @moduletag capture_log: true
 
+  defmodule ImportRecorder do
+    @behaviour Indexer.Block.Fetcher
+
+    @impl Indexer.Block.Fetcher
+    def import(_block_fetcher, options) do
+      send(self(), {:block_fetcher_import_options, options})
+
+      {:ok,
+       %{
+         addresses: [],
+         block_second_degree_relations: [],
+         blocks: [],
+         transactions: [],
+         withdrawals: []
+       }}
+    end
+  end
+
   # MUST use global mode because we aren't guaranteed to get `start_supervised`'s pid back fast enough to `allow` it to
   # use expectations and stubs from test's pid.
   setup :set_mox_global
@@ -96,6 +114,150 @@ defmodule Indexer.Block.FetcherTest do
           task_supervisor: Indexer.TaskSupervisor
         }
       }
+    end
+
+    test "passes parsed tokens and current token balances to the importer", %{
+      block_fetcher: %Fetcher{json_rpc_named_arguments: json_rpc_named_arguments} = block_fetcher
+    } do
+      original_fetch_rewards_way = Application.get_env(:indexer, :fetch_rewards_way)
+      Application.put_env(:indexer, :fetch_rewards_way, "manual")
+
+      on_exit(fn -> Application.put_env(:indexer, :fetch_rewards_way, original_fetch_rewards_way) end)
+
+      block_number = 37
+      block_quantity = integer_to_quantity(block_number)
+      from_address_hash = "0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"
+      to_address_hash = "0x8bf38d4764929064f2d4d3a56520a76ab3df415b"
+      token_contract_address_hash = "0x862d67cb0773ee3f8ce7ea89b328ffea861ab3ef"
+      transaction_hash = "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5"
+
+      transaction = %{
+        "blockHash" => "0xf6b4b8c88df3ebd252ec476328334dc026cf66606a84fb769b3d3cbccc8471bd",
+        "blockNumber" => block_quantity,
+        "chainId" => "0x4d",
+        "condition" => nil,
+        "creates" => nil,
+        "from" => from_address_hash,
+        "gas" => "0x47b760",
+        "gasPrice" => "0x174876e800",
+        "hash" => transaction_hash,
+        "input" => "0x",
+        "nonce" => "0x4",
+        "publicKey" =>
+          "0xe5d196ad4ceada719d9e592f7166d0c75700f6eab2e3c3de34ba751ea786527cb3f6eb96ad9fdfdb9989ff572df50f1c42ef800af9c5207a38b929aff969b5c9",
+        "r" => "0xa7f8f45cce375bb7af8750416e1b03e0473f93c256da2285d1134fc97a700e01",
+        "raw" =>
+          "0xf86c0485174876e8008347b760948bf38d4764929064f2d4d3a56520a76ab3df415b80801ca0a7f8f45cce375bb7af8750416e1b03e0473f93c256da2285d1134fc97a700e01a01f87a076f13824f4be8963e3dffd7300dae64d5f23c9a062af0c6ead347c135f",
+        "s" => "0x1f87a076f13824f4be8963e3dffd7300dae64d5f23c9a062af0c6ead347c135f",
+        "standardV" => "0x1",
+        "to" => to_address_hash,
+        "transactionIndex" => "0x0",
+        "v" => "0x1c",
+        "value" => "0x0"
+      }
+
+      if json_rpc_named_arguments[:transport] == EthereumJSONRPC.Mox do
+        EthereumJSONRPC.Mox
+        |> expect(:json_rpc, fn json, _options ->
+          assert [%{id: id, method: "eth_getBlockByNumber", params: [^block_quantity, true]}] = json
+
+          {:ok,
+           [
+             %{
+               id: id,
+               jsonrpc: "2.0",
+               result: %{
+                 "author" => from_address_hash,
+                 "difficulty" => "0xfffffffffffffffffffffffffffffffe",
+                 "extraData" => "0x",
+                 "gasLimit" => "0x69fe20",
+                 "gasUsed" => "0xc512",
+                 "hash" => "0xf6b4b8c88df3ebd252ec476328334dc026cf66606a84fb769b3d3cbccc8471bd",
+                 "logsBloom" =>
+                   "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                 "miner" => from_address_hash,
+                 "number" => block_quantity,
+                 "parentHash" => "0xc37bbad7057945d1bf128c1ff009fb1ad632110bf6a000aac025a80f7766b66e",
+                 "receiptsRoot" => "0xd300311aab7dcc98c05ac3f1893629b2c9082c189a0a0c76f4f63e292ac419d5",
+                 "sha3Uncles" => "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                 "size" => "0x2cf",
+                 "stateRoot" => "0x2cd84079b0d0c267ed387e3895fd1c1dc21ff82717beb1132adac64276886e19",
+                 "timestamp" => "0x5a343956",
+                 "totalDifficulty" => "0x24ffffffffffffffffffffffffedf78dfd",
+                 "transactions" => [transaction],
+                 "transactionsRoot" => "0x68e314a05495f390f9cd0c36267159522e5450d2adf254a74567b452e767bf34",
+                 "uncles" => []
+               }
+             }
+           ]}
+        end)
+        |> expect(:json_rpc, fn json, _options ->
+          assert [%{id: id, method: "eth_getTransactionReceipt", params: [^transaction_hash]}] = json
+
+          {:ok,
+           [
+             %{
+               id: id,
+               jsonrpc: "2.0",
+               result: %{
+                 "blockHash" => "0xf6b4b8c88df3ebd252ec476328334dc026cf66606a84fb769b3d3cbccc8471bd",
+                 "blockNumber" => block_quantity,
+                 "contractAddress" => nil,
+                 "cumulativeGasUsed" => "0xc512",
+                 "gasUsed" => "0xc512",
+                 "logs" => [
+                   %{
+                     "address" => token_contract_address_hash,
+                     "blockHash" => "0xf6b4b8c88df3ebd252ec476328334dc026cf66606a84fb769b3d3cbccc8471bd",
+                     "blockNumber" => block_quantity,
+                     "data" => "0x000000000000000000000000000000000000000000000000000000000000002a",
+                     "logIndex" => "0x0",
+                     "topics" => [
+                       "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
+                       "0x000000000000000000000000e8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca",
+                       "0x0000000000000000000000008bf38d4764929064f2d4d3a56520a76ab3df415b"
+                     ],
+                     "transactionHash" => transaction_hash,
+                     "transactionIndex" => "0x0",
+                     "transactionLogIndex" => "0x0"
+                   }
+                 ],
+                 "logsBloom" =>
+                   "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                 "root" => nil,
+                 "status" => "0x1",
+                 "transactionHash" => transaction_hash,
+                 "transactionIndex" => "0x0"
+               }
+             }
+           ]}
+        end)
+      end
+
+      block_fetcher = %Fetcher{block_fetcher | callback_module: ImportRecorder}
+
+      assert {:ok, %{errors: []}} = Fetcher.fetch_and_import_range(block_fetcher, block_number..block_number)
+
+      assert_received {:block_fetcher_import_options, import_options}
+
+      assert [%{contract_address_hash: ^token_contract_address_hash, type: "ERC-20"}] = import_options.tokens.params
+
+      assert [
+               %{
+                 address_hash: ^to_address_hash,
+                 block_number: ^block_number,
+                 token_contract_address_hash: ^token_contract_address_hash,
+                 token_id: nil,
+                 token_type: "ERC-20"
+               },
+               %{
+                 address_hash: ^from_address_hash,
+                 block_number: ^block_number,
+                 token_contract_address_hash: ^token_contract_address_hash,
+                 token_id: nil,
+                 token_type: "ERC-20"
+               }
+             ] = import_options.address_current_token_balances.params
     end
 
     # blinking test
