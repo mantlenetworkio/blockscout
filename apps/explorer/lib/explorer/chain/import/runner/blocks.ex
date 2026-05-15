@@ -325,7 +325,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
       |> Enum.sort_by(&{&1.uncle_hash, &1.index})
 
     {_total, forked_transaction} =
-      repo.insert_all(
+      repo.safe_insert_all(
         Transaction.Fork,
         transaction_forks,
         conflict_target: [:uncle_hash, :index],
@@ -898,7 +898,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
       |> Enum.uniq()
 
     {_total, result} =
-      repo.insert_all(
+      repo.safe_insert_all(
         InternalTransactionDeleteQueue,
         insert_params,
         conflict_target: [:block_number],

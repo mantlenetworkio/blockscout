@@ -321,8 +321,8 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
                   {genesis_block_l2, block_duration},
                   incomplete_channels_acc,
                   {json_rpc_named_arguments, json_rpc_named_arguments_l2},
-                  {eip4844_blobs_api_url, eip4844_blobs_api_fallback_url, celestia_blobs_api_url,
-                   eigenda_blobs_api_url, alt_da_server_url, chain_id_l1},
+                  {eip4844_blobs_api_url, eip4844_blobs_api_fallback_url, celestia_blobs_api_url, eigenda_blobs_api_url,
+                   alt_da_server_url, chain_id_l1},
                   prev_chunk_last_hash,
                   Helper.infinite_retries_number()
                 )
@@ -385,8 +385,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
             Optimism.set_last_block_hash(@empty_hash, @counter_type)
 
             {:halt,
-             {if(reorg_block <= chunk_end, do: reorg_block - 1, else: chunk_end), new_incomplete_channels,
-              @empty_hash}}
+             {if(reorg_block <= chunk_end, do: reorg_block - 1, else: chunk_end), new_incomplete_channels, @empty_hash}}
           else
             Optimism.set_last_block_hash(last_block_hash, @counter_type)
 

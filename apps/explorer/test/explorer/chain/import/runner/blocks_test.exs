@@ -11,10 +11,14 @@ defmodule Explorer.Chain.Import.Runner.BlocksTest do
   alias Ecto.Multi
   alias Explorer.Chain.Import.Runner.{Blocks, Transactions}
   alias Explorer.Chain.InternalTransaction.DeleteQueue, as: InternalTransactionDeleteQueue
-  alias Explorer.Chain.{Address, Block, Transaction, PendingBlockOperation}
+  alias Explorer.Chain.{Address, Block, Data, Hash, Transaction, Wei}
   alias Explorer.Chain.Cache.BlockNumber
   alias Explorer.{Chain, Repo}
   alias Explorer.Utility.MissingBlockRange
+
+  @postgres_max_parameters 65_535
+  @transaction_fork_bind_fields 5
+  @oversized_transaction_fork_count div(@postgres_max_parameters, @transaction_fork_bind_fields) + 1
 
   describe "run/1" do
     setup do
@@ -86,6 +90,40 @@ defmodule Explorer.Chain.Import.Runner.BlocksTest do
 
       assert Repo.one!(from(transaction_fork in Transaction.Fork, select: "ctid")) == ctid,
              "Tuple was written even though it is not distinct"
+    end
+
+    @tag timeout: :infinity
+    test "derive_transaction_forks chunks inserts for blocks above PostgreSQL parameter limit", %{
+      options: options
+    } do
+      consensus_block = insert(:block, consensus: true)
+      from_address = insert(:address)
+      to_address = insert(:address)
+
+      Repo.safe_insert_all(
+        Transaction,
+        oversized_transaction_changes(consensus_block, from_address, to_address),
+        returning: false
+      )
+
+      block_params =
+        params_for(
+          :block,
+          hash: consensus_block.hash,
+          miner_hash: consensus_block.miner_hash,
+          number: consensus_block.number,
+          consensus: false
+        )
+
+      %Ecto.Changeset{valid?: true, changes: block_changes} = Block.changeset(%Block{}, block_params)
+
+      assert {:ok, %{derive_transaction_forks: forked_transaction_hashes}} =
+               Multi.new()
+               |> Blocks.run([block_changes], options)
+               |> Repo.transaction()
+
+      assert length(forked_transaction_hashes) == @oversized_transaction_fork_count
+      assert count(Transaction.Fork) == @oversized_transaction_fork_count
     end
 
     test "coin balances are deleted and new balances are derived if some blocks lost consensus",
@@ -960,6 +998,47 @@ defmodule Explorer.Chain.Import.Runner.BlocksTest do
 
   defp count(schema) do
     Repo.one!(select(schema, fragment("COUNT(*)")))
+  end
+
+  defp oversized_transaction_changes(consensus_block, from_address, to_address) do
+    now = DateTime.utc_now()
+
+    Enum.map(0..(@oversized_transaction_fork_count - 1), fn index ->
+      %{
+        block_consensus: true,
+        block_hash: consensus_block.hash,
+        block_number: consensus_block.number,
+        block_timestamp: consensus_block.timestamp,
+        cumulative_gas_used: Decimal.new(21_000 * (index + 1)),
+        fhe_operations_count: 0,
+        from_address_hash: from_address.hash,
+        gas: Decimal.new(21_000),
+        gas_price: wei(1),
+        gas_used: Decimal.new(21_000),
+        hash: full_hash(1_000_000 + index),
+        index: index,
+        input: %Data{bytes: <<>>},
+        inserted_at: now,
+        nonce: index,
+        r: Decimal.new(index + 1),
+        s: Decimal.new(index + 1),
+        status: :ok,
+        to_address_hash: to_address.hash,
+        updated_at: now,
+        v: 27,
+        value: wei(0)
+      }
+    end)
+  end
+
+  defp wei(amount) do
+    {:ok, value} = Wei.cast(amount)
+    value
+  end
+
+  defp full_hash(integer) do
+    {:ok, hash} = Hash.Full.cast(integer)
+    hash
   end
 
   defp holder_reverts_to_non_holder(%{
