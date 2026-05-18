@@ -353,9 +353,18 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
 
   operation :deposits,
     summary: "List deposits.",
-    description: "Retrieves a paginated list of deposits.",
+    description: "Retrieves a paginated list of deposits. Optionally filtered by L1 origin address.",
     parameters:
       base_params() ++
+        [
+          %OpenApiSpex.Parameter{
+            name: :address_hash,
+            in: :query,
+            schema: Schemas.General.AddressHash,
+            required: false,
+            description: "L1 origin address to filter the deposits by."
+          }
+        ] ++
         define_paging_params([
           "items_count",
           "l1_block_number",
@@ -381,21 +390,24 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   """
   @spec deposits(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def deposits(conn, params) do
-    {deposits, next_page} =
-      params
-      |> paging_options()
-      |> Keyword.put(:api?, true)
-      |> Deposit.list()
-      |> split_list_by_page()
+    with {:ok, address_hash} <- parse_optional_address_hash(params["address_hash"]) do
+      {deposits, next_page} =
+        params
+        |> paging_options()
+        |> Keyword.put(:api?, true)
+        |> Keyword.put(:address_hash, address_hash)
+        |> Deposit.list()
+        |> split_list_by_page()
 
-    next_page_params = next_page_params(next_page, deposits, params)
+      next_page_params = next_page_params(next_page, deposits, params)
 
-    conn
-    |> put_status(200)
-    |> render(:optimism_deposits, %{
-      deposits: deposits,
-      next_page_params: next_page_params
-    })
+      conn
+      |> put_status(200)
+      |> render(:optimism_deposits, %{
+        deposits: deposits,
+        next_page_params: next_page_params
+      })
+    end
   end
 
   operation :main_page_deposits,
@@ -428,8 +440,18 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
 
   operation :deposits_count,
     summary: "Number of deposits in the list.",
-    description: "Retrieves a size of the deposits list.",
-    parameters: base_params(),
+    description: "Retrieves a size of the deposits list. Optionally filtered by L1 origin address.",
+    parameters:
+      base_params() ++
+        [
+          %OpenApiSpex.Parameter{
+            name: :address_hash,
+            in: :query,
+            schema: Schemas.General.AddressHash,
+            required: false,
+            description: "L1 origin address to filter the deposits count by."
+          }
+        ],
     responses: [
       ok: {"Number of items in the deposits list.", "application/json", %Schema{type: :integer, nullable: false}},
       unprocessable_entity: JsonErrorResponse.response()
@@ -439,12 +461,14 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   Function to handle GET requests to `/api/v2/optimism/deposits/count` endpoint.
   """
   @spec deposits_count(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def deposits_count(conn, _params) do
-    count = Deposit.count(@api_true)
+  def deposits_count(conn, params) do
+    with {:ok, address_hash} <- parse_optional_address_hash(params["address_hash"]) do
+      count = Deposit.count(api?: true, address_hash: address_hash)
 
-    conn
-    |> put_status(200)
-    |> render(:optimism_items_count, %{count: count})
+      conn
+      |> put_status(200)
+      |> render(:optimism_items_count, %{count: count})
+    end
   end
 
   operation :interop_message, false
@@ -581,9 +605,18 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
 
   operation :withdrawals,
     summary: "List withdrawals.",
-    description: "Retrieves a paginated list of withdrawals.",
+    description: "Retrieves a paginated list of withdrawals. Optionally filtered by L2 initiator address.",
     parameters:
       base_params() ++
+        [
+          %OpenApiSpex.Parameter{
+            name: :address_hash,
+            in: :query,
+            schema: Schemas.General.AddressHash,
+            required: false,
+            description: "L2 initiator address to filter the withdrawals by."
+          }
+        ] ++
         define_paging_params([
           "items_count",
           "nonce"
@@ -607,27 +640,40 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   """
   @spec withdrawals(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def withdrawals(conn, params) do
-    {withdrawals, next_page} =
-      params
-      |> paging_options()
-      |> Keyword.put(:api?, true)
-      |> Withdrawal.list()
-      |> split_list_by_page()
+    with {:ok, address_hash} <- parse_optional_address_hash(params["address_hash"]) do
+      {withdrawals, next_page} =
+        params
+        |> paging_options()
+        |> Keyword.put(:api?, true)
+        |> Keyword.put(:address_hash, address_hash)
+        |> Withdrawal.list()
+        |> split_list_by_page()
 
-    next_page_params = next_page_params(next_page, withdrawals, params)
+      next_page_params = next_page_params(next_page, withdrawals, params)
 
-    conn
-    |> put_status(200)
-    |> render(:optimism_withdrawals, %{
-      withdrawals: withdrawals,
-      next_page_params: next_page_params
-    })
+      conn
+      |> put_status(200)
+      |> render(:optimism_withdrawals, %{
+        withdrawals: withdrawals,
+        next_page_params: next_page_params
+      })
+    end
   end
 
   operation :withdrawals_count,
     summary: "Number of withdrawals in the list.",
-    description: "Retrieves a size of the withdrawals list.",
-    parameters: base_params(),
+    description: "Retrieves a size of the withdrawals list. Optionally filtered by L2 initiator address.",
+    parameters:
+      base_params() ++
+        [
+          %OpenApiSpex.Parameter{
+            name: :address_hash,
+            in: :query,
+            schema: Schemas.General.AddressHash,
+            required: false,
+            description: "L2 initiator address to filter the withdrawals count by."
+          }
+        ],
     responses: [
       ok: {"Number of items in the withdrawals list.", "application/json", %Schema{type: :integer, nullable: false}},
       unprocessable_entity: JsonErrorResponse.response()
@@ -637,8 +683,18 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   Function to handle GET requests to `/api/v2/optimism/withdrawals/count` endpoint.
   """
   @spec withdrawals_count(Plug.Conn.t(), map()) :: Plug.Conn.t()
-  def withdrawals_count(conn, _params) do
-    items_count(conn, Withdrawal)
+  def withdrawals_count(conn, params) do
+    with {:ok, address_hash} <- parse_optional_address_hash(params["address_hash"]) do
+      count =
+        case address_hash do
+          nil -> Chain.get_table_rows_total_count(Withdrawal, api?: true)
+          _ -> Withdrawal.count(api?: true, address_hash: address_hash)
+        end
+
+      conn
+      |> put_status(200)
+      |> render(:optimism_items_count, %{count: count})
+    end
   end
 
   operation :interop_public_key, false
@@ -1078,5 +1134,21 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
     conn
     |> put_status(200)
     |> render(:optimism_items_count, %{count: count})
+  end
+
+  # Parses an optional `address_hash` query parameter into `Hash.Address.t()`.
+  # Returns `{:ok, nil}` when the input is `nil` or empty so callers can pass it
+  # through unconditionally. Returns `{:format, :error}` on a malformed hash,
+  # which the FallbackController turns into a 422 response.
+  @spec parse_optional_address_hash(nil | String.t()) ::
+          {:ok, Hash.Address.t() | nil} | {:format, :error}
+  defp parse_optional_address_hash(nil), do: {:ok, nil}
+  defp parse_optional_address_hash(""), do: {:ok, nil}
+
+  defp parse_optional_address_hash(str) when is_binary(str) do
+    case Chain.string_to_address_hash(str) do
+      {:ok, hash} -> {:ok, hash}
+      :error -> {:format, :error}
+    end
   end
 end

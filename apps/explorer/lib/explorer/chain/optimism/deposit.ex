@@ -71,10 +71,13 @@ defmodule Explorer.Chain.Optimism.Deposit do
   @doc """
   Lists `t:Explorer.Chain.Optimism.Deposit.t/0`'s' in descending order based on l1_block_number and l2_transaction_hash.
 
+  Accepts an optional `:address_hash` filter (`Hash.Address.t()` or `nil`) which
+  restricts the result to deposits whose L1 origin address matches the given hash.
   """
   @spec list :: [__MODULE__.t()]
   def list(options \\ []) do
     paging_options = Keyword.get(options, :paging_options, default_paging_options())
+    address_hash = Keyword.get(options, :address_hash)
 
     case paging_options do
       %PagingOptions{key: {0, _l2_transaction_hash}} ->
@@ -98,6 +101,7 @@ defmodule Explorer.Chain.Optimism.Deposit do
           )
 
         base_query
+        |> filter_by_address(address_hash)
         |> page_deposits(paging_options)
         |> limit(^paging_options.page_size)
         |> select_repo(options).all(timeout: :infinity)
@@ -110,12 +114,16 @@ defmodule Explorer.Chain.Optimism.Deposit do
     ## Parameters
     - `options`: A keyword list of options:
       - `:api?` - Whether the function is being called from an API context.
+      - `:address_hash` - An optional `Hash.Address.t()` to restrict the count to
+        deposits whose L1 origin address matches the given hash.
 
     ## Returns
     - A total number of deposits.
   """
   @spec count(list()) :: non_neg_integer()
   def count(options \\ []) do
+    address_hash = Keyword.get(options, :address_hash)
+
     query =
       from(
         d in __MODULE__,
@@ -123,7 +131,15 @@ defmodule Explorer.Chain.Optimism.Deposit do
         on: t.hash == d.l2_transaction_hash and t.status == :ok
       )
 
-    select_repo(options).aggregate(query, :count)
+    query
+    |> filter_by_address(address_hash)
+    |> select_repo(options).aggregate(:count)
+  end
+
+  defp filter_by_address(query, nil), do: query
+
+  defp filter_by_address(query, address_hash) do
+    from(d in query, where: d.l1_transaction_origin == ^address_hash)
   end
 
   defp page_deposits(query, %PagingOptions{key: nil}), do: query

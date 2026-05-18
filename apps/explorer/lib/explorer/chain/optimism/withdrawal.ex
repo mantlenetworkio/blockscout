@@ -62,10 +62,14 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   @doc """
   Lists `t:Explorer.Chain.Optimism.Withdrawal.t/0`'s' in descending order based on message nonce.
 
+  Accepts an optional `:address_hash` filter (`Hash.Address.t()` or `nil`) which
+  restricts the result to withdrawals whose L2 transaction `from_address_hash`
+  matches the given hash.
   """
   @spec list :: [__MODULE__.t()]
   def list(options \\ []) do
     paging_options = Keyword.get(options, :paging_options, default_paging_options())
+    address_hash = Keyword.get(options, :address_hash)
 
     case paging_options do
       %PagingOptions{key: {0}} ->
@@ -76,8 +80,10 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
 
         base_query =
           from(w in __MODULE__,
+            as: :withdrawal,
             order_by: [desc: w.msg_nonce],
             left_join: l2_transaction in Transaction,
+            as: :l2_transaction,
             on: w.l2_transaction_hash == l2_transaction.hash,
             left_join: l2_block in Block,
             on: w.l2_block_number == l2_block.number,
@@ -102,16 +108,54 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
           )
 
         base_query
+        |> filter_by_address(address_hash)
         |> page_optimism_withdrawals(paging_options)
         |> limit(^paging_options.page_size)
         |> select_repo(options).all(timeout: :infinity)
     end
   end
 
+  @doc """
+    Returns total number of displayed withdrawals.
+
+    ## Parameters
+    - `options`: A keyword list of options:
+      - `:api?` - Whether the function is being called from an API context.
+      - `:address_hash` - An optional `Hash.Address.t()` to restrict the count to
+        withdrawals whose L2 transaction `from_address_hash` matches the given hash.
+
+    ## Returns
+    - A total number of withdrawals.
+  """
+  @spec count(list()) :: non_neg_integer()
+  def count(options \\ []) do
+    address_hash = Keyword.get(options, :address_hash)
+
+    query =
+      from(w in __MODULE__,
+        as: :withdrawal,
+        left_join: l2_transaction in Transaction,
+        as: :l2_transaction,
+        on: w.l2_transaction_hash == l2_transaction.hash
+      )
+
+    query
+    |> filter_by_address(address_hash)
+    |> select_repo(options).aggregate(:count)
+  end
+
+  defp filter_by_address(query, nil), do: query
+
+  defp filter_by_address(query, address_hash) do
+    from([l2_transaction: l2_transaction] in query,
+      where: l2_transaction.from_address_hash == ^address_hash
+    )
+  end
+
   defp page_optimism_withdrawals(query, %PagingOptions{key: nil}), do: query
 
   defp page_optimism_withdrawals(query, %PagingOptions{key: {nonce}}) do
-    from(w in query, where: w.msg_nonce < ^nonce)
+    from([withdrawal: w] in query, where: w.msg_nonce < ^nonce)
   end
 
   @doc """

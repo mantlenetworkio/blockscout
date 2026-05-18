@@ -5,7 +5,8 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
   import Mox
 
   alias Explorer.Chain.{Address, Data}
-  alias Explorer.Chain.Optimism.Deposit
+  alias Explorer.Chain.Optimism.{Deposit, Withdrawal}
+  alias Explorer.Repo
   alias Explorer.TestHelper
 
   setup :set_mox_global
@@ -22,6 +23,108 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
         assert response_2nd_page = json_response(request_2nd_page, 200)
 
         check_paginated_response(response, response_2nd_page, deposits)
+      end
+
+      test "deposits filtered by address_hash returns only matching", %{conn: conn} do
+        target = insert(:address)
+        match1 = insert(:op_deposit, l1_transaction_origin: target.hash)
+        match2 = insert(:op_deposit, l1_transaction_origin: target.hash)
+        _other1 = insert(:op_deposit)
+        _other2 = insert(:op_deposit)
+
+        request = get(conn, "/api/v2/optimism/deposits", %{"address_hash" => to_string(target.hash)})
+
+        assert %{"items" => items, "next_page_params" => nil} = json_response(request, 200)
+
+        returned_hashes =
+          items
+          |> Enum.map(& &1["l2_transaction_hash"])
+          |> Enum.sort()
+
+        expected_hashes =
+          [match1, match2]
+          |> Enum.map(&to_string(&1.l2_transaction_hash))
+          |> Enum.sort()
+
+        assert returned_hashes == expected_hashes
+      end
+
+      test "deposits with invalid address_hash returns 422", %{conn: conn} do
+        request = get(conn, "/api/v2/optimism/deposits", %{"address_hash" => "not_an_addr"})
+
+        assert json_response(request, 422)
+      end
+    end
+  end
+
+  describe "/optimism/deposits/count" do
+    if @chain_type == :optimism do
+      test "deposits_count without filter returns total", %{conn: conn} do
+        insert_list(3, :op_deposit)
+
+        request = get(conn, "/api/v2/optimism/deposits/count")
+
+        assert json_response(request, 200) == 3
+      end
+
+      test "deposits_count filtered by address_hash returns scoped count", %{conn: conn} do
+        target = insert(:address)
+        insert(:op_deposit, l1_transaction_origin: target.hash)
+        insert(:op_deposit, l1_transaction_origin: target.hash)
+        insert(:op_deposit)
+
+        request = get(conn, "/api/v2/optimism/deposits/count", %{"address_hash" => to_string(target.hash)})
+
+        assert json_response(request, 200) == 2
+      end
+
+      test "deposits_count with invalid address_hash returns 422", %{conn: conn} do
+        request = get(conn, "/api/v2/optimism/deposits/count", %{"address_hash" => "not_an_addr"})
+
+        assert json_response(request, 422)
+      end
+    end
+  end
+
+  describe "/optimism/withdrawals" do
+    if @chain_type == :optimism do
+      test "withdrawals filtered by address_hash returns only matching", %{conn: conn} do
+        target = insert(:address)
+        match = insert_withdrawal(from_address: target)
+        _other = insert_withdrawal()
+        _other2 = insert_withdrawal()
+
+        request = get(conn, "/api/v2/optimism/withdrawals", %{"address_hash" => to_string(target.hash)})
+
+        assert %{"items" => [item], "next_page_params" => nil} = json_response(request, 200)
+        assert item["l2_transaction_hash"] == to_string(match.l2_transaction_hash)
+      end
+
+      test "withdrawals with invalid address_hash returns 422", %{conn: conn} do
+        request = get(conn, "/api/v2/optimism/withdrawals", %{"address_hash" => "not_an_addr"})
+
+        assert json_response(request, 422)
+      end
+    end
+  end
+
+  describe "/optimism/withdrawals/count" do
+    if @chain_type == :optimism do
+      test "withdrawals_count filtered by address_hash returns scoped count", %{conn: conn} do
+        target = insert(:address)
+        insert_withdrawal(from_address: target)
+        insert_withdrawal(from_address: target)
+        insert_withdrawal()
+
+        request = get(conn, "/api/v2/optimism/withdrawals/count", %{"address_hash" => to_string(target.hash)})
+
+        assert json_response(request, 200) == 2
+      end
+
+      test "withdrawals_count with invalid address_hash returns 422", %{conn: conn} do
+        request = get(conn, "/api/v2/optimism/withdrawals/count", %{"address_hash" => "not_an_addr"})
+
+        assert json_response(request, 422)
       end
     end
   end
@@ -74,5 +177,16 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
     assert Address.checksum(deposit.l1_transaction_origin) == Address.checksum(json["l1_transaction_origin"])
     assert to_string(deposit.l2_transaction.hash) == json["l2_transaction_hash"]
     assert to_string(deposit.l2_transaction.gas) == json["l2_transaction_gas_limit"]
+  end
+
+  defp insert_withdrawal(opts \\ []) do
+    transaction = insert(:transaction, Keyword.take(opts, [:from_address]))
+
+    Repo.insert!(%Withdrawal{
+      msg_nonce: Decimal.new(System.unique_integer([:positive])),
+      hash: Explorer.Factory.transaction_hash(),
+      l2_transaction_hash: transaction.hash,
+      l2_block_number: transaction.block_number || 1
+    })
   end
 end
