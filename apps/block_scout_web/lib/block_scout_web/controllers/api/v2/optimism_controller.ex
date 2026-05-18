@@ -390,7 +390,7 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   """
   @spec deposits(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def deposits(conn, params) do
-    with {:ok, address_hash} <- parse_optional_address_hash(params["address_hash"]) do
+    with {:ok, address_hash} <- parse_optional_address_hash(params[:address_hash]) do
       {deposits, next_page} =
         params
         |> paging_options()
@@ -462,7 +462,7 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   """
   @spec deposits_count(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def deposits_count(conn, params) do
-    with {:ok, address_hash} <- parse_optional_address_hash(params["address_hash"]) do
+    with {:ok, address_hash} <- parse_optional_address_hash(params[:address_hash]) do
       count = Deposit.count(api?: true, address_hash: address_hash)
 
       conn
@@ -640,7 +640,7 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   """
   @spec withdrawals(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def withdrawals(conn, params) do
-    with {:ok, address_hash} <- parse_optional_address_hash(params["address_hash"]) do
+    with {:ok, address_hash} <- parse_optional_address_hash(params[:address_hash]) do
       {withdrawals, next_page} =
         params
         |> paging_options()
@@ -684,7 +684,7 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   """
   @spec withdrawals_count(Plug.Conn.t(), map()) :: Plug.Conn.t()
   def withdrawals_count(conn, params) do
-    with {:ok, address_hash} <- parse_optional_address_hash(params["address_hash"]) do
+    with {:ok, address_hash} <- parse_optional_address_hash(params[:address_hash]) do
       count =
         case address_hash do
           nil -> Chain.get_table_rows_total_count(Withdrawal, api?: true)

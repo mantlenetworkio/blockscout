@@ -54,6 +54,19 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
 
         assert json_response(request, 422)
       end
+
+      # Regression: previously params["address_hash"] returned nil under
+      # CastAndValidate (atom-keyed params), filter no-op'd, and an unrelated
+      # but well-formed address still returned the full chain.
+      test "deposits returns empty items for a well-formed address that is absent from DB", %{conn: conn} do
+        insert(:op_deposit)
+        insert(:op_deposit)
+        unrelated = insert(:address)
+
+        request = get(conn, "/api/v2/optimism/deposits", %{"address_hash" => to_string(unrelated.hash)})
+
+        assert %{"items" => [], "next_page_params" => nil} = json_response(request, 200)
+      end
     end
   end
 
@@ -83,6 +96,17 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
 
         assert json_response(request, 422)
       end
+
+      # Regression: see deposits regression note above.
+      test "deposits_count returns 0 for a well-formed address that is absent from DB", %{conn: conn} do
+        insert(:op_deposit)
+        insert(:op_deposit)
+        unrelated = insert(:address)
+
+        request = get(conn, "/api/v2/optimism/deposits/count", %{"address_hash" => to_string(unrelated.hash)})
+
+        assert json_response(request, 200) == 0
+      end
     end
   end
 
@@ -105,6 +129,17 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
 
         assert json_response(request, 422)
       end
+
+      # Regression: see deposits regression note above.
+      test "withdrawals returns empty items for a well-formed address that is absent from DB", %{conn: conn} do
+        insert_withdrawal()
+        insert_withdrawal()
+        unrelated = insert(:address)
+
+        request = get(conn, "/api/v2/optimism/withdrawals", %{"address_hash" => to_string(unrelated.hash)})
+
+        assert %{"items" => [], "next_page_params" => nil} = json_response(request, 200)
+      end
     end
   end
 
@@ -125,6 +160,17 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
         request = get(conn, "/api/v2/optimism/withdrawals/count", %{"address_hash" => "not_an_addr"})
 
         assert json_response(request, 422)
+      end
+
+      # Regression: see deposits regression note above.
+      test "withdrawals_count returns 0 for a well-formed address that is absent from DB", %{conn: conn} do
+        insert_withdrawal()
+        insert_withdrawal()
+        unrelated = insert(:address)
+
+        request = get(conn, "/api/v2/optimism/withdrawals/count", %{"address_hash" => to_string(unrelated.hash)})
+
+        assert json_response(request, 200) == 0
       end
     end
   end
