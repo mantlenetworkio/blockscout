@@ -90,8 +90,12 @@ defmodule Indexer.Fetcher.Token do
   # Overlay hardcoded metadata for known Mantle predeploys (e.g. WETH at
   # 0xdEAd...1111) when their on-chain `name()`/`symbol()`/`decimals()` calls
   # don't yield usable values. On-chain values still win — overrides only fill
-  # nil fields, so a real ERC-20 that happens to share an address would not be
-  # silently relabeled.
+  # nil or empty fields, so a real ERC-20 that happens to share an address
+  # would not be silently relabeled.
+  #
+  # Note: the contract at 0xdEAd…1111 doesn't revert; it returns empty strings
+  # for `name()` and `symbol()`. Treat `""` as missing too, otherwise the
+  # overlay would never apply.
   defp apply_predeploy_overrides(params, token) do
     case Predeploys.lookup(token.contract_address_hash) do
       nil ->
@@ -103,9 +107,15 @@ defmodule Indexer.Fetcher.Token do
       overrides ->
         params
         |> Map.drop([:skip_metadata])
-        |> Map.merge(overrides, fn _key, on_chain, hardcoded -> on_chain || hardcoded end)
+        |> Map.merge(overrides, fn _key, on_chain, hardcoded ->
+          if blank?(on_chain), do: hardcoded, else: on_chain
+        end)
     end
   end
+
+  defp blank?(nil), do: true
+  defp blank?(""), do: true
+  defp blank?(_), do: false
 
   defp defaults do
     [

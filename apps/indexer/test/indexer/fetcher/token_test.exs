@@ -127,5 +127,66 @@ defmodule Indexer.Fetcher.TokenTest do
                 }} = Chain.token_from_address_hash(contract_address_hash)
       end
     end
+
+    test "treats empty-string on-chain name/symbol as missing and overlays Mantle predeploy metadata",
+         %{json_rpc_named_arguments: json_rpc_named_arguments} do
+      # The L2 WETH at 0xdEAd…1111 actually doesn't revert — `name()` and
+      # `symbol()` return empty bytes that decode to "". Without treating ""
+      # as missing, the overlay never applies and the token stays unnamed.
+      weth_address = build(:contract_address, hash: "0xdeaddeaddeaddeaddeaddeaddeaddeaddead1111")
+
+      token =
+        insert(:token,
+          contract_address: weth_address,
+          name: nil,
+          symbol: nil,
+          decimals: nil,
+          total_supply: nil,
+          cataloged: false
+        )
+
+      contract_address_hash = token.contract_address_hash
+
+      if json_rpc_named_arguments[:transport] == EthereumJSONRPC.Mox do
+        # ABI-encoded empty string: offset (0x20) + length (0).
+        empty_string_abi =
+          "0x0000000000000000000000000000000000000000000000000000000000000020" <>
+            "0000000000000000000000000000000000000000000000000000000000000000"
+
+        expect(
+          EthereumJSONRPC.Mox,
+          :json_rpc,
+          1,
+          fn requests, _opts ->
+            {:ok,
+             Enum.map(requests, fn
+               %{id: id, method: "eth_call", params: [%{data: "0x313ce567", to: _}, "latest"]} ->
+                 %{id: id, result: "0x0000000000000000000000000000000000000000000000000000000000000012"}
+
+               %{id: id, method: "eth_call", params: [%{data: "0x06fdde03", to: _}, "latest"]} ->
+                 %{id: id, result: empty_string_abi}
+
+               %{id: id, method: "eth_call", params: [%{data: "0x95d89b41", to: _}, "latest"]} ->
+                 %{id: id, result: empty_string_abi}
+
+               %{id: id, method: "eth_call", params: [%{data: "0x18160ddd", to: _}, "latest"]} ->
+                 %{id: id, result: "0x0000000000000000000000000000000000000000000000000000000000000001"}
+             end)}
+          end
+        )
+
+        assert TokenFetcher.run([contract_address_hash], json_rpc_named_arguments) == :ok
+
+        weth_decimals = Decimal.new(18)
+
+        assert {:ok,
+                %Token{
+                  name: "Wrapped Ether",
+                  symbol: "WETH",
+                  decimals: ^weth_decimals,
+                  cataloged: true
+                }} = Chain.token_from_address_hash(contract_address_hash)
+      end
+    end
   end
 end
