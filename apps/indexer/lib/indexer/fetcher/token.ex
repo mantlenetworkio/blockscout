@@ -8,6 +8,7 @@ defmodule Indexer.Fetcher.Token do
 
   alias Explorer.Chain
   alias Explorer.Chain.Hash.Address
+  alias Explorer.Chain.Mantle.Predeploys
   alias Explorer.Chain.Token
   alias Explorer.MicroserviceInterfaces.MultichainSearch
   alias Explorer.Token.MetadataRetriever
@@ -69,8 +70,9 @@ defmodule Indexer.Fetcher.Token do
   defp catalog_token(token) do
     token
     |> MetadataRetriever.get_functions_of(set_skip_metadata: true)
+    |> apply_predeploy_overrides(token)
     |> case do
-      %{skip_metadata: false} ->
+      :no_metadata ->
         :ok
 
       token_params ->
@@ -82,6 +84,26 @@ defmodule Indexer.Fetcher.Token do
 
         {:ok, _} = Token.update(token, Map.put(token_params, :cataloged, true))
         :ok
+    end
+  end
+
+  # Overlay hardcoded metadata for known Mantle predeploys (e.g. WETH at
+  # 0xdEAd...1111) when their on-chain `name()`/`symbol()`/`decimals()` calls
+  # don't yield usable values. On-chain values still win — overrides only fill
+  # nil fields, so a real ERC-20 that happens to share an address would not be
+  # silently relabeled.
+  defp apply_predeploy_overrides(params, token) do
+    case Predeploys.lookup(token.contract_address_hash) do
+      nil ->
+        case params do
+          %{skip_metadata: false} -> :no_metadata
+          token_params -> token_params
+        end
+
+      overrides ->
+        params
+        |> Map.drop([:skip_metadata])
+        |> Map.merge(overrides, fn _key, on_chain, hardcoded -> on_chain || hardcoded end)
     end
   end
 
