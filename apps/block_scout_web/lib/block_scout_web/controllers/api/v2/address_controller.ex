@@ -1118,7 +1118,11 @@ defmodule BlockScoutWeb.API.V2.AddressController do
     next_page_params = next_page_params(next_page, addresses, params)
 
     exchange_rate = Market.get_coin_exchange_rate()
-    total_supply = Chain.total_supply()
+
+    total_supply =
+      if Application.get_env(:block_scout_web, :show_percentage) do
+        Chain.total_supply()
+      end
 
     conn
     |> put_status(200)
