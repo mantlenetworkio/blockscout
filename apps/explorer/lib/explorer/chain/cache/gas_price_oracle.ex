@@ -205,7 +205,12 @@ defmodule Explorer.Chain.Cache.GasPriceOracle do
         exchange_rate = Market.get_coin_exchange_rate()
         average_block_time = get_average_block_time()
 
-        gas_prices = compose_gas_price(base_fee_wei, average_block_time, exchange_rate, base_fee_wei, 0)
+        priority_fee_int_wei = fetch_max_priority_fee_per_gas_from_rpc() || 0
+        priority_fee_wei = priority_fee_int_wei |> Decimal.new() |> Wei.from(:wei)
+        total_fee_wei = Wei.sum(base_fee_wei, priority_fee_wei)
+
+        gas_prices =
+          compose_gas_price(total_fee_wei, average_block_time, exchange_rate, base_fee_wei, priority_fee_int_wei)
 
         %{
           slow: gas_prices,
@@ -324,6 +329,28 @@ defmodule Explorer.Chain.Cache.GasPriceOracle do
 
   defp priority_with_base_fee(priority, base_fee) do
     priority |> Wei.from(:wei) |> Wei.sum(base_fee)
+  end
+
+  # Best-effort fetch of `eth_maxPriorityFeePerGas` from the configured upstream node.
+  # Returns the suggested priority fee in wei, or `nil` if the RPC call fails for any
+  # reason. Caller must default `nil` to `0` to preserve legacy behavior.
+  defp fetch_max_priority_fee_per_gas_from_rpc do
+    EthereumJSONRPC.fetch_max_priority_fee_per_gas(Application.get_env(:explorer, :json_rpc_named_arguments))
+  rescue
+    error ->
+      Logger.debug(["Couldn't fetch eth_maxPriorityFeePerGas. Reason: ", inspect(error)])
+      nil
+  catch
+    kind, reason ->
+      Logger.debug(["Couldn't fetch eth_maxPriorityFeePerGas (#{kind}). Reason: ", inspect(reason)])
+      nil
+  else
+    {:ok, value} when is_integer(value) and value >= 0 ->
+      value
+
+    other ->
+      Logger.debug(["Unexpected eth_maxPriorityFeePerGas response: ", inspect(other)])
+      nil
   end
 
   defp gas_price(nil), do: nil

@@ -492,25 +492,27 @@ defmodule Explorer.Chain.Block do
   def uncle_reward_coef, do: @uncle_reward_coef
 
   # Gets EIP-1559 config actual for the given block number.
-  # If not found, returns EIP_1559_BASE_FEE_MAX_CHANGE_DENOMINATOR and EIP_1559_ELASTICITY_MULTIPLIER env values.
+  # If not found, returns EIP_1559_BASE_FEE_MAX_CHANGE_DENOMINATOR and EIP_1559_ELASTICITY_MULTIPLIER env values
+  # with `nil` for `min_base_fee` (no per-block floor).
   #
   # ## Parameters
   # - `block_number`: The given block number.
   #
   # ## Returns
-  # - `{denominator, multiplier}` tuple.
-  @spec get_eip1559_config(non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
+  # - `{denominator, multiplier, min_base_fee}` tuple. `min_base_fee` is the per-block floor in wei from
+  #   the on-chain Holocene config, or `nil` when no per-block floor is set.
+  @spec get_eip1559_config(non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer() | nil}
   defp get_eip1559_config(block_number) do
     with true <- Application.get_env(:explorer, :chain_type) == :optimism,
          # credo:disable-for-next-line Credo.Check.Design.AliasUsage
          config = Explorer.Chain.Optimism.EIP1559ConfigUpdate.actual_config_for_block(block_number),
          false <- is_nil(config) do
-      {denominator, multiplier, _min_base_fee} = config
-      {denominator, multiplier}
+      config
     else
       _ ->
         {Application.get_env(:explorer, :base_fee_max_change_denominator),
-         Application.get_env(:explorer, :elasticity_multiplier)}
+         Application.get_env(:explorer, :elasticity_multiplier), nil}
     end
   end
 
@@ -532,7 +534,7 @@ defmodule Explorer.Chain.Block do
   @spec gas_target(t()) :: float()
   def gas_target(block) do
     if Decimal.compare(block.gas_limit, 0) == :gt do
-      {_, elasticity_multiplier} = get_eip1559_config(block.number)
+      {_, elasticity_multiplier, _} = get_eip1559_config(block.number)
 
       ratio = Decimal.div(block.gas_used, Decimal.div(block.gas_limit, elasticity_multiplier))
       ratio |> Decimal.sub(1) |> Decimal.mult(100) |> Decimal.to_float()
@@ -586,11 +588,16 @@ defmodule Explorer.Chain.Block do
 
   @spec next_block_base_fee_per_gas(t()) :: Decimal.t() | nil
   def next_block_base_fee_per_gas(block) do
-    {base_fee_max_change_denominator, elasticity_multiplier} = get_eip1559_config(block.number)
+    # OP Holocene/Jovian: extraData of block N specifies params that apply starting from block N+1.
+    # The row stored at `l2_block_number = N` therefore governs block N+1, and
+    # `actual_config_for_block/1` filters `l2_block_number < x`. We compute block N+1's base fee,
+    # so we query with `block.number + 1` to include the row at `block.number` itself.
+    {base_fee_max_change_denominator, elasticity_multiplier, min_base_fee} = get_eip1559_config(block.number + 1)
 
     gas_target = Decimal.div_int(block.gas_limit, elasticity_multiplier)
 
-    lower_bound = Application.get_env(:explorer, :base_fee_lower_bound)
+    env_lower_bound = Application.get_env(:explorer, :base_fee_lower_bound)
+    lower_bound = max(env_lower_bound || 0, min_base_fee || 0)
 
     base_fee_per_gas_decimal = block.base_fee_per_gas |> Wei.to(:wei)
 

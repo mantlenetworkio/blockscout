@@ -4,7 +4,9 @@ defmodule Explorer.Chain.BlockTest do
   alias Ecto.Changeset
   alias Explorer.Chain.{Address, Block, PendingBlockOperation, Wei}
   alias Explorer.Chain.InternalTransaction.DeleteQueue, as: InternalTransactionDeleteQueue
+  alias Explorer.Chain.Optimism.EIP1559ConfigUpdate
   alias Explorer.PagingOptions
+  alias Explorer.Repo
 
   describe "changeset/2" do
     test "with valid attributes" do
@@ -143,6 +145,44 @@ defmodule Explorer.Chain.BlockTest do
       )
 
       assert Block.next_block_base_fee_per_gas() == Decimal.new(1100)
+    end
+
+    test "applies min_base_fee from the OP Holocene config row stored at the latest block's own number" do
+      # Per OP Holocene/Jovian spec, params in block N's extraData apply starting from block N+1.
+      # When the latest indexed block IS the config-change block, the new floor must still be
+      # applied to the next-block estimate. Regression guard for the off-by-one in
+      # `actual_config_for_block(< X)` boundary.
+      old_chain_type = Application.get_env(:explorer, :chain_type)
+      Application.put_env(:explorer, :chain_type, :optimism)
+      on_exit(fn -> Application.put_env(:explorer, :chain_type, old_chain_type) end)
+
+      block_number = 100
+
+      block_hash =
+        "0xfeed0000000000000000000000000000000000000000000000000000000000aa"
+
+      insert(:block,
+        consensus: true,
+        number: block_number,
+        hash: block_hash,
+        base_fee_per_gas: Wei.from(Decimal.new(1_000), :wei),
+        gas_limit: Decimal.new(30_000_000),
+        gas_used: Decimal.new(0)
+      )
+
+      # Holocene/Jovian config row at l2_block_number = block_number — governs block_number + 1.
+      # min_base_fee chosen well above the unfloored formula result so the test only passes when
+      # the lookup uses `block_number + 1` (which includes this row) rather than `block_number`.
+      Repo.insert!(%EIP1559ConfigUpdate{
+        l2_block_number: block_number,
+        l2_block_hash:
+          "0x00000000000000000000000000000000000000000000000000000000000000bb" |> Explorer.Chain.Hash.Full.cast() |> elem(1),
+        base_fee_max_change_denominator: 8,
+        elasticity_multiplier: 2,
+        min_base_fee: 5_000
+      })
+
+      assert Block.next_block_base_fee_per_gas() == Decimal.new(5_000)
     end
   end
 

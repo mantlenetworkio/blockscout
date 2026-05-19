@@ -478,6 +478,30 @@ defmodule EthereumJSONRPC do
   end
 
   @doc """
+    Fetches the node's suggested priority fee via `eth_maxPriorityFeePerGas`.
+
+    ## Parameters
+    - `json_rpc_named_arguments`: A keyword list of JSON-RPC configuration options.
+
+    ## Returns
+    - `{:ok, value}` tuple where `value` is the suggested priority fee in wei.
+    - `{:error, reason}` tuple in case of error.
+  """
+  @spec fetch_max_priority_fee_per_gas(json_rpc_named_arguments) ::
+          {:ok, non_neg_integer()} | {:error, reason :: term}
+  def fetch_max_priority_fee_per_gas(json_rpc_named_arguments) do
+    result =
+      %{id: 0, method: "eth_maxPriorityFeePerGas", params: []}
+      |> request()
+      |> json_rpc(json_rpc_named_arguments)
+
+    case result do
+      {:ok, value} -> {:ok, quantity_to_integer(value)}
+      other -> other
+    end
+  end
+
+  @doc """
     Fetches the block number for a block identified by a semantic tag.
 
     ## Parameters
