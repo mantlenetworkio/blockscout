@@ -4,8 +4,9 @@ defmodule BlockScoutWeb.V2.AddressChannelTest do
     async: false
 
   alias BlockScoutWeb.Notifier
-  alias Explorer.Chain.Wei
   alias Explorer.Chain.Cache.Counters.AddressesCount
+  alias Explorer.Chain.{Transaction, Wei}
+  alias Explorer.Repo
 
   test "subscribed user is notified of new_address count event" do
     topic = "addresses:new_address"
@@ -102,6 +103,31 @@ defmodule BlockScoutWeb.V2.AddressChannelTest do
                      :timer.seconds(5)
 
       assert List.first(payload.transactions)["hash"] == transaction.hash
+    end
+
+    test "notified of contract_call for transaction with unloaded contract to_address" do
+      contract_address = insert(:contract_address)
+      topic = "addresses:#{contract_address.hash}"
+      @endpoint.subscribe(topic)
+
+      transaction =
+        :transaction
+        |> insert(to_address: contract_address, value: 0)
+        |> with_block()
+
+      transaction = Repo.get!(Transaction, transaction.hash)
+      assert match?(%Ecto.Association.NotLoaded{}, transaction.to_address)
+
+      Notifier.handle_event({:chain_event, :transactions, :realtime, [transaction]})
+
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^topic,
+                       event: "transaction",
+                       payload: %{transactions: [payload]}
+                     },
+                     :timer.seconds(5)
+
+      assert payload["transaction_types"] == [:contract_call]
     end
 
     test "not notified twice of new_transaction if to and from address are equal", %{address: address, topic: topic} do

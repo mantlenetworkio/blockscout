@@ -712,6 +712,18 @@ defmodule BlockScoutWeb.Notifier do
       })
     end
 
+    address_preloads = [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
+    created_contract_address_preloads = [:token | address_preloads]
+
+    transactions =
+      Repo.preload(transactions, [
+        :block,
+        [created_contract_address: created_contract_address_preloads],
+        [from_address: address_preloads],
+        [to_address: address_preloads],
+        :token_transfers
+      ])
+
     prepared_transactions =
       TransactionView.render("transactions.json", %{
         transactions: transactions,
