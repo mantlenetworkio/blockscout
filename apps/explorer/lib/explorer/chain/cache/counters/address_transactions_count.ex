@@ -51,6 +51,16 @@ defmodule Explorer.Chain.Cache.Counters.AddressTransactionsCount do
 
   def cache_name, do: @cache_name
 
+  @spec invalidate(term()) :: :ok
+  def invalidate(address_hash) do
+    address_hash_string = to_string(address_hash)
+
+    delete_cache_key("hash_#{address_hash_string}")
+    delete_cache_key("hash_#{address_hash_string}_#{@last_update_key}")
+
+    :ok
+  end
+
   defp cache_expired?(address) do
     cache_period = Application.get_env(:explorer, __MODULE__)[:cache_period]
     address_hash_string = to_string(address.hash)
@@ -79,6 +89,12 @@ defmodule Explorer.Chain.Cache.Counters.AddressTransactionsCount do
     address
     |> Changeset.change(%{transactions_count: value})
     |> Repo.update()
+  end
+
+  defp delete_cache_key(key) do
+    if :ets.whereis(@cache_name) != :undefined do
+      :ets.delete(@cache_name, key)
+    end
   end
 
   defp enable_consolidation?, do: @enable_consolidation

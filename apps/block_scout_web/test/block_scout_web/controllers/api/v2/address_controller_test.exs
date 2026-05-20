@@ -4119,6 +4119,78 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
              } = response
     end
 
+    test "refreshes transactions counter before cache ttl expires", %{conn: conn} do
+      address = insert(:address)
+
+      block = insert(:block)
+
+      assert {:ok, %{transactions: [_from_transaction, _to_transaction]}} =
+               Chain.import(%{
+                 transactions: %{
+                   params: [
+                     params_for(:transaction,
+                       hash: build(:transaction).hash,
+                       block_hash: block.hash,
+                       block_number: block.number,
+                       index: 0,
+                       from_address_hash: address.hash,
+                       to_address_hash: insert(:address).hash,
+                       gas_used: 0,
+                       cumulative_gas_used: 0
+                     ),
+                     params_for(:transaction,
+                       hash: build(:transaction).hash,
+                       block_hash: block.hash,
+                       block_number: block.number,
+                       index: 1,
+                       from_address_hash: insert(:address).hash,
+                       to_address_hash: address.hash,
+                       gas_used: 0,
+                       cumulative_gas_used: 0
+                     )
+                   ]
+                 }
+               })
+
+      request = get(conn, "/api/v2/addresses/#{address.hash}/tabs-counters")
+
+      assert %{"transactions_count" => 2} = json_response(request, 200)
+
+      block = insert(:block)
+
+      assert {:ok, %{transactions: [_from_transaction, _to_transaction]}} =
+               Chain.import(%{
+                 transactions: %{
+                   params: [
+                     params_for(:transaction,
+                       hash: build(:transaction).hash,
+                       block_hash: block.hash,
+                       block_number: block.number,
+                       index: 0,
+                       from_address_hash: address.hash,
+                       to_address_hash: insert(:address).hash,
+                       gas_used: 0,
+                       cumulative_gas_used: 0
+                     ),
+                     params_for(:transaction,
+                       hash: build(:transaction).hash,
+                       block_hash: block.hash,
+                       block_number: block.number,
+                       index: 1,
+                       from_address_hash: insert(:address).hash,
+                       to_address_hash: address.hash,
+                       gas_used: 0,
+                       cumulative_gas_used: 0
+                     )
+                   ]
+                 }
+               })
+
+      request = get(conn, "/api/v2/addresses/#{address.hash}/tabs-counters")
+
+      assert %{"transactions_count" => 4} = json_response(request, 200)
+    end
+
     test "check counters cache ttl", %{conn: conn} do
       address = insert(:address, withdrawals: insert_list(60, :withdrawal))
 

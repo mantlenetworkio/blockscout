@@ -53,6 +53,7 @@ defmodule Explorer.Chain do
   }
 
   alias Explorer.Chain.Block.Reader.General, as: BlockReaderGeneral
+  alias Explorer.Chain.Celo.ElectionReward, as: CeloElectionReward
 
   alias Explorer.Chain.Cache.{
     BlockNumber,
@@ -61,6 +62,8 @@ defmodule Explorer.Chain do
   }
 
   alias Explorer.Chain.Cache.Counters.{
+    AddressTabsElementsCount,
+    AddressTransactionsCount,
     BlocksCount,
     ContractsCount,
     NewContractsCount,
@@ -1208,6 +1211,8 @@ defmodule Explorer.Chain do
   def import(options) do
     case Import.all(options) do
       {:ok, imported} = result ->
+        invalidate_address_counters(imported)
+
         assets_to_import = %{
           addresses: imported[:addresses] || [],
           blocks: imported[:blocks] || [],
@@ -1227,6 +1232,92 @@ defmodule Explorer.Chain do
       other_result ->
         other_result
     end
+  end
+
+  defp invalidate_address_counters(imported) do
+    invalidate_address_transaction_counters(imported[:transactions] || [])
+
+    invalidate_tab_counter(:validations, imported[:blocks] || [], &block_address_hashes/1)
+    invalidate_tab_counter(:token_transfers, imported[:token_transfers] || [], &token_transfer_address_hashes/1)
+    invalidate_tab_counter(:logs, imported[:logs] || [], &log_address_hashes/1)
+
+    invalidate_tab_counter(
+      :internal_transactions,
+      imported[:internal_transactions] || [],
+      &internal_transaction_address_hashes/1
+    )
+
+    invalidate_tab_counter(
+      :token_balances,
+      imported[:address_current_token_balances] || [],
+      &current_token_balance_address_hashes/1
+    )
+
+    invalidate_tab_counter(:withdrawals, imported[:withdrawals] || [], &withdrawal_address_hashes/1)
+
+    invalidate_tab_counter(
+      :celo_election_rewards,
+      imported[:celo_election_rewards] || [],
+      &celo_election_reward_address_hashes/1
+    )
+  end
+
+  defp invalidate_address_transaction_counters(transactions) do
+    transactions
+    |> Enum.flat_map(&transaction_address_hashes/1)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.each(fn address_hash ->
+      AddressTransactionsCount.invalidate(address_hash)
+      AddressTabsElementsCount.invalidate_transactions_counter(address_hash)
+    end)
+  end
+
+  defp invalidate_tab_counter(counter_type, records, address_hashes_fun) do
+    records
+    |> Enum.flat_map(address_hashes_fun)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.each(&AddressTabsElementsCount.invalidate_counter(counter_type, &1))
+  end
+
+  defp block_address_hashes(%Block{} = block), do: [block.miner_hash]
+
+  defp transaction_address_hashes(%Transaction{} = transaction) do
+    [
+      transaction.from_address_hash,
+      transaction.to_address_hash,
+      transaction.created_contract_address_hash
+    ]
+  end
+
+  defp transaction_address_hashes(_), do: []
+
+  defp token_transfer_address_hashes(%TokenTransfer{} = token_transfer) do
+    [
+      token_transfer.from_address_hash,
+      token_transfer.to_address_hash
+    ]
+  end
+
+  defp log_address_hashes(%Log{} = log), do: [log.address_hash]
+
+  defp internal_transaction_address_hashes(%InternalTransaction{} = internal_transaction) do
+    [
+      internal_transaction.from_address_hash,
+      internal_transaction.to_address_hash,
+      internal_transaction.created_contract_address_hash
+    ]
+  end
+
+  defp current_token_balance_address_hashes(%CurrentTokenBalance{} = current_token_balance) do
+    [current_token_balance.address_hash]
+  end
+
+  defp withdrawal_address_hashes(%Withdrawal{} = withdrawal), do: [withdrawal.address_hash]
+
+  defp celo_election_reward_address_hashes(%CeloElectionReward{} = election_reward) do
+    [election_reward.account_address_hash]
   end
 
   @doc """
