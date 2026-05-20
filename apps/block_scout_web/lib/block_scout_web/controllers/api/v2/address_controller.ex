@@ -64,6 +64,8 @@ defmodule BlockScoutWeb.API.V2.AddressController do
   alias Indexer.Fetcher.OnDemand.ContractCode, as: ContractCodeOnDemand
   alias Indexer.Fetcher.OnDemand.TokenBalance, as: TokenBalanceOnDemand
 
+  @optimism_predeploy_namespace_size 0x0800
+
   case @chain_identity do
     {:optimism, :celo} ->
       @chain_type_transaction_necessity_by_association %{
@@ -188,6 +190,8 @@ defmodule BlockScoutWeb.API.V2.AddressController do
     with {:ok, address_hash} <- validate_address_hash(address_hash_string, params) do
       case Chain.hash_to_address(address_hash, @address_options) do
         {:ok, address} ->
+          {address, contract_code_fetch_attempted?} = maybe_fetch_contract_code_on_demand(ip, address)
+
           %Address{} =
             fully_preloaded_address =
             Address.maybe_preload_smart_contract_associations(address, contract_address_preloads(), @api_true)
@@ -195,7 +199,10 @@ defmodule BlockScoutWeb.API.V2.AddressController do
           implementations = SmartContractHelper.pre_fetch_implementations(fully_preloaded_address)
 
           CoinBalanceOnDemand.trigger_fetch(ip, address)
-          ContractCodeOnDemand.trigger_fetch(ip, fully_preloaded_address)
+
+          unless contract_code_fetch_attempted? do
+            ContractCodeOnDemand.trigger_fetch(ip, fully_preloaded_address)
+          end
 
           conn
           |> put_status(200)
@@ -233,6 +240,29 @@ defmodule BlockScoutWeb.API.V2.AddressController do
       end
     end
   end
+
+  defp maybe_fetch_contract_code_on_demand(ip, %Address{} = address) do
+    if sync_fetch_contract_code?(address) do
+      case ContractCodeOnDemand.get_or_fetch_bytecode(ip, address.hash) do
+        {:ok, bytecode} -> {%Address{address | contract_code: bytecode}, true}
+        :error -> {address, true}
+      end
+    else
+      {address, false}
+    end
+  end
+
+  defp sync_fetch_contract_code?(%Address{contract_code: nil, hash: address_hash}) do
+    optimism_predeploy?(address_hash)
+  end
+
+  defp sync_fetch_contract_code?(_), do: false
+
+  defp optimism_predeploy?(%Hash{byte_count: 20, bytes: <<0x42, 0::size(136), suffix::unsigned-size(16)>>})
+       when suffix < @optimism_predeploy_namespace_size,
+       do: true
+
+  defp optimism_predeploy?(_), do: false
 
   operation :counters,
     summary: "Get activity count stats for a specific address",
