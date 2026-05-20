@@ -310,10 +310,19 @@ defmodule Indexer.Fetcher.OnDemand.ContractCodeTest do
       assert attempts.retries_number == 1
     end
 
-    test "returns :error when address is not found" do
-      # Build a random address hash that is not in DB
+    test "fetches from RPC when address is not found" do
       {:ok, random_hash} = Hash.Address.cast(<<1::160>>)
-      assert :error = ContractCodeOnDemand.get_or_fetch_bytecode(random_hash)
+      string_address_hash = to_string(random_hash)
+
+      contract_code_hex = "0x6080"
+
+      eth_get_code_expectation(string_address_hash, contract_code_hex)
+
+      code = Data.cast(contract_code_hex) |> elem(1)
+
+      assert {:ok, ^code} = ContractCodeOnDemand.get_or_fetch_bytecode(random_hash)
+
+      assert Repo.get(Address, random_hash).contract_code == code
     end
   end
 

@@ -206,19 +206,26 @@ defmodule BlockScoutWeb.API.V2.AddressController do
           })
 
         _ ->
+          contract_code =
+            case ContractCodeOnDemand.get_or_fetch_bytecode(ip, address_hash) do
+              {:ok, bytecode} -> bytecode
+              :error -> nil
+            end
+
           address =
             %Address{
               hash: address_hash,
+              contract_code: contract_code,
               names: [],
               scam_badge: nil,
               token: nil,
+              proxy_implementations: nil,
               signed_authorization: nil,
               smart_contract: nil
             }
             |> maybe_preload_ens_to_address()
 
           CoinBalanceOnDemand.trigger_fetch(ip, address)
-          ContractCodeOnDemand.trigger_fetch(ip, address)
 
           conn
           |> put_status(200)

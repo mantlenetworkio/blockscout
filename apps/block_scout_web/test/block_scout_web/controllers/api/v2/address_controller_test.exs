@@ -91,6 +91,34 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
       check_response(correct_response, json_response)
     end
 
+    test "fetches bytecode before rendering an address missing from DB", %{conn: conn} do
+      address = build(:address)
+      address_hash = address.hash
+      string_address_hash = to_string(address_hash)
+      contract_code = "0x6080"
+
+      EthereumJSONRPC.Mox
+      |> expect(:json_rpc, fn [
+                                %{
+                                  id: id,
+                                  jsonrpc: "2.0",
+                                  method: "eth_getCode",
+                                  params: [^string_address_hash, "latest"]
+                                }
+                              ],
+                              _ ->
+        {:ok, [%{id: id, result: contract_code}]}
+      end)
+
+      request = get(conn, "/api/v2/addresses/#{Address.checksum(address_hash)}")
+      response = json_response(request, 200)
+
+      assert response["is_contract"]
+
+      {:ok, expected_contract_code} = Explorer.Chain.Data.cast(contract_code)
+      assert Repo.get(Address, address_hash).contract_code == expected_contract_code
+    end
+
     test "get 422 on invalid address", %{conn: conn} do
       request = get(conn, "/api/v2/addresses/0x")
 
