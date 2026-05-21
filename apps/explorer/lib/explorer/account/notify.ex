@@ -5,6 +5,7 @@ defmodule Explorer.Account.Notify do
 
   alias Explorer.Account
   alias Explorer.Account.Notifier.Notify
+  alias Explorer.ThirdPartyIntegrations.{Auth0, Dynamic, Keycloak}
 
   require Logger
 
@@ -20,20 +21,17 @@ defmodule Explorer.Account.Notify do
   rescue
     err ->
       Logger.info("--- Notifier error", fetcher: :account)
-      Logger.info(err, fetcher: :account)
+      :error |> Exception.format(err, __STACKTRACE__) |> Logger.info(fetcher: :account)
   end
 
   defp check_envs do
-    check_auth0()
+    check_authentication_provider()
     check_sendgrid()
   end
 
-  defp check_auth0 do
-    (Application.get_env(:ueberauth, Ueberauth.Strategy.Auth0.OAuth)[:client_id] &&
-       Application.get_env(:ueberauth, Ueberauth.Strategy.Auth0.OAuth)[:client_secret] &&
-       Application.get_env(:ueberauth, Ueberauth)[:logout_return_to_url] &&
-       Application.get_env(:ueberauth, Ueberauth)[:logout_url]) ||
-      raise "Auth0 not configured"
+  defp check_authentication_provider do
+    Auth0.enabled?() || Keycloak.enabled?() || Dynamic.enabled?() ||
+      raise "No authentication provider configured"
   end
 
   defp check_sendgrid do

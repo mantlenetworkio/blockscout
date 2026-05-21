@@ -1,4 +1,4 @@
-defmodule EthereumJsonrpc.MixProject do
+defmodule EthereumJSONRPC.MixProject do
   use Mix.Project
 
   def project do
@@ -11,19 +11,15 @@ defmodule EthereumJsonrpc.MixProject do
       deps_path: "../../deps",
       description: "Ethereum JSONRPC client.",
       dialyzer: [
-        plt_add_deps: :transitive,
+        plt_add_deps: :app_tree,
         plt_add_apps: [:mix],
-        ignore_warnings: "../../.dialyzer-ignore"
+        ignore_warnings: "../../.dialyzer_ignore.exs"
       ],
-      elixir: "~> 1.13",
+      elixir: "~> 1.19",
       elixirc_paths: elixirc_paths(Mix.env()),
       lockfile: "../../mix.lock",
-      preferred_cli_env: [
-        credo: :test,
-        dialyzer: :test
-      ],
       start_permanent: Mix.env() == :prod,
-      version: "5.0.0"
+      version: "11.0.3"
     ]
   end
 
@@ -31,8 +27,12 @@ defmodule EthereumJsonrpc.MixProject do
   def application do
     [
       mod: {EthereumJSONRPC.Application, []},
-      extra_applications: [:logger]
+      extra_applications: [:logger, :tesla]
     ]
+  end
+
+  def cli do
+    [preferred_envs: [credo: :test, dialyzer: :test]]
   end
 
   defp aliases(env) do
@@ -58,34 +58,37 @@ defmodule EthereumJsonrpc.MixProject do
       {:certifi, "~> 2.3"},
       # WebSocket-server for testing `EthereumJSONRPC.WebSocket.WebSocketClient`.
       {:cowboy, "~> 2.0", only: [:dev, :test]},
-      # Style Checking
-      {:credo, "~> 1.5", only: :test, runtime: false},
       # Static Type Checking
       {:dialyxir, "~> 1.1", only: [:dev, :test], runtime: false},
+      {:ex_keccak, "~> 0.7.5"},
       # JSONRPC HTTP Post calls
-      {:httpoison, "~> 1.6"},
+      {:httpoison, "~> 2.0"},
       # Decode/Encode JSON for JSONRPC
       {:jason, "~> 1.3"},
       # Log errors and application output to separate files
       {:logger_file_backend, "~> 0.0.10"},
+      {:logger_json, "~> 7.0"},
       # Mocking `EthereumJSONRPC.Transport` and `EthereumJSONRPC.HTTP` so we avoid hitting real chains for local testing
-      {:mox, "~> 1.0", only: [:test]},
+      {:mox, "~> 1.1.0", only: [:test]},
+      {:prometheus_ex, "~> 5.1.0", override: true},
       # Tracing
       {:spandex, "~> 3.0"},
       # `:spandex` integration with Datadog
       {:spandex_datadog, "~> 1.0"},
+      {:tesla, "~> 1.17.0"},
       # Convert unix timestamps in JSONRPC to DateTimes
       {:timex, "~> 3.7.1"},
       # Encode/decode function names and arguments
-      {:ex_abi, "~> 0.4"},
+      {:ex_abi, "~> 0.8"},
       # `:verify_fun` for `Socket.Web.connect`
       {:ssl_verify_fun, "~> 1.1"},
       # `EthereumJSONRPC.WebSocket`
-      {:websocket_client, "~> 1.3"},
       {:decimal, "~> 2.0"},
       {:decorator, "~> 1.4"},
       {:hackney, "~> 1.18"},
-      {:poolboy, "~> 1.5.2"}
+      {:poolboy, "~> 1.5.2"},
+      {:utils, in_umbrella: true},
+      {:websockex, "~> 0.5.0"}
     ]
   end
 end

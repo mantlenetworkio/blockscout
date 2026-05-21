@@ -3,7 +3,6 @@ defmodule Explorer.Chain.Address.TokenBalanceTest do
 
   alias Explorer.Repo
   alias Explorer.Chain.Address.TokenBalance
-  alias Explorer.Chain
 
   describe "unfetched_token_balances/0" do
     test "returns only the token balances that have value_fetched_at nil" do
@@ -47,6 +46,7 @@ defmodule Explorer.Chain.Address.TokenBalanceTest do
         :token_balance,
         address: burn_address,
         token_contract_address_hash: token.contract_address_hash,
+        token_type: "ERC-721",
         value_fetched_at: nil
       )
 
@@ -78,7 +78,7 @@ defmodule Explorer.Chain.Address.TokenBalanceTest do
     end
   end
 
-  describe "fetch_token_balance/3" do
+  describe "fetch_token_balance/4" do
     test "returns the token balance for the given address" do
       token_balance = insert(:token_balance)
 
@@ -117,6 +117,17 @@ defmodule Explorer.Chain.Address.TokenBalanceTest do
         |> Repo.one()
 
       assert(result.value == token_balance_b.value)
+    end
+  end
+
+  describe "stream_unfetched_token_balances/2" do
+    test "executes the given reducer with the query result" do
+      address = insert(:address, hash: "0xc45e4830dff873cf8b70de2b194d0ddd06ef651e")
+      token_balance = insert(:token_balance, value_fetched_at: nil, address: address)
+      insert(:token_balance)
+
+      assert TokenBalance.stream_unfetched_token_balances([], &[&1.block_number | &2]) ==
+               {:ok, [token_balance.block_number]}
     end
   end
 end

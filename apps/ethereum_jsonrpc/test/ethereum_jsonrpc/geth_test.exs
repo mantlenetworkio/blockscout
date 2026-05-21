@@ -5,11 +5,13 @@ defmodule EthereumJSONRPC.GethTest do
 
   alias EthereumJSONRPC.Geth
 
-  @moduletag :no_nethermind
+  setup :verify_on_exit!
 
   describe "fetch_internal_transactions/2" do
     # Infura Mainnet does not support debug_traceTransaction, so this cannot be tested expect in Mox
     setup do
+      initial_env = Application.get_all_env(:ethereum_jsonrpc)
+      on_exit(fn -> Application.put_all_env([{:ethereum_jsonrpc, initial_env}]) end)
       EthereumJSONRPC.Case.Geth.Mox.setup()
     end
 
@@ -22,7 +24,7 @@ defmodule EthereumJSONRPC.GethTest do
       transaction_hash = "0x32b17f27ddb546eab3c4c33f31eb22c1cb992d4ccc50dae26922805b717efe5c"
       tracer = File.read!("priv/js/ethereum_jsonrpc/geth/debug_traceTransaction/tracer.js")
 
-      expect(EthereumJSONRPC.Mox, :json_rpc, fn [%{id: id, params: [^transaction_hash, %{tracer: ^tracer}]}], _ ->
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn [%{id: id, params: [^transaction_hash, %{"tracer" => ^tracer}]}], _ ->
         {:ok,
          [
            %{
@@ -44,6 +46,8 @@ defmodule EthereumJSONRPC.GethTest do
            }
          ]}
       end)
+
+      Application.put_env(:ethereum_jsonrpc, Geth, tracer: "js", debug_trace_timeout: "5s")
 
       assert {:ok,
               [
@@ -75,11 +79,907 @@ defmodule EthereumJSONRPC.GethTest do
                  json_rpc_named_arguments
                )
     end
+
+    test "call_tracer contract calls results are the same as js tracer", %{
+      json_rpc_named_arguments: json_rpc_named_arguments
+    } do
+      transaction_hash = "0xb342cafc6ac552c3be2090561453204c8784caf025ac8267320834e4cd163d96"
+      block_number = 3_287_375
+      transaction_index = 13
+
+      transaction_params = %{
+        block_number: block_number,
+        transaction_index: transaction_index,
+        hash_data: transaction_hash
+      }
+
+      tracer = File.read!("priv/js/ethereum_jsonrpc/geth/debug_traceTransaction/tracer.js")
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
+        [%{id: id, params: [^transaction_hash, %{"tracer" => "callTracer"}]}], _ ->
+          {:ok,
+           [
+             %{
+               id: id,
+               result: %{
+                 "calls" => [
+                   %{
+                     "calls" => [
+                       %{
+                         "from" => "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                         "gas" => "0x12816",
+                         "gasUsed" => "0x229e",
+                         "input" =>
+                           "0xa9059cbb0000000000000000000000009507c04b10486547584c37bcbd931b2a4fee9a4100000000000000000000000000000000000000000000000322a0aedb1fe2c7e6",
+                         "output" => "0x",
+                         "to" => "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                         "type" => "CALL",
+                         "value" => "0x0"
+                       },
+                       %{
+                         "calls" => [
+                           %{
+                             "from" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                             "gas" => "0xfbb8",
+                             "gasUsed" => "0x211",
+                             "input" => "0x70a0823100000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                             "output" => "0x",
+                             "to" => "0xa2327a938febf5fec13bacfb16ae10ecbc4cbdcf",
+                             "type" => "DELEGATECALL"
+                           }
+                         ],
+                         "from" => "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                         "gas" => "0x1029c",
+                         "gasUsed" => "0x523",
+                         "input" => "0x70a0823100000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                         "output" => "0x",
+                         "to" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                         "type" => "STATICCALL"
+                       },
+                       %{
+                         "calls" => [
+                           %{
+                             "calls" => [
+                               %{
+                                 "from" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                                 "gas" => "0xe3e3",
+                                 "gasUsed" => "0x259c",
+                                 "input" =>
+                                   "0xa9059cbb00000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f564000000000000000000000000000000000000000000000000000000014e53ad37c",
+                                 "output" => "0x",
+                                 "to" => "0xa2327a938febf5fec13bacfb16ae10ecbc4cbdcf",
+                                 "type" => "DELEGATECALL"
+                               }
+                             ],
+                             "from" => "0x9507c04b10486547584c37bcbd931b2a4fee9a41",
+                             "gas" => "0xea6a",
+                             "gasUsed" => "0x28b1",
+                             "input" =>
+                               "0xa9059cbb00000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f564000000000000000000000000000000000000000000000000000000014e53ad37c",
+                             "output" => "0x",
+                             "to" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                             "type" => "CALL",
+                             "value" => "0x0"
+                           }
+                         ],
+                         "from" => "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                         "gas" => "0xfa71",
+                         "gasUsed" => "0x3627",
+                         "input" =>
+                           "0xfa461e3300000000000000000000000000000000000000000000000000000014e53ad37cfffffffffffffffffffffffffffffffffffffffffffffffcdd5f5124e01d381a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc200000000000000000000000000000000000000000000000000000000000001f400000000000000000000000000000000000000000000000000000014e53ad37c00000000000000000000000000000000000000000000000322a0aedb1fe2c7e600000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000",
+                         "output" => "0x",
+                         "to" => "0x9507c04b10486547584c37bcbd931b2a4fee9a41",
+                         "type" => "CALL",
+                         "value" => "0x0"
+                       },
+                       %{
+                         "calls" => [
+                           %{
+                             "from" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                             "gas" => "0xbcc4",
+                             "gasUsed" => "0x211",
+                             "input" => "0x70a0823100000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                             "output" => "0x",
+                             "to" => "0xa2327a938febf5fec13bacfb16ae10ecbc4cbdcf",
+                             "type" => "DELEGATECALL"
+                           }
+                         ],
+                         "from" => "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                         "gas" => "0xc2a9",
+                         "gasUsed" => "0x523",
+                         "input" => "0x70a0823100000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                         "output" => "0x",
+                         "to" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                         "type" => "STATICCALL"
+                       }
+                     ],
+                     "from" => "0x9507c04b10486547584c37bcbd931b2a4fee9a41",
+                     "gas" => "0x185b2",
+                     "gasUsed" => "0xd38e",
+                     "input" =>
+                       "0x128acb080000000000000000000000009507c04b10486547584c37bcbd931b2a4fee9a410000000000000000000000000000000000000000000000000000000000000001fffffffffffffffffffffffffffffffffffffffffffffffcdd5f5124e01d381a00000000000000000000000000000000000000000000000000000001000276a400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc200000000000000000000000000000000000000000000000000000000000001f400000000000000000000000000000000000000000000000000000014e53ad37c00000000000000000000000000000000000000000000000322a0aedb1fe2c7e600000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000",
+                     "output" => "0x",
+                     "to" => "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                     "type" => "CALL",
+                     "value" => "0x0"
+                   }
+                 ],
+                 "from" => "0x56d0c33e5e8cb6390cebd7369d2fe7e7870a04e0",
+                 "gas" => "0x1a8c6",
+                 "gasUsed" => "0xf1f6",
+                 "input" =>
+                   "0x33000000000000000014e53ad37c0000000322a0aedb1fe2c7e6010201f4ff010088e6a0c2ddd26feeb64f039a2c41296fcb3f5640a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48c02aaa39b223fe8d0a0e5c4f27ead9083c756cc203",
+                 "output" => "0x",
+                 "time" => "48.391824ms",
+                 "to" => "0x9507c04b10486547584c37bcbd931b2a4fee9a41",
+                 "type" => "CALL",
+                 "value" => "0xfa72c6"
+               }
+             }
+           ]}
+      end)
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
+        [%{id: id, params: [^transaction_hash, %{"tracer" => ^tracer}]}], _ ->
+          {:ok,
+           [
+             %{
+               id: id,
+               result: [
+                 %{
+                   "callType" => "call",
+                   "from" => "0x56d0c33e5e8cb6390cebd7369d2fe7e7870a04e0",
+                   "gas" => "0x1a8c6",
+                   "gasUsed" => "0xf1f6",
+                   "input" =>
+                     "0x33000000000000000014e53ad37c0000000322a0aedb1fe2c7e6010201f4ff010088e6a0c2ddd26feeb64f039a2c41296fcb3f5640a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48c02aaa39b223fe8d0a0e5c4f27ead9083c756cc203",
+                   "output" => "0x",
+                   "to" => "0x9507c04b10486547584c37bcbd931b2a4fee9a41",
+                   "traceAddress" => [],
+                   "type" => "call",
+                   "value" => "0xfa72c6"
+                 },
+                 %{
+                   "callType" => "call",
+                   "from" => "0x9507c04b10486547584c37bcbd931b2a4fee9a41",
+                   "gas" => "0x185b2",
+                   "gasUsed" => "0xd38e",
+                   "input" =>
+                     "0x128acb080000000000000000000000009507c04b10486547584c37bcbd931b2a4fee9a410000000000000000000000000000000000000000000000000000000000000001fffffffffffffffffffffffffffffffffffffffffffffffcdd5f5124e01d381a00000000000000000000000000000000000000000000000000000001000276a400000000000000000000000000000000000000000000000000000000000000a000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc200000000000000000000000000000000000000000000000000000000000001f400000000000000000000000000000000000000000000000000000014e53ad37c00000000000000000000000000000000000000000000000322a0aedb1fe2c7e600000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000",
+                   "output" => "0x",
+                   "to" => "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                   "traceAddress" => [0],
+                   "type" => "call",
+                   "value" => "0x0"
+                 },
+                 %{
+                   "callType" => "call",
+                   "from" => "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                   "gas" => "0x12816",
+                   "gasUsed" => "0x229e",
+                   "input" =>
+                     "0xa9059cbb0000000000000000000000009507c04b10486547584c37bcbd931b2a4fee9a4100000000000000000000000000000000000000000000000322a0aedb1fe2c7e6",
+                   "output" => "0x",
+                   "to" => "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                   "traceAddress" => [0, 0],
+                   "type" => "call",
+                   "value" => "0x0"
+                 },
+                 %{
+                   "callType" => "staticcall",
+                   "from" => "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                   "gas" => "0x1029c",
+                   "gasUsed" => "0x523",
+                   "input" => "0x70a0823100000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                   "output" => "0x",
+                   "to" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                   "traceAddress" => [0, 1],
+                   "type" => "call",
+                   "value" => "0x0"
+                 },
+                 %{
+                   "callType" => "delegatecall",
+                   "from" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                   "gas" => "0xfbb8",
+                   "gasUsed" => "0x211",
+                   "input" => "0x70a0823100000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                   "output" => "0x",
+                   "to" => "0xa2327a938febf5fec13bacfb16ae10ecbc4cbdcf",
+                   "traceAddress" => [0, 1, 0],
+                   "type" => "call",
+                   "value" => "0x0"
+                 },
+                 %{
+                   "callType" => "call",
+                   "from" => "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                   "gas" => "0xfa71",
+                   "gasUsed" => "0x3627",
+                   "input" =>
+                     "0xfa461e3300000000000000000000000000000000000000000000000000000014e53ad37cfffffffffffffffffffffffffffffffffffffffffffffffcdd5f5124e01d381a000000000000000000000000000000000000000000000000000000000000006000000000000000000000000000000000000000000000000000000000000000e0000000000000000000000000a0b86991c6218b36c1d19d4a2e9eb0ce3606eb48000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc200000000000000000000000000000000000000000000000000000000000001f400000000000000000000000000000000000000000000000000000014e53ad37c00000000000000000000000000000000000000000000000322a0aedb1fe2c7e600000000000000000000000000000000000000000000000000000000000000c00000000000000000000000000000000000000000000000000000000000000000",
+                   "output" => "0x",
+                   "to" => "0x9507c04b10486547584c37bcbd931b2a4fee9a41",
+                   "traceAddress" => [0, 2],
+                   "type" => "call",
+                   "value" => "0x0"
+                 },
+                 %{
+                   "callType" => "call",
+                   "from" => "0x9507c04b10486547584c37bcbd931b2a4fee9a41",
+                   "gas" => "0xea6a",
+                   "gasUsed" => "0x28b1",
+                   "input" =>
+                     "0xa9059cbb00000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f564000000000000000000000000000000000000000000000000000000014e53ad37c",
+                   "output" => "0x",
+                   "to" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                   "traceAddress" => [0, 2, 0],
+                   "type" => "call",
+                   "value" => "0x0"
+                 },
+                 %{
+                   "callType" => "delegatecall",
+                   "from" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                   "gas" => "0xe3e3",
+                   "gasUsed" => "0x259c",
+                   "input" =>
+                     "0xa9059cbb00000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f564000000000000000000000000000000000000000000000000000000014e53ad37c",
+                   "output" => "0x",
+                   "to" => "0xa2327a938febf5fec13bacfb16ae10ecbc4cbdcf",
+                   "traceAddress" => [0, 2, 0, 0],
+                   "type" => "call",
+                   "value" => "0x0"
+                 },
+                 %{
+                   "callType" => "staticcall",
+                   "from" => "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                   "gas" => "0xc2a9",
+                   "gasUsed" => "0x523",
+                   "input" => "0x70a0823100000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                   "output" => "0x",
+                   "to" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                   "traceAddress" => [0, 3],
+                   "type" => "call",
+                   "value" => "0x0"
+                 },
+                 %{
+                   "callType" => "delegatecall",
+                   "from" => "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+                   "gas" => "0xbcc4",
+                   "gasUsed" => "0x211",
+                   "input" => "0x70a0823100000000000000000000000088e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                   "output" => "0x",
+                   "to" => "0xa2327a938febf5fec13bacfb16ae10ecbc4cbdcf",
+                   "traceAddress" => [0, 3, 0],
+                   "type" => "call",
+                   "value" => "0x0"
+                 }
+               ]
+             }
+           ]}
+      end)
+
+      Application.put_env(:ethereum_jsonrpc, Geth, tracer: "call_tracer", debug_trace_timeout: "5s")
+
+      call_tracer_internal_transactions =
+        Geth.fetch_internal_transactions([transaction_params], json_rpc_named_arguments)
+
+      Application.put_env(:ethereum_jsonrpc, Geth, tracer: "js", debug_trace_timeout: "5s")
+
+      assert call_tracer_internal_transactions ==
+               Geth.fetch_internal_transactions([transaction_params], json_rpc_named_arguments)
+    end
+
+    test "call_tracer contract creation results are the same as js tracer", %{
+      json_rpc_named_arguments: json_rpc_named_arguments
+    } do
+      transaction_hash = "0xb342cafc6ac552c3be2090561453204c8784caf025ac8267320834e4cd163d96"
+      block_number = 3_287_375
+      transaction_index = 13
+
+      transaction_params = %{
+        block_number: block_number,
+        transaction_index: transaction_index,
+        hash_data: transaction_hash
+      }
+
+      tracer = File.read!("priv/js/ethereum_jsonrpc/geth/debug_traceTransaction/tracer.js")
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
+        [%{id: id, params: [^transaction_hash, %{"tracer" => "callTracer"}]}], _ ->
+          {:ok,
+           [
+             %{
+               id: id,
+               result: %{
+                 "type" => "CREATE",
+                 "from" => "0x117b358218da5a4f647072ddb50ded038ed63d17",
+                 "to" => "0x205a6b72ce16736c9d87172568a9c0cb9304de0d",
+                 "value" => "0x0",
+                 "gas" => "0x106f5",
+                 "gasUsed" => "0x106f5",
+                 "input" =>
+                   "0x608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033",
+                 "output" =>
+                   "0x608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033"
+               }
+             }
+           ]}
+      end)
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
+        [%{id: id, params: [^transaction_hash, %{"tracer" => ^tracer}]}], _ ->
+          {:ok,
+           [
+             %{
+               id: id,
+               result: [
+                 %{
+                   "type" => "create",
+                   "from" => "0x117b358218da5a4f647072ddb50ded038ed63d17",
+                   "init" =>
+                     "0x608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033",
+                   "createdContractAddressHash" => "0x205a6b72ce16736c9d87172568a9c0cb9304de0d",
+                   "createdContractCode" =>
+                     "0x608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033",
+                   "traceAddress" => [],
+                   "value" => "0x0",
+                   "gas" => "0x106f5",
+                   "gasUsed" => "0x106f5"
+                 }
+               ]
+             }
+           ]}
+      end)
+
+      Application.put_env(:ethereum_jsonrpc, Geth, tracer: "call_tracer", debug_trace_timeout: "5s")
+
+      call_tracer_internal_transactions =
+        Geth.fetch_internal_transactions([transaction_params], json_rpc_named_arguments)
+
+      Application.put_env(:ethereum_jsonrpc, Geth, tracer: "js", debug_trace_timeout: "5s")
+
+      assert call_tracer_internal_transactions ==
+               Geth.fetch_internal_transactions([transaction_params], json_rpc_named_arguments)
+    end
+
+    test "successfully handle single stop opcode from call_tracer", %{
+      json_rpc_named_arguments: json_rpc_named_arguments
+    } do
+      transaction_hash = "0xb342cafc6ac552c3be2090561453204c8784caf025ac8267320834e4cd163d96"
+      block_number = 3_287_375
+      transaction_index = 13
+
+      transaction_params = %{
+        block_number: block_number,
+        transaction_index: transaction_index,
+        hash_data: transaction_hash
+      }
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
+        [%{id: id, params: [^transaction_hash, %{"tracer" => "callTracer"}]}], _ ->
+          {:ok,
+           [
+             %{
+               id: id,
+               result: %{
+                 "type" => "STOP",
+                 "from" => "0x0000000000000000000000000000000000000000",
+                 "value" => "0x0",
+                 "gas" => "0x0",
+                 "gasUsed" => "0x5842"
+               }
+             }
+           ]}
+      end)
+
+      Application.put_env(:ethereum_jsonrpc, Geth, tracer: "call_tracer", debug_trace_timeout: "5s")
+
+      assert {:ok,
+              [
+                %{
+                  block_number: 3_287_375,
+                  error: "execution stopped",
+                  from_address_hash: "0x0000000000000000000000000000000000000000",
+                  input: "0x",
+                  trace_address: [],
+                  transaction_hash: "0xb342cafc6ac552c3be2090561453204c8784caf025ac8267320834e4cd163d96",
+                  transaction_index: 13,
+                  type: "stop",
+                  value: nil
+                }
+              ]} = Geth.fetch_internal_transactions([transaction_params], json_rpc_named_arguments)
+    end
+
+    test "uppercase type parsing result is the same as lowercase", %{
+      json_rpc_named_arguments: json_rpc_named_arguments
+    } do
+      transaction_hash = "0xb342cafc6ac552c3be2090561453204c8784caf025ac8267320834e4cd163d96"
+      block_number = 3_287_375
+      transaction_index = 13
+
+      transaction_params = %{
+        block_number: block_number,
+        transaction_index: transaction_index,
+        hash_data: transaction_hash
+      }
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
+        [%{id: id, params: [^transaction_hash, %{"tracer" => "callTracer"}]}], _ ->
+          {:ok,
+           [
+             %{
+               id: id,
+               result: %{
+                 "type" => "CREATE",
+                 "from" => "0x117b358218da5a4f647072ddb50ded038ed63d17",
+                 "to" => "0x205a6b72ce16736c9d87172568a9c0cb9304de0d",
+                 "value" => "0x0",
+                 "gas" => "0x106f5",
+                 "gasUsed" => "0x106f5",
+                 "input" =>
+                   "0x608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033",
+                 "output" =>
+                   "0x608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033"
+               }
+             }
+           ]}
+      end)
+
+      Application.put_env(:ethereum_jsonrpc, Geth, tracer: "call_tracer", debug_trace_timeout: "5s")
+
+      uppercase_result = Geth.fetch_internal_transactions([transaction_params], json_rpc_named_arguments)
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
+        [%{id: id, params: [^transaction_hash, %{"tracer" => "callTracer"}]}], _ ->
+          {:ok,
+           [
+             %{
+               id: id,
+               result: %{
+                 "type" => "create",
+                 "from" => "0x117b358218da5a4f647072ddb50ded038ed63d17",
+                 "to" => "0x205a6b72ce16736c9d87172568a9c0cb9304de0d",
+                 "value" => "0x0",
+                 "gas" => "0x106f5",
+                 "gasUsed" => "0x106f5",
+                 "input" =>
+                   "0x608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033",
+                 "output" =>
+                   "0x608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033"
+               }
+             }
+           ]}
+      end)
+
+      lowercase_result = Geth.fetch_internal_transactions([transaction_params], json_rpc_named_arguments)
+
+      assert uppercase_result == lowercase_result
+    end
+
+    test "fallback 'to' field to the parent object for selfdestruct", %{
+      json_rpc_named_arguments: json_rpc_named_arguments
+    } do
+      transaction_hash = "0xb342cafc6ac552c3be2090561453204c8784caf025ac8267320834e4cd163d96"
+      block_number = 3_287_375
+      transaction_index = 13
+
+      transaction_params = %{
+        block_number: block_number,
+        transaction_index: transaction_index,
+        hash_data: transaction_hash
+      }
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
+        [%{id: id, params: [^transaction_hash, %{"tracer" => "callTracer"}]}], _ ->
+          {:ok,
+           [
+             %{
+               id: id,
+               result: %{
+                 "calls" => [
+                   %{
+                     "from" => "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                     "gas" => "0x12816",
+                     "gasUsed" => "0x229e",
+                     "input" => "0x",
+                     "output" => "0x",
+                     "to" => "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                     "type" => "CALL",
+                     "value" => "0x0"
+                   },
+                   %{
+                     "from" => "0x0000000000000000000000000000000000000000",
+                     "gas" => "0x0",
+                     "gasUsed" => "0x0",
+                     "input" => "0x",
+                     "type" => "SELFDESTRUCT"
+                   }
+                 ],
+                 "from" => "0xd2ca697bb0114ca4f6a2ed28a5896d280a46d61b",
+                 "gas" => "0x6799",
+                 "gasUsed" => "0x6642",
+                 "input" => "0x092a5cce",
+                 "to" => "0x97f09972913935c098096d364a286c7b941070b3",
+                 "type" => "CALL",
+                 "value" => "0x0"
+               }
+             }
+           ]}
+      end)
+
+      Application.put_env(:ethereum_jsonrpc, Geth, tracer: "call_tracer", debug_trace_timeout: "5s")
+
+      assert {:ok,
+              [
+                %{
+                  index: 0,
+                  input: "0x092a5cce",
+                  output: "0x",
+                  type: "call",
+                  value: nil,
+                  call_type: "call",
+                  block_number: ^block_number,
+                  gas_used: 26178,
+                  transaction_hash: ^transaction_hash,
+                  transaction_index: 13,
+                  gas: 26521,
+                  from_address_hash: "0xd2ca697bb0114ca4f6a2ed28a5896d280a46d61b",
+                  to_address_hash: "0x97f09972913935c098096d364a286c7b941070b3",
+                  trace_address: []
+                },
+                %{
+                  index: 1,
+                  input: "0x",
+                  output: "0x",
+                  type: "call",
+                  value: nil,
+                  call_type: "call",
+                  block_number: ^block_number,
+                  gas_used: 8862,
+                  transaction_hash: ^transaction_hash,
+                  transaction_index: 13,
+                  gas: 75798,
+                  from_address_hash: "0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640",
+                  to_address_hash: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2",
+                  trace_address: [0]
+                },
+                %{
+                  index: 2,
+                  type: "selfdestruct",
+                  value: nil,
+                  block_number: ^block_number,
+                  gas_used: 0,
+                  transaction_hash: ^transaction_hash,
+                  transaction_index: 13,
+                  gas: 0,
+                  from_address_hash: "0x0000000000000000000000000000000000000000",
+                  to_address_hash: "0x97f09972913935c098096d364a286c7b941070b3",
+                  trace_address: [1]
+                }
+              ]} = Geth.fetch_internal_transactions([transaction_params], json_rpc_named_arguments)
+    end
   end
 
   describe "fetch_block_internal_transactions/1" do
-    test "is not supported", %{json_rpc_named_arguments: json_rpc_named_arguments} do
-      EthereumJSONRPC.Geth.fetch_block_internal_transactions([], json_rpc_named_arguments)
+    setup do
+      EthereumJSONRPC.Case.Geth.Mox.setup()
+    end
+
+    test "is supported", %{json_rpc_named_arguments: json_rpc_named_arguments} do
+      block_number = 3_287_375
+      block_quantity = EthereumJSONRPC.integer_to_quantity(block_number)
+      transaction_hash = "0x32b17f27ddb546eab3c4c33f31eb22c1cb992d4ccc50dae26922805b717efe5c"
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn [%{id: id, params: [^block_quantity, %{"tracer" => "callTracer"}]}],
+                                                _ ->
+        {:ok,
+         [
+           %{
+             id: id,
+             result: [
+               %{
+                 "result" => %{
+                   "calls" => [
+                     %{
+                       "from" => "0x4200000000000000000000000000000000000015",
+                       "gas" => "0xe9a3c",
+                       "gasUsed" => "0x4a28",
+                       "input" =>
+                         "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                       "to" => "0x6df83a19647a398d48e77a6835f4a28eb7e2f7c0",
+                       "type" => "DELEGATECALL",
+                       "value" => "0x0"
+                     }
+                   ],
+                   "from" => "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001",
+                   "gas" => "0xf4240",
+                   "gasUsed" => "0xb6f9",
+                   "input" =>
+                     "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                   "to" => "0x4200000000000000000000000000000000000015",
+                   "type" => "CALL",
+                   "value" => "0x0"
+                 },
+                 "txHash" => transaction_hash
+               }
+             ]
+           }
+         ]}
+      end)
+
+      Application.put_env(:ethereum_jsonrpc, Geth, tracer: "call_tracer", debug_trace_timeout: "5s")
+
+      assert {:ok,
+              [
+                %{
+                  block_number: 3_287_375,
+                  call_type: "call",
+                  from_address_hash: "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001",
+                  gas: 1_000_000,
+                  gas_used: 46841,
+                  index: 0,
+                  input:
+                    "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                  output: "0x",
+                  to_address_hash: "0x4200000000000000000000000000000000000015",
+                  trace_address: [],
+                  transaction_hash: ^transaction_hash,
+                  transaction_index: 0,
+                  type: "call",
+                  value: nil
+                },
+                %{
+                  block_number: 3_287_375,
+                  call_type: "delegatecall",
+                  from_address_hash: "0x4200000000000000000000000000000000000015",
+                  gas: 956_988,
+                  gas_used: 18984,
+                  index: 1,
+                  input:
+                    "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                  output: "0x",
+                  to_address_hash: "0x6df83a19647a398d48e77a6835f4a28eb7e2f7c0",
+                  trace_address: [0],
+                  transaction_hash: ^transaction_hash,
+                  transaction_index: 0,
+                  type: "call",
+                  value: nil
+                }
+              ]} = Geth.fetch_block_internal_transactions([block_number], json_rpc_named_arguments)
+    end
+
+    test "works for multiple blocks request", %{json_rpc_named_arguments: json_rpc_named_arguments} do
+      block_number_1 = 3_287_375
+      block_number_2 = 3_287_376
+      block_quantity_1 = EthereumJSONRPC.integer_to_quantity(block_number_1)
+      block_quantity_2 = EthereumJSONRPC.integer_to_quantity(block_number_2)
+      transaction_hash_1 = "0x32b17f27ddb546eab3c4c33f31eb22c1cb992d4ccc50dae26922805b717efe5c"
+      transaction_hash_2 = "0x32b17f27ddb546eab3c4c33f31eb22c1cb992d4ccc50dae26922805b717efe5b"
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn
+        [
+          %{id: id_1, params: [^block_quantity_1, %{"tracer" => "callTracer"}]},
+          %{id: id_2, params: [^block_quantity_2, %{"tracer" => "callTracer"}]}
+        ],
+        _ ->
+          {:ok,
+           [
+             %{
+               id: id_1,
+               result: [
+                 %{
+                   "result" => %{
+                     "calls" => [
+                       %{
+                         "from" => "0x4200000000000000000000000000000000000015",
+                         "gas" => "0xe9a3c",
+                         "gasUsed" => "0x4a28",
+                         "input" =>
+                           "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                         "to" => "0x6df83a19647a398d48e77a6835f4a28eb7e2f7c0",
+                         "type" => "DELEGATECALL",
+                         "value" => "0x0"
+                       }
+                     ],
+                     "from" => "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001",
+                     "gas" => "0xf4240",
+                     "gasUsed" => "0xb6f9",
+                     "input" =>
+                       "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                     "to" => "0x4200000000000000000000000000000000000015",
+                     "type" => "CALL",
+                     "value" => "0x0"
+                   },
+                   "txHash" => transaction_hash_1
+                 }
+               ]
+             },
+             %{
+               id: id_2,
+               result: [
+                 %{
+                   "result" => %{
+                     "calls" => [
+                       %{
+                         "from" => "0x4200000000000000000000000000000000000015",
+                         "gas" => "0xe9a3c",
+                         "gasUsed" => "0x4a28",
+                         "input" =>
+                           "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                         "to" => "0x6df83a19647a398d48e77a6835f4a28eb7e2f7c0",
+                         "type" => "DELEGATECALL",
+                         "value" => "0x0"
+                       }
+                     ],
+                     "from" => "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001",
+                     "gas" => "0xf4240",
+                     "gasUsed" => "0xb6f9",
+                     "input" =>
+                       "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                     "to" => "0x4200000000000000000000000000000000000015",
+                     "type" => "CALL",
+                     "value" => "0x0"
+                   },
+                   "txHash" => transaction_hash_2
+                 }
+               ]
+             }
+           ]}
+      end)
+
+      Application.put_env(:ethereum_jsonrpc, Geth, tracer: "call_tracer", debug_trace_timeout: "5s")
+
+      assert {:ok,
+              [
+                %{
+                  block_number: ^block_number_1,
+                  call_type: "call",
+                  from_address_hash: "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001",
+                  gas: 1_000_000,
+                  gas_used: 46841,
+                  index: 0,
+                  input:
+                    "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                  output: "0x",
+                  to_address_hash: "0x4200000000000000000000000000000000000015",
+                  trace_address: [],
+                  transaction_hash: ^transaction_hash_1,
+                  transaction_index: 0,
+                  type: "call",
+                  value: nil
+                },
+                %{
+                  block_number: ^block_number_1,
+                  call_type: "delegatecall",
+                  from_address_hash: "0x4200000000000000000000000000000000000015",
+                  gas: 956_988,
+                  gas_used: 18984,
+                  index: 1,
+                  input:
+                    "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                  output: "0x",
+                  to_address_hash: "0x6df83a19647a398d48e77a6835f4a28eb7e2f7c0",
+                  trace_address: [0],
+                  transaction_hash: ^transaction_hash_1,
+                  transaction_index: 0,
+                  type: "call",
+                  value: nil
+                },
+                %{
+                  block_number: ^block_number_2,
+                  call_type: "call",
+                  from_address_hash: "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001",
+                  gas: 1_000_000,
+                  gas_used: 46841,
+                  index: 0,
+                  input:
+                    "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                  output: "0x",
+                  to_address_hash: "0x4200000000000000000000000000000000000015",
+                  trace_address: [],
+                  transaction_hash: ^transaction_hash_2,
+                  transaction_index: 0,
+                  type: "call",
+                  value: nil
+                },
+                %{
+                  block_number: ^block_number_2,
+                  call_type: "delegatecall",
+                  from_address_hash: "0x4200000000000000000000000000000000000015",
+                  gas: 956_988,
+                  gas_used: 18984,
+                  index: 1,
+                  input:
+                    "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                  output: "0x",
+                  to_address_hash: "0x6df83a19647a398d48e77a6835f4a28eb7e2f7c0",
+                  trace_address: [0],
+                  transaction_hash: ^transaction_hash_2,
+                  transaction_index: 0,
+                  type: "call",
+                  value: nil
+                }
+              ]} = Geth.fetch_block_internal_transactions([block_number_1, block_number_2], json_rpc_named_arguments)
+    end
+
+    test "result is the same as fetch_internal_transactions/2", %{json_rpc_named_arguments: json_rpc_named_arguments} do
+      block_number = 3_287_375
+      block_quantity = EthereumJSONRPC.integer_to_quantity(block_number)
+      transaction_hash = "0x32b17f27ddb546eab3c4c33f31eb22c1cb992d4ccc50dae26922805b717efe5c"
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, 2, fn
+        [%{id: id, params: [^block_quantity, %{"tracer" => "callTracer"}]}], _ ->
+          {:ok,
+           [
+             %{
+               id: id,
+               result: [
+                 %{
+                   "result" => %{
+                     "calls" => [
+                       %{
+                         "from" => "0x4200000000000000000000000000000000000015",
+                         "gas" => "0xe9a3c",
+                         "gasUsed" => "0x4a28",
+                         "input" =>
+                           "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                         "to" => "0x6df83a19647a398d48e77a6835f4a28eb7e2f7c0",
+                         "type" => "DELEGATECALL",
+                         "value" => "0x0"
+                       }
+                     ],
+                     "from" => "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001",
+                     "gas" => "0xf4240",
+                     "gasUsed" => "0xb6f9",
+                     "input" =>
+                       "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                     "to" => "0x4200000000000000000000000000000000000015",
+                     "type" => "CALL",
+                     "value" => "0x0"
+                   },
+                   "txHash" => transaction_hash
+                 }
+               ]
+             }
+           ]}
+
+        [%{id: id, params: [^transaction_hash, %{"tracer" => "callTracer"}]}], _ ->
+          {:ok,
+           [
+             %{
+               id: id,
+               result: %{
+                 "calls" => [
+                   %{
+                     "from" => "0x4200000000000000000000000000000000000015",
+                     "gas" => "0xe9a3c",
+                     "gasUsed" => "0x4a28",
+                     "input" =>
+                       "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                     "to" => "0x6df83a19647a398d48e77a6835f4a28eb7e2f7c0",
+                     "type" => "DELEGATECALL",
+                     "value" => "0x0"
+                   }
+                 ],
+                 "from" => "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001",
+                 "gas" => "0xf4240",
+                 "gasUsed" => "0xb6f9",
+                 "input" =>
+                   "0x015d8eb900000000000000000000000000000000000000000000000000000000009cb0d80000000000000000000000000000000000000000000000000000000065898738000000000000000000000000000000000000000000000000000000000000001b65f7961a6893850c1f001edeaa0aa4f1fb36b67eee61a8623f8f4da81be25c0000000000000000000000000000000000000000000000000000000000000000050000000000000000000000007431310e026b69bfc676c0013e12a1a11411eec9000000000000000000000000000000000000000000000000000000000000083400000000000000000000000000000000000000000000000000000000000f4240",
+                 "to" => "0x4200000000000000000000000000000000000015",
+                 "type" => "CALL",
+                 "value" => "0x0"
+               }
+             }
+           ]}
+      end)
+
+      Application.put_env(:ethereum_jsonrpc, Geth, tracer: "call_tracer", debug_trace_timeout: "5s")
+
+      assert Geth.fetch_block_internal_transactions([block_number], json_rpc_named_arguments) ==
+               Geth.fetch_internal_transactions(
+                 [%{block_number: block_number, transaction_index: 0, hash_data: transaction_hash}],
+                 json_rpc_named_arguments
+               )
     end
   end
 

@@ -1,5 +1,5 @@
-<% burned_fee = if !is_nil(@block.base_fee_per_gas), do: Wei.mult(@block.base_fee_per_gas, BlockBurnedFeeCounter.fetch(@block.hash)), else: nil %>
-<% priority_fee = if !is_nil(@block.base_fee_per_gas), do: BlockPriorityFeeCounter.fetch(@block.hash), else: nil %>
+<% burnt_fees = if !is_nil(@block.base_fee_per_gas), do: Wei.mult(@block.base_fee_per_gas, BlockBurntFeeCount.fetch(@block.hash)), else: nil %>
+<% priority_fee = if !is_nil(@block.base_fee_per_gas), do: BlockPriorityFeeCount.fetch(@block.hash), else: nil %>
 <section>
   <%= render BlockScoutWeb.Advertisement.TextAdView, "index.html", conn: @conn %>
   <div class="row">
@@ -26,7 +26,7 @@
                         </svg>
                     </a>
                 </li>
-                 <li class="page-item"><a class="page-link no-hover" href data-page-number data-page-lang='<%= gettext "Page" %>' ><%= gettext "Block" %> <%= @block.number %></a>
+                 <li class="page-item"><a class="page-link no-hover" href data-page-number><%= gettext "Block" %> <%= @block.number %></a>
                 </li>
                 <li class="page-item">
                     <a
@@ -79,30 +79,33 @@
               text: gettext("The number of transactions in the block.") %>
               <%= gettext("Transactions") %>
             </dt>
-              <dd class="col-sm-9 col-lg-10">
-              <%= if @block_transaction_count == 1 do %>
-                <%= gettext "%{count} Transaction", count: @block_transaction_count %>
-              <% else %>
-                <%= gettext "%{count} Transactions", count: @block_transaction_count %>
-              <% end %>
-              <a href="#txs"><i class="fas fa-eye" style="font-size: 9.8px; position: absolute; bottom: 4.6px; margin-left: 5px;"></i></a>
+            <dd class="col-sm-9 col-lg-10">
+              <a href="#txs" class="page-link bs-label large btn-no-border-link-to-tems">
+                <%= if @block_transaction_count == 1 do %>
+                  <%= gettext "%{count} Transaction", count: @block_transaction_count %>
+                <% else %>
+                  <%= gettext "%{count} Transactions", count: @block_transaction_count %>
+                <% end %>
+              </a>
             </dd>
           </dl>
           <!-- Miner/Validator -->
-          <dl class="row">
-            <dt class="col-sm-3 col-lg-2 text-muted">
-              <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
-              text: gettext("A block producer who successfully included the block onto the blockchain.") %>
-              <%= gettext("Miner") %>
-            </dt>
-            <dd class="col-sm-9 col-lg-10"><%= render BlockScoutWeb.AddressView, "_link.html", address: @block.miner, contract: false, class: "", use_custom_tooltip: false, show_full_hash: true %>
-              <%= render BlockScoutWeb.CommonComponentsView, "_btn_copy.html",
-                additional_classes: ["btn-copy-icon-small", "btn-copy-icon-custom", "btn-copy-icon-no-borders"],
-                clipboard_text: @block.miner,
-                aria_label: gettext("Copy Address"),
-                title: gettext("Copy Address") %>
-              </dd>
-          </dl>
+          <%= if !Application.get_env(:block_scout_web, :hide_block_miner) do %>
+            <dl class="row">
+              <dt class="col-sm-3 col-lg-2 text-muted">
+                <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
+                text: gettext("A block producer who successfully included the block onto the blockchain.") %>
+                <%= gettext("Miner") %>
+              </dt>
+              <dd class="col-sm-9 col-lg-10"><%= render BlockScoutWeb.AddressView, "_link.html", address: @block.miner, contract: false, class: "", use_custom_tooltip: false, show_full_hash: true %>
+                <%= render BlockScoutWeb.CommonComponentsView, "_btn_copy.html",
+                  additional_classes: ["btn-copy-icon-small", "btn-copy-icon-custom", "btn-copy-icon-no-borders"],
+                  clipboard_text: @block.miner,
+                  aria_label: gettext("Copy Address"),
+                  title: gettext("Copy Address") %>
+                </dd>
+            </dl>
+          <% end %>
           <!-- Size -->
           <dl class="row">
             <dt class="col-sm-3 col-lg-2 text-muted">
@@ -158,15 +161,17 @@
             <dd class="col-sm-9 col-lg-10"><%= @block.difficulty |> Decimal.to_integer() |> BlockScoutWeb.Cldr.Number.to_string! %></dd>
           </dl>
           <%= if block_type(@block) == "Block" do %>
-            <!-- Total Difficulty -->
-            <dl class="row">
-              <dt class="col-sm-3 col-lg-2 text-muted">
-                <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
-                text: gettext("Total difficulty of the chain until this block.") %>
-                <%= gettext("Total Difficulty") %>
-              </dt>
-              <dd class="col-sm-9 col-lg-10"><%= @block.total_difficulty |> Decimal.to_integer() |> BlockScoutWeb.Cldr.Number.to_string! %></dd>
-            </dl>
+            <%= if !is_nil(@block.total_difficulty) do %>
+              <!-- Total Difficulty -->
+              <dl class="row">
+                <dt class="col-sm-3 col-lg-2 text-muted">
+                  <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
+                  text: gettext("Total difficulty of the chain until this block.") %>
+                  <%= gettext("Total Difficulty") %>
+                </dt>
+                <dd class="col-sm-9 col-lg-10"><%= @block.total_difficulty |> Decimal.to_integer() |> BlockScoutWeb.Cldr.Number.to_string! %></dd>
+              </dl>
+            <% end %>
             <!-- Gas Used -->
             <dl class="row">
               <dt class="col-sm-3 col-lg-2 text-muted">
@@ -209,10 +214,10 @@
             <dl class="row">
                 <dt class="col-sm-3 col-lg-2 text-muted">
                   <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
-                  text: Explorer.coin_name() <> " " <> gettext("burned from transactions included in the block (Base fee (per unit of gas) * Gas Used).") %>
+                  text: Explorer.coin_name() <> " " <> gettext("burnt from transactions included in the block (Base fee (per unit of gas) * Gas Used).") %>
                   <%= gettext("Burnt Fees") %>
                 </dt>
-                <dd class="col-sm-9 col-lg-10"><i class="fa-solid fa-fire i-tooltip-2"></i> <%= format_wei_value(burned_fee, :ether) %></dd>
+                <dd class="col-sm-9 col-lg-10"><i class="fa-solid fa-fire i-tooltip-2"></i> <%= format_wei_value(burnt_fees, :ether) %></dd>
             </dl>
             <!-- Priority Fee / Tip -->
             <dl class="row">

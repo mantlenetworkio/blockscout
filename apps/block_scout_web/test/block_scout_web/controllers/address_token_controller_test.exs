@@ -2,24 +2,13 @@ defmodule BlockScoutWeb.AddressTokenControllerTest do
   use BlockScoutWeb.ConnCase, async: true
   use ExUnit.Case, async: false
 
-  import BlockScoutWeb.WebRouter.Helpers, only: [address_token_path: 3]
+  import BlockScoutWeb.Routers.WebRouter.Helpers, only: [address_token_path: 3]
   import Mox
 
   alias Explorer.Chain.{Address, Token}
 
   describe "GET index/2" do
     setup :set_mox_global
-
-    setup do
-      configuration = Application.get_env(:explorer, :checksum_function)
-      Application.put_env(:explorer, :checksum_function, :eth)
-
-      :ok
-
-      on_exit(fn ->
-        Application.put_env(:explorer, :checksum_function, configuration)
-      end)
-    end
 
     test "with invalid address hash", %{conn: conn} do
       conn = get(conn, address_token_path(conn, :index, "invalid_address"))
@@ -128,6 +117,68 @@ defmodule BlockScoutWeb.AddressTokenControllerTest do
       assert Enum.any?(items, fn item ->
                Enum.any?(second_page_tokens, fn token_name -> String.contains?(item, token_name) end)
              end)
+    end
+
+    test "returns next page of results based on last seen token for erc-1155", %{conn: conn} do
+      address = insert(:address)
+
+      1..51
+      |> Enum.reduce([], fn _i, acc ->
+        token = insert(:token, name: "FN2 Token", type: "ERC-1155")
+
+        insert(
+          :address_current_token_balance,
+          token_contract_address_hash: token.contract_address_hash,
+          address: address,
+          value: 3
+        )
+
+        acc ++ [token.name]
+      end)
+
+      conn =
+        get(conn, address_token_path(BlockScoutWeb.Endpoint, :index, Address.checksum(address.hash)), %{
+          "type" => "JSON"
+        })
+
+      assert response = json_response(conn, 200)
+
+      request_2nd_page = get(conn, response["next_page_path"], %{"type" => "JSON"})
+
+      assert response_2nd_page = json_response(request_2nd_page, 200)
+
+      assert 1 = length(response_2nd_page["items"])
+    end
+
+    test "returns next page of results based on last seen token for erc-404", %{conn: conn} do
+      address = insert(:address)
+
+      1..51
+      |> Enum.reduce([], fn _i, acc ->
+        token = insert(:token, name: "FN2 Token", type: "ERC-404")
+
+        insert(
+          :address_current_token_balance,
+          token_contract_address_hash: token.contract_address_hash,
+          address: address,
+          value: 3
+        )
+
+        acc ++ [token.name]
+      end)
+
+      conn =
+        get(conn, address_token_path(BlockScoutWeb.Endpoint, :index, Address.checksum(address.hash)), %{
+          "type" => "JSON"
+        })
+
+      assert response = json_response(conn, 200)
+
+      request_2nd_page = get(conn, response["next_page_path"], %{"type" => "JSON"})
+
+      assert response_2nd_page = json_response(request_2nd_page, 200)
+
+      assert 1 = length(response_2nd_page["items"])
     end
 
     test "next_page_params exists if not on last page", %{conn: conn} do

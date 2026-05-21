@@ -2,12 +2,11 @@ defmodule BlockScoutWeb.AddressContractVerificationVyperController do
   use BlockScoutWeb, :controller
 
   alias BlockScoutWeb.Controller
-  alias Explorer.Chain
   alias Explorer.Chain.SmartContract
   alias Explorer.SmartContract.{CompilerVersion, Vyper.PublisherWorker}
 
   def new(conn, %{"address_id" => address_hash_string}) do
-    if Chain.smart_contract_fully_verified?(address_hash_string) do
+    if SmartContract.verified_with_full_match?(address_hash_string) do
       address_contract_path =
         conn
         |> address_contract_path(:index, address_hash_string)
@@ -47,12 +46,5 @@ defmodule BlockScoutWeb.AddressContractVerificationVyperController do
     Que.add(PublisherWorker, {smart_contract["address_hash"], smart_contract, conn})
 
     send_resp(conn, 204, "")
-  end
-
-  def parse_optimization_runs(%{"runs" => runs}) do
-    case Integer.parse(runs) do
-      {integer, ""} -> integer
-      _ -> 200
-    end
   end
 end

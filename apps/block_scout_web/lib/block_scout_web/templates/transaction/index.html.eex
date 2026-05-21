@@ -8,56 +8,22 @@
 <section class="container" data-page="transaction-list">
   <%= render BlockScoutWeb.Advertisement.TextAdView, "index.html", conn: @conn %>
   <div class="card">
-    <div class="card-body txn-list-container" data-async-listing="<%= @current_path %>">
-      <h1 class="card-title list-title-description"><%= gettext "Transactions" %></h1>
+    <div class="card-body" data-async-listing="<%= @current_path %>">
+      <h1 class="card-title list-title-description"><%= gettext "Validated Transactions" %></h1>
       <div class="list-top-pagination-container-wrapper">
-        <%= render BlockScoutWeb.CommonComponentsView, "_rap_pagination_container.html", position: "top", showing_limit: if Chain.transactions_available_count() >= Chain.limit_showing_transactions(), do: Chain.limit_showing_transactions(), else: nil %>
+        <%= render BlockScoutWeb.CommonComponentsView, "_rap_pagination_container.html", position: "top", showing_limit: if(Transaction.transactions_available_count() == Transaction.limit_showing_transactions(), do: Transaction.limit_showing_transactions(), else: nil) %>
       </div>
 
-
-      <%= render BlockScoutWeb.CommonComponentsView, "_channel_disconnected_message.html", text: gettext("More transactions come in, click for an update") %>
+      <div data-selector="channel-batching-message" class="d-none">
+        <div data-selector="reload-button" class="alert alert-info">
+          <a href="#" class="alert-link"><span data-selector="channel-batching-count"></span> <%= gettext "More transactions have come in" %></a>
+        </div>
+      </div>
+      <%= render BlockScoutWeb.CommonComponentsView, "_channel_disconnected_message.html", text: gettext("Connection Lost, click to load newer transactions") %>
 
       <button data-error-message class="alert alert-danger col-12 text-left" style="display: none;">
         <span href="#" class="alert-link"><%= gettext("Something went wrong, click to reload.") %></span>
       </button>
-
-
-      <div class="table-tile-header txn-list-table-head-container">
-        <span style="width: 2%;">
-         &nbsp;
-        </span>
-        <span style="width: 10%;">
-           <%= gettext "Txn Hash" %>
-        </span>
-        <span style="width: 10%;">
-           <%= gettext "Txn Type" %>
-        </span>
-        <span style="width: 9%;">
-             <%= gettext "Method" %>
-        </span>
-        <span style="width: 8%;">
-           <%= gettext "Block" %>
-        </span>
-        <span style="width: 10%;">
-           <%= gettext "Age" %>
-        </span>
-        <span style="width: 14%;">
-          <%= gettext "From" %>
-        </span>
-        <span style="width: 3%;">
-        &nbsp;
-        </span>
-        <span style="width: 14%;">
-          <%= gettext "To" %>
-        </span>
-        <span style="width: 10%;">
-           <%= gettext "Value" %>
-        </span>
-        <span style="width: 10%;">
-           <%= gettext "Txn Fee" %>
-        </span>
-      </div>
-
 
       <div data-empty-response-message style="display: none;">
         <div class="tile tile-muted text-center">
@@ -67,10 +33,9 @@
         </div>
       </div>
 
-      <div data-selector="transactions-list" data-items class="table-list-page">
+      <div data-selector="transactions-list" data-items>
         <%= render BlockScoutWeb.CommonComponentsView, "_tile-loader.html" %>
       </div>
-
 
       <%= render BlockScoutWeb.CommonComponentsView, "_rap_pagination_container.html", position: "bottom" %>
 

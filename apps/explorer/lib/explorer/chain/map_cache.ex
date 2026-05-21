@@ -28,7 +28,7 @@ defmodule Explorer.Chain.MapCache do
 
   ## Callbacks
   Apart from the `callback` that can be set as part of the `ConCache` options,
-  two callbacks esist and can be overridden:
+  two callbacks exist and can be overridden:
 
   `c:handle_update/3` will be called whenever an update is issued. It will receive
   the `t:key/0` that is going to be updated, the current `t:value/0` that is
@@ -198,6 +198,35 @@ defmodule Explorer.Chain.MapCache do
       end
 
       def child_id, do: {ConCache, cache_name()}
+    end
+  end
+
+  defp named_functions(:async_task) do
+    quote do
+      def get_async_task, do: get(:async_task)
+
+      @doc """
+      Checks if the asynchronous task has stalled (has finished, but still in cache),
+      and if so, creates a new replacement task to continue the operation.
+      """
+      def safe_get_async_task do
+        case get_async_task() do
+          pid when is_pid(pid) ->
+            if Process.alive?(pid) do
+              pid
+            else
+              set_async_task(nil)
+              get_async_task()
+            end
+
+          not_pid ->
+            not_pid
+        end
+      end
+
+      def set_async_task(value), do: set(:async_task, value)
+
+      def update_async_task(value), do: update(:async_task, value)
     end
   end
 

@@ -2,10 +2,8 @@
   <div class="api-doc-list-item-contents" href="#<%= @action %>">
     <div class="api-doc-list-item-description">
       <h3 class="api-doc-list-item-title"><%= @action %></h3>
-      <p class="api-doc-list-item-contents">
-        <%= if @info[:name], do: explorerNotes(@info[:name],@info.notes), else: raw @info.notes %>
-      </p>
-      <span class="api-doc-list-item-query api-text-monospace api-text-monospace-background btn"
+      <p class="api-doc-list-item-contents"><%= raw @info.notes %></p>
+      <span class="api-doc-list-item-query api-text-monospace api-text-monospace-background btn" 
         data-clipboard-text="curl -X POST --data '{&quot;id&quot;:0,&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;method&quot;: &quot;<%= @action %>&quot;,&quot;params&quot;: []}'"
       >
         curl -X POST --data '{"id":0,"jsonrpc":"2.0","method": "<%= @action %>", "params": []}'
@@ -19,7 +17,7 @@
         </div>
       </p>
     </div>
-    <div class="api-doc-list-item-controls"
+    <div class="api-doc-list-item-controls" 
       aria-controls="<%= @action %>"
       aria-expanded="false"
       data-toggle="collapse"
@@ -28,8 +26,8 @@
         <span class="badge badge-neutral api-badge"><%= gettext "POST" %></span>
       </div>
       <span class="api-doc-list-item-controls-view-more">
-        <span class="api-doc-list-item-controls-view-more-open"><%= gettext "More Details" %> <span class="fa fa-chevron-down"></span></span>
-        <span class="api-doc-list-item-controls-view-more-close"><%= gettext "Hide Details" %> <span class="fa fa-chevron-up"></span></span>
+        <span class="api-doc-list-item-controls-view-more-open">More Details <span class="fa fa-chevron-down"></span></span>
+        <span class="api-doc-list-item-controls-view-more-close">Hide Details <span class="fa fa-chevron-up"></span></span>
       </span>
     </div>
   </div>
@@ -75,9 +73,7 @@
             </h5>
           </div>
           <div class="col-sm-8 col-md-10">
-            <p  class="api-doc-parameters-list-item-description">
-              <%= explorerDescription(param.name, param.description) %>
-            </p>
+            <p  class="api-doc-parameters-list-item-description"><%= param.description %></p>
             <input
               class="collapse form-control border-rounded <%= if param.required && !param.default, do: "form-control-danger is-invalid" %>"
               data-parameter-type='<%= param.type %>'

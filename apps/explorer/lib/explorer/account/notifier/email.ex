@@ -5,16 +5,16 @@ defmodule Explorer.Account.Notifier.Email do
 
   require Logger
 
-  alias BlockScoutWeb.WebRouter.Helpers
   alias Explorer.Account.{Identity, Watchlist, WatchlistAddress, WatchlistNotification}
+  alias Explorer.Chain.Address
   alias Explorer.Repo
+  alias Utils.Helper
 
   import Bamboo.{Email, SendGridHelper}
 
   def compose(notification, %{notify_email: notify}) when notify do
-
     notification = preload(notification)
-    email = compose_email(notification)
+
     email = compose_email(notification)
     Logger.debug("--- composed email", fetcher: :account)
     Logger.debug(email, fetcher: :account)
@@ -25,18 +25,19 @@ defmodule Explorer.Account.Notifier.Email do
 
   defp compose_email(notification) do
     email = new_email(from: sender(), to: email(notification))
+
     email
     |> with_template(template())
     |> add_dynamic_field("username", username(notification))
-    |> add_dynamic_field("address_hash", address_hash_string(notification))
+    |> add_dynamic_field("address_hash", Address.checksum(notification.watchlist_address.address_hash))
     |> add_dynamic_field("address_name", notification.watchlist_address.name)
-    |> add_dynamic_field("transaction_hash", hash_string(notification.transaction_hash))
-    |> add_dynamic_field("from_address_hash", hash_string(notification.from_address_hash))
-    |> add_dynamic_field("to_address_hash", hash_string(notification.to_address_hash))
+    |> add_dynamic_field("transaction_hash", to_string(notification.transaction_hash))
+    |> add_dynamic_field("from_address_hash", Address.checksum(notification.from_address_hash))
+    |> add_dynamic_field("to_address_hash", Address.checksum(notification.to_address_hash))
     |> add_dynamic_field("block_number", notification.block_number)
     |> add_dynamic_field("amount", amount(notification))
     |> add_dynamic_field("name", notification.name)
-    |> add_dynamic_field("tx_fee", notification.tx_fee)
+    |> add_dynamic_field("transaction_fee", notification.transaction_fee)
     |> add_dynamic_field("direction", direction(notification))
     |> add_dynamic_field("method", notification.method)
     |> add_dynamic_field("transaction_url", transaction_url(notification))
@@ -47,7 +48,6 @@ defmodule Explorer.Account.Notifier.Email do
   end
 
   defp amount(%WatchlistNotification{amount: amount, subject: subject, type: type}) do
-
     case type do
       "COIN" ->
         amount
@@ -55,10 +55,16 @@ defmodule Explorer.Account.Notifier.Email do
       "ERC-20" ->
         amount
 
+      "ZRC-2" ->
+        amount
+
       "ERC-721" ->
         "Token ID: " <> subject <> " of "
 
       "ERC-1155" ->
+        "Token ID: " <> subject <> " of "
+
+      "ERC-404" ->
         "Token ID: " <> subject <> " of "
     end
   end
@@ -71,11 +77,8 @@ defmodule Explorer.Account.Notifier.Email do
              }
            }
          }
-       }) do
-        Logger.info("receive email address:")
-        Logger.info("#{inspect(email)}")
-        email
-       end
+       }),
+       do: email
 
   defp username(%WatchlistNotification{
          watchlist_address: %WatchlistAddress{
@@ -87,15 +90,6 @@ defmodule Explorer.Account.Notifier.Email do
          }
        }),
        do: name
-
-  defp address_hash_string(%WatchlistNotification{
-         watchlist_address: %WatchlistAddress{address_hash: address_hash}
-       }),
-       do: hash_string(address_hash)
-
-  defp hash_string(hash) do
-    "0x" <> Base.encode16(hash.bytes, case: :lower)
-  end
 
   defp direction(notification) do
     affect(notification) <> " " <> place(notification)
@@ -122,31 +116,15 @@ defmodule Explorer.Account.Notifier.Email do
   end
 
   defp address_url(address_hash) do
-    Helpers.address_url(uri(), :show, address_hash)
+    Helper.instance_url() |> URI.append_path("/address/#{address_hash}") |> to_string()
   end
 
   defp block_url(notification) do
-    URI.to_string(uri()) <> "block/" <> Integer.to_string(notification.block_number)
+    Helper.instance_url() |> URI.append_path("/block/#{notification.block_number}") |> to_string()
   end
 
   defp transaction_url(notification) do
-    Helpers.transaction_url(uri(), :show, notification.transaction_hash)
-  end
-
-  defp uri do
-    %URI{scheme: "https", host: host(), path: path()}
-  end
-
-  defp host do
-    if System.get_env("MIX_ENV") == "prod" do
-      "blockscout.com"
-    else
-      Application.get_env(:block_scout_web, BlockScoutWeb.Endpoint)[:url][:host]
-    end
-  end
-
-  defp path do
-    Application.get_env(:block_scout_web, BlockScoutWeb.Endpoint)[:url][:path]
+    Helper.instance_url() |> URI.append_path("/tx/#{notification.transaction_hash}") |> to_string()
   end
 
   defp sender do

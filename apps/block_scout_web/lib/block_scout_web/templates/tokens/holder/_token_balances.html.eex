@@ -1,20 +1,19 @@
-<div class="table-tile tile tile-type-token mb-10" data-test="token_holders">
+<div class="tile tile-type-token fade-in mb-10" data-test="token_holders">
+  <div class="row">
+    <div class="col-md-7 col-lg-8 d-flex flex-column">
+      <span>
+        <%= render BlockScoutWeb.AddressView, "_link.html", address: @token_balance.address, contract: Address.smart_contract?(@token_balance.address), use_custom_tooltip: false %>
+      </span>
 
-  <div class="table-tile-row">
-    <span style="width: 40%;">
-      <%= render BlockScoutWeb.AddressView, "_link.html", address: @token_balance.address, contract: BlockScoutWeb.AddressView.contract?(@token_balance.address), use_custom_tooltip: false %>
-    </span>
-    <span style="width: 40%;">
-      <%= format_token_balance_value(@token_balance.value, @token_balance.token_id, @token) %> <%= @token.symbol %>
-    </span>
-    <span style="width: 20%;">
-      <%= if show_total_supply_percentage?(@token.total_supply) do %>
-        <%= total_supply_percentage(@token_balance.value, @token.total_supply) %>
-      <% end %>
-    </span>
+      <span>
+        <span class="text-dark">
+          <%= format_token_balance_value(@token_balance.value, @token_balance.token_id, @token) %> <%= @token.symbol %>
+        </span>
+
+        <%= if show_total_supply_percentage?(@token.total_supply) do %>
+          <%= total_supply_percentage(@token_balance.value, @token.total_supply) %>
+        <% end %>
+      </span>
+    </div>
   </div>
-
-
-
-
 </div>

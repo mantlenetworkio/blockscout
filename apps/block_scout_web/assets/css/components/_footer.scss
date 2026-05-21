@@ -8,8 +8,8 @@ $footer-logo-height: 28px !default;
 $footer-logo-width: auto !default;
 
 .footer {
-  background: #091312;
-  color: #6E767D;
+  background: $footer-background-color;
+  color: $footer-text-color;
   font-size: 12px;
   line-height: 1.67;
   margin: 0;
@@ -18,24 +18,6 @@ $footer-logo-width: auto !default;
 
   @media (max-width: $breakpoint-md) {
     width: 100%;
-  }
-  .foot-left-description-container{
-    display:flex;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 12px;
-    padding:18px;
-    width:480px;
-    margin-right:80px;
-    @media (max-width: 992px) {
-      margin-right: 0;
-    }
-    @media (max-width: 1199px) {
-      margin-bottom: 20px;
-    }
-  }
-  .row {
-    margin: 0;
-    align-items: flex-start;
   }
 }
 
@@ -80,9 +62,9 @@ $footer-logo-width: auto !default;
 }
 
 .footer-link {
-  color: #fff;
+  color: $footer-link-color;
 
-  &:hover {
+  &:hover, &:focus {
     color: $footer-link-color;
     text-decoration: underline;
   }

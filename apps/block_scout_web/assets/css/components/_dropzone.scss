@@ -538,32 +538,4 @@
 	justify-content: center;
 	display: flex;
 	background: rgba($primary, 0.1) !important;
-
-	position: relative;
-	display: grid !important;
-	grid-template-columns: repeat(4, minmax(0, 1fr));
-	grid-auto-rows:1fr;
-	gap: 16px;
-
-	@media screen and (max-width: 1199px) {
-		grid-template-columns: repeat(3, minmax(0, 1fr));
-	}
-	@media screen and (max-width: 991px) {
-		grid-template-columns: repeat(4, minmax(0, 1fr));
-	}
-	@media screen and (max-width: 767px) {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
-	}
-
-	.dz-message-wrapper{
-		position: absolute;
-		left: 50%;
-		transform: translateX(-50%);
-	}
-	.dz-image{
-		margin: 0 auto;
-	}
-	.dz-preview{
-		margin: 0;
-	}
 }

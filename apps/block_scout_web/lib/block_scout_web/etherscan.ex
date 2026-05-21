@@ -2,8 +2,7 @@ defmodule BlockScoutWeb.Etherscan do
   @moduledoc """
   Documentation data for Etherscan-compatible API.
   """
-
-  import BlockScoutWeb.Gettext
+  use Utils.CompileTimeEnvHelper, bridged_tokens_enabled: [:block_scout_web, [Explorer.Chain.BridgedToken, :enabled]]
 
   @account_balance_example_value %{
     "status" => "1",
@@ -83,7 +82,8 @@ defmodule BlockScoutWeb.Etherscan do
         "contractAddress" => "",
         "cumulativeGasUsed" => "122207",
         "gasUsed" => "122207",
-        "confirmations" => "5994246"
+        "confirmations" => "5994246",
+        "methodId" => "0xf00d4b5d"
       }
     ]
   }
@@ -666,6 +666,12 @@ defmodule BlockScoutWeb.Etherscan do
     example: ~s("6005998")
   }
 
+  @method_id_type %{
+    type: "string",
+    definition: "Method signature used in transaction (0x for simple coin transfers)",
+    example: ~s("0xf00d4b5d")
+  }
+
   @transaction_index_type %{
     type: "transaction index",
     definition: "Index of the transaction in it's block.",
@@ -787,7 +793,8 @@ defmodule BlockScoutWeb.Etherscan do
       contractAddress: @address_hash_type,
       cumulativeGasUsed: @gas_type,
       gasUsed: @gas_type,
-      confirmations: @confirmation_type
+      confirmations: @confirmation_type,
+      methodId: @method_id_type
     }
   }
 
@@ -1092,39 +1099,8 @@ defmodule BlockScoutWeb.Etherscan do
     """
   }
 
-  @contract_decompiled_source_code_type %{
-    type: "contract decompiled source code",
-    definition: "The contract's decompiled source code.",
-    example: """
-    const name() = 'CryptoKitties'
-    const GEN0_STARTING_PRICE() = 10^16
-    const GEN0_AUCTION_DURATION() = 86400
-    const GEN0_CREATION_LIMIT() = 45000
-    const symbol() = 'CK'
-    const PROMO_CREATION_LIMIT() = 5000
-    def storage:
-      ceoAddress is addr # mask(160, 0) at storage #0
-      cfoAddress is addr # mask(160, 0) at storage #1
-      stor1.768 is uint16 => uint256 # mask(256, 768) at storage #1
-      cooAddress is addr # mask(160, 0) at storage #2
-      stor2.0 is uint256 => uint256 # mask(256, 0) at storage #2
-      paused is uint8 # mask(8, 160) at storage #2
-      stor2.256 is uint256 => uint256 # mask(256, 256) at storage #2
-      stor3 is uint32 #
-    ...<continues>
-    """
-  }
-
-  @contract_decompiler_version_type %{
-    type: "decompiler version",
-    definition: "When decompiled source code is present, the decompiler version with which it was generated.",
-    example: "decompiler.version"
-  }
-
   @contract_with_sourcecode_model @contract_model
                                   |> put_in([:fields, "SourceCode"], @contract_source_code_type)
-                                  |> put_in([:fields, "DecompiledSourceCode"], @contract_decompiled_source_code_type)
-                                  |> put_in([:fields, "DecompilerVersion"], @contract_decompiler_version_type)
 
   @transaction_receipt_status_model %{
     name: "TransactionReceiptStatus",
@@ -1150,7 +1126,7 @@ defmodule BlockScoutWeb.Etherscan do
       confirmations: @confirmation_type,
       success: %{
         type: "boolean",
-        definition: "Flag for success during tx execution",
+        definition: "Flag for success during transaction execution",
         example: ~s(true)
       },
       from: @address_hash_type,
@@ -1222,15 +1198,14 @@ defmodule BlockScoutWeb.Etherscan do
 
   @account_eth_get_balance_action %{
     name: "eth_get_balance",
-    description: "Mimics Ethereum JSON RPC's eth_getBalance. Returns the balance as of the provided block (defaults to latest)",
-    getDescription: &__MODULE__.generateDescription/1,
+    description:
+      "Mimics Ethereum JSON RPC's eth_getBalance. Returns the balance as of the provided block (defaults to latest)",
     required_params: [
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "The address of the account.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1,
+        description: "The address of the account."
       }
     ],
     optional_params: [
@@ -1243,9 +1218,8 @@ defmodule BlockScoutWeb.Etherscan do
 
         latest will be the latest balance in a *consensus* block.
         earliest will be the first recorded balance for the address.
-        pending will be the latest balance in consensus *or* nonconcensus blocks.
-        """,
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        pending will be the latest balance in consensus *or* nonconsensus blocks.
+        """
       }
     ],
     responses: [
@@ -1267,15 +1241,22 @@ defmodule BlockScoutWeb.Etherscan do
 
   @account_balance_action %{
     name: "balance",
-    description: "Get balance for address. Also available through a GraphQL 'addresses' query. If the balance hasn't been updated in a long time, we will double check with the node to fetch the absolute latest balance. This will not be reflected in the current request, but once it is updated, subsequent requests will show the updated balance. If you want to know whether or not we are checking for another balance, use the `balancemulti` action. That contains a property called `stale` that will let you know to recheck that balance in the near future.",
-    getDescription: &__MODULE__.generateDescription/1,
+    description: """
+        Get balance for address. Also available through a GraphQL 'addresses' query.
+
+        If the balance hasn't been updated in a long time, we will double check
+        with the node to fetch the absolute latest balance. This will not be
+        reflected in the current request, but once it is updated, subsequent requests
+        will show the updated balance. If you want to know whether or not we are checking
+        for another balance, use the `balancemulti` action. That contains a property
+        called `stale` that will let you know to recheck that balance in the near future.
+    """,
     required_params: [
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "A 160-bit code used for identifying accounts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1,
+        description: "A 160-bit code used for identifying Accounts."
       }
     ],
     optional_params: [],
@@ -1303,16 +1284,22 @@ defmodule BlockScoutWeb.Etherscan do
 
   @account_balancemulti_action %{
     name: "balancemulti",
-    description: "Get balance for multiple addresses. Also available through a GraphQL 'addresses' query. If the balance hasn't been updated in a long time, we will double check with the node to fetch the absolute latest balance. This will not be reflected in the current request, but once it is updated, subsequent requests will show the updated balance. You can know that this is taking place via the `stale` attribute, which is set to `true` if a new balance is being fetched.",
-    getDescription: &__MODULE__.generateDescription/1,
+    description: """
+        Get balance for multiple addresses. Also available through a GraphQL 'addresses' query.
+
+        If the balance hasn't been updated in a long time, we will double check
+        with the node to fetch the absolute latest balance. This will not be
+        reflected in the current request, but once it is updated, subsequent requests
+        will show the updated balance. You can know that this is taking place via
+        the `stale` attribute, which is set to `true` if a new balance is being fetched.
+    """,
     required_params: [
       %{
         key: "address",
         placeholder: "addressHash1,addressHash2,addressHash3",
         type: "string",
         description:
-          "A 160-bit code used for identifying accounts. Separate addresses by comma. Maximum of 20 addresses.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+          "A 160-bit code used for identifying Accounts. Separate addresses by comma. Maximum of 20 addresses."
       }
     ],
     optional_params: [],
@@ -1344,14 +1331,12 @@ defmodule BlockScoutWeb.Etherscan do
   @account_pendingtxlist_action %{
     name: "pendingtxlist",
     description: "Get pending transactions by address.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "A 160-bit code used for identifying accounts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying Accounts."
       }
     ],
     optional_params: [
@@ -1359,15 +1344,13 @@ defmodule BlockScoutWeb.Etherscan do
         key: "page",
         type: "integer",
         description:
-          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction."
       },
       %{
         key: "offset",
         type: "integer",
         description:
-          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction."
       }
     ],
     responses: [
@@ -1399,14 +1382,12 @@ defmodule BlockScoutWeb.Etherscan do
     name: "txlist",
     description:
       "Get transactions by address. Up to a maximum of 10,000 transactions. Also available through a GraphQL 'address' query.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "A 160-bit code used for identifying accounts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying Accounts."
       }
     ],
     optional_params: [
@@ -1414,34 +1395,29 @@ defmodule BlockScoutWeb.Etherscan do
         key: "sort",
         type: "string",
         description:
-          "A string representing the order by block number direction. Defaults to descending order. Available values: asc, desc",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A string representing the order by block number direction. Defaults to descending order. Available values: asc, desc"
       },
       %{
-        key: "start_block",
+        key: "startblock",
         type: "integer",
-        description: "A nonnegative integer that represents the starting block number.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "A nonnegative integer that represents the starting block number."
       },
       %{
-        key: "end_block",
+        key: "endblock",
         type: "integer",
-        description: "A nonnegative integer that represents the ending block number.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "A nonnegative integer that represents the ending block number."
       },
       %{
         key: "page",
         type: "integer",
         description:
-          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction."
       },
       %{
         key: "offset",
         type: "integer",
         description:
-          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction."
       },
       %{
         key: "filter_by",
@@ -1450,20 +1426,17 @@ defmodule BlockScoutWeb.Etherscan do
         A string representing the field to filter by. If none is given
         it returns transactions that match to, from, or contract address.
         Available values: to, from
-        """,
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        """
       },
       %{
         key: "start_timestamp",
         type: "unix timestamp",
-        description: "Represents the starting block timestamp.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "Represents the starting block timestamp."
       },
       %{
         key: "end_timestamp",
         type: "unix timestamp",
-        description: "Represents the ending block timestamp.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "Represents the ending block timestamp."
       }
     ],
     responses: [
@@ -1495,59 +1468,50 @@ defmodule BlockScoutWeb.Etherscan do
     name: "txlistinternal",
     description:
       "Get internal transactions by transaction or address hash. Up to a maximum of 10,000 internal transactions. Also available through a GraphQL 'transaction' query.",
-    getDescription: &__MODULE__.generateDescription/1,
-    required_params: [
+    required_params: [],
+    optional_params: [
       %{
         key: "txhash",
         placeholder: "transactionHash",
         type: "string",
         description:
-          "Transaction hash. Hash of contents of the transaction. A transaction hash or address hash is required.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
-      }
-    ],
-    optional_params: [
+          "Transaction hash. Hash of contents of the transaction. Optional parameter to filter results by a specific transaction hash."
+      },
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "A 160-bit code used for identifying accounts. An address hash or transaction hash is required.",
-      getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "A 160-bit code used for identifying accounts. An address hash or transaction hash is required."
       },
       %{
         key: "sort",
         type: "string",
         description:
-          "A string representing the order by block number direction. Defaults to ascending order. Available values: asc, desc. WARNING: Only available if 'address' is provided.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A string representing the order by block number direction. Defaults to ascending order. Available values: asc, desc. WARNING: Only available if 'address' is provided."
       },
       %{
-        key: "start_block",
+        key: "startblock",
         type: "integer",
         description:
-          "A nonnegative integer that represents the starting block number. WARNING: Only available if 'address' is provided.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the starting block number. WARNING: Only available if 'address' is provided."
       },
       %{
-        key: "end_block",
+        key: "endblock",
         type: "integer",
         description:
-          "A nonnegative integer that represents the ending block number. WARNING: Only available if 'address' is provided.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the ending block number. WARNING: Only available if 'address' is provided."
       },
       %{
         key: "page",
         type: "integer",
         description:
-          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction. WARNING: Only available if 'address' is provided.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction. WARNING: Only available if 'address' is provided."
       },
       %{
         key: "offset",
         type: "integer",
         description:
-          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction. WARNING: Only available if 'address' is provided.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction. WARNING: Only available if 'address' is provided."
       }
     ],
     responses: [
@@ -1579,14 +1543,12 @@ defmodule BlockScoutWeb.Etherscan do
     name: "tokentx",
     description:
       "Get token transfer events by address. Up to a maximum of 10,000 token transfer events. Also available through a GraphQL 'token_transfers' query.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "A 160-bit code used for identifying accounts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying accounts."
       }
     ],
     optional_params: [
@@ -1594,41 +1556,35 @@ defmodule BlockScoutWeb.Etherscan do
         key: "contractaddress",
         placeholder: "contractAddressHash",
         type: "string",
-        description: "A 160-bit code used for identifying contracts.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+        description: "A 160-bit code used for identifying contracts."
       },
       %{
         key: "sort",
         type: "string",
         description:
-          "A string representing the order by block number direction. Defaults to ascending order. Available values: asc, desc",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A string representing the order by block number direction. Defaults to ascending order. Available values: asc, desc"
       },
       %{
-        key: "start_block",
+        key: "startblock",
         type: "integer",
-        description: "A nonnegative integer that represents the starting block number.",
-      getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "A nonnegative integer that represents the starting block number."
       },
       %{
-        key: "end_block",
+        key: "endblock",
         type: "integer",
-        description: "A nonnegative integer that represents the ending block number.",
-      getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "A nonnegative integer that represents the ending block number."
       },
       %{
         key: "page",
         type: "integer",
         description:
-          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction."
       },
       %{
         key: "offset",
         type: "integer",
         description:
-          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction."
       }
     ],
     responses: [
@@ -1659,21 +1615,18 @@ defmodule BlockScoutWeb.Etherscan do
   @account_tokenbalance_action %{
     name: "tokenbalance",
     description: "Get token account balance for token contract address.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "contractaddress",
         placeholder: "contractAddressHash",
         type: "string",
-        description: "A 160-bit code used for identifying contracts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying contracts."
       },
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "A 160-bit code used for identifying accounts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying accounts."
       }
     ],
     optional_params: [],
@@ -1706,14 +1659,12 @@ defmodule BlockScoutWeb.Etherscan do
   @account_tokenlist_action %{
     name: "tokenlist",
     description: "Get list of tokens owned by address.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "A 160-bit code used for identifying accounts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying accounts."
       }
     ],
     optional_params: [],
@@ -1745,14 +1696,12 @@ defmodule BlockScoutWeb.Etherscan do
   @account_getminedblocks_action %{
     name: "getminedblocks",
     description: "Get list of blocks mined by address.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "A 160-bit code used for identifying accounts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1,
+        description: "A 160-bit code used for identifying accounts."
       }
     ],
     optional_params: [
@@ -1760,15 +1709,13 @@ defmodule BlockScoutWeb.Etherscan do
         key: "page",
         type: "integer",
         description:
-          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction."
       },
       %{
         key: "offset",
         type: "integer",
         description:
-          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction."
       }
     ],
     responses: [
@@ -1800,22 +1747,19 @@ defmodule BlockScoutWeb.Etherscan do
     name: "listaccounts",
     description:
       "Get a list of accounts and their balances, sorted ascending by the time they were first seen by the explorer.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [],
     optional_params: [
       %{
         key: "page",
         type: "integer",
         description:
-          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction."
       },
       %{
         key: "offset",
         type: "integer",
         description:
-          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction."
       }
     ],
     responses: [
@@ -1841,105 +1785,91 @@ defmodule BlockScoutWeb.Etherscan do
   @logs_getlogs_action %{
     name: "getLogs",
     description: "Get event logs for an address and/or topics. Up to a maximum of 1,000 event logs.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "fromBlock",
         placeholder: "blockNumber",
         type: "integer",
         description:
-          "A nonnegative integer that represents the starting block number. The use of 'latest' is also supported.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+          "A nonnegative integer that represents the starting block number. The use of 'latest' is also supported."
       },
       %{
         key: "toBlock",
         placeholder: "blockNumber",
         type: "integer",
         description:
-          "A nonnegative integer that represents the ending block number. The use of 'latest' is also supported.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+          "A nonnegative integer that represents the ending block number. The use of 'latest' is also supported."
       },
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "A 160-bit code used for identifying contracts. An address and/or topic{x} is required.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying contracts. An address and/or topic{x} is required."
       },
       %{
         key: "topic0",
         placeholder: "firstTopic",
         type: "string",
-        description: "A string equal to the first topic. A topic{x} and/or address is required.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A string equal to the first topic. A topic{x} and/or address is required."
       }
     ],
     optional_params: [
       %{
         key: "topic1",
         type: "string",
-        description: "A string equal to the second topic. A topic{x} and/or address is required.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+        description: "A string equal to the second topic. A topic{x} and/or address is required."
       },
       %{
         key: "topic2",
         type: "string",
-        description: "A string equal to the third topic. A topic{x} and/or address is required.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+        description: "A string equal to the third topic. A topic{x} and/or address is required."
       },
       %{
         key: "topic3",
         type: "string",
-        description: "A string equal to the fourth topic. A topic{x} and/or address is required.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+        description: "A string equal to the fourth topic. A topic{x} and/or address is required."
       },
       %{
         key: "topic0_1_opr",
         type: "string",
         description:
           "A string representing the and|or operator for topic0 and topic1. " <>
-            "Required if topic0 and topic1 is used. Available values: and, or",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+            "Required if topic0 and topic1 is used. Available values: and, or"
       },
       %{
         key: "topic0_2_opr",
         type: "string",
         description:
           "A string representing the and|or operator for topic0 and topic2. " <>
-            "Required if topic0 and topic2 is used. Available values: and, or",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+            "Required if topic0 and topic2 is used. Available values: and, or"
       },
       %{
         key: "topic0_3_opr",
         type: "string",
         description:
           "A string representing the and|or operator for topic0 and topic3. " <>
-            "Required if topic0 and topic3 is used. Available values: and, or",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+            "Required if topic0 and topic3 is used. Available values: and, or"
       },
       %{
         key: "topic1_2_opr",
         type: "string",
         description:
           "A string representing the and|or operator for topic1 and topic2. " <>
-            "Required if topic1 and topic2 is used. Available values: and, or",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+            "Required if topic1 and topic2 is used. Available values: and, or"
       },
       %{
         key: "topic1_3_opr",
         type: "string",
         description:
           "A string representing the and|or operator for topic1 and topic3. " <>
-            "Required if topic1 and topic3 is used. Available values: and, or",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+            "Required if topic1 and topic3 is used. Available values: and, or"
       },
       %{
         key: "topic2_3_opr",
         type: "string",
         description:
           "A string representing the and|or operator for topic2 and topic3. " <>
-            "Required if topic2 and topic3 is used. Available values: and, or",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+            "Required if topic2 and topic3 is used. Available values: and, or"
       }
     ],
     responses: [
@@ -1972,14 +1902,12 @@ defmodule BlockScoutWeb.Etherscan do
     description:
       "Get <a href='https://github.com/ethereum/EIPs/issues/20'>ERC-20</a> " <>
         "or <a href='https://github.com/ethereum/EIPs/issues/721'>ERC-721</a> token by contract address.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "contractaddress",
         placeholder: "contractAddressHash",
         type: "string",
-        description: "A 160-bit code used for identifying contracts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying contracts."
       }
     ],
     optional_params: [],
@@ -2011,14 +1939,12 @@ defmodule BlockScoutWeb.Etherscan do
   @token_gettokenholders_action %{
     name: "getTokenHolders",
     description: "Get token holders by contract address.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "contractaddress",
         placeholder: "contractAddressHash",
         type: "string",
-        description: "A 160-bit code used for identifying contracts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying contracts."
       }
     ],
     optional_params: [
@@ -2026,15 +1952,13 @@ defmodule BlockScoutWeb.Etherscan do
         key: "page",
         type: "integer",
         description:
-          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction."
       },
       %{
         key: "offset",
         type: "integer",
         description:
-          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1
+          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction."
       }
     ],
     responses: [
@@ -2062,20 +1986,129 @@ defmodule BlockScoutWeb.Etherscan do
     ]
   }
 
+  if @bridged_tokens_enabled do
+    @success_status_type %{
+      type: "status",
+      enum: ~s(["1"]),
+      enum_interpretation: %{"1" => "ok"}
+    }
+
+    @bridged_token_details %{
+      name: "Bridged Token Detail",
+      fields: %{
+        foreignChainId: %{
+          type: "value",
+          definition: "Chain ID of the chain where original token exists.",
+          example: ~s("1")
+        },
+        foreignTokenContractAddressHash: @address_hash_type,
+        homeContractAddressHash: @address_hash_type,
+        homeDecimals: @token_decimal_type,
+        homeHolderCount: %{
+          type: "value",
+          definition: "Token holders count.",
+          example: ~s("393")
+        },
+        homeName: @token_name_type,
+        homeSymbol: @token_symbol_type,
+        homeTotalSupply: %{
+          type: "value",
+          definition: "Total supply of the token on the home side (where token was bridged).",
+          example: ~s("1484374.775044204093387391")
+        },
+        homeUsdValue: %{
+          type: "value",
+          definition: "Total supply of the token on the home side (where token was bridged) in USD.",
+          example: ~s("6638727.472651464170990256943")
+        }
+      }
+    }
+
+    @token_bridgedtokenlist_example_value %{
+      "status" => "1",
+      "message" => "OK",
+      "result" => [
+        %{
+          "foreignChainId" => "1",
+          "foreignTokenContractAddressHash" => "0x0ae055097c6d159879521c384f1d2123d1f195e6",
+          "homeContractAddressHash" => "0xb7d311e2eb55f2f68a9440da38e7989210b9a05e",
+          "homeDecimals" => "18",
+          "homeHolderCount" => 393,
+          "homeName" => "STAKE on xDai",
+          "homeSymbol" => "STAKE",
+          "homeTotalSupply" => "1484374.775044204093387391",
+          "homeUsdValue" => "18807028.39981006586321824397"
+        },
+        %{
+          "foreignChainId" => "1",
+          "foreignTokenContractAddressHash" => "0xf5581dfefd8fb0e4aec526be659cfab1f8c781da",
+          "homeContractAddressHash" => "0xd057604a14982fe8d88c5fc25aac3267ea142a08",
+          "homeDecimals" => "18",
+          "homeHolderCount" => 73,
+          "homeName" => "HOPR Token on xDai",
+          "homeSymbol" => "HOPR",
+          "homeTotalSupply" => "26600449.86076749062791602",
+          "homeUsdValue" => "6638727.472651464170990256943"
+        }
+      ]
+    }
+
+    @token_bridgedtokenlist_action %{
+      name: "bridgedTokenList",
+      description: "Get bridged tokens list.",
+      required_params: [],
+      optional_params: [
+        %{
+          key: "chainid",
+          type: "integer",
+          description: "A nonnegative integer that represents the chain id, where original token exists."
+        },
+        %{
+          key: "page",
+          type: "integer",
+          description:
+            "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction."
+        },
+        %{
+          key: "offset",
+          type: "integer",
+          description:
+            "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction."
+        }
+      ],
+      responses: [
+        %{
+          code: "200",
+          description: "successful operation",
+          example_value: Jason.encode!(@token_bridgedtokenlist_example_value),
+          model: %{
+            name: "Result",
+            fields: %{
+              status: @success_status_type,
+              message: @message_type,
+              result: %{
+                type: "array",
+                array_type: @bridged_token_details
+              }
+            }
+          }
+        }
+      ]
+    }
+  end
+
   @stats_tokensupply_action %{
     name: "tokensupply",
     description:
       "Get <a href='https://github.com/ethereum/EIPs/issues/20'>ERC-20</a> or " <>
         "<a href='https://github.com/ethereum/EIPs/issues/721'>ERC-721</a> " <>
         " token total supply by contract address.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "contractaddress",
         placeholder: "contractAddressHash",
         type: "string",
-        description: "A 160-bit code used for identifying contracts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying contracts."
       }
     ],
     optional_params: [],
@@ -2108,7 +2141,6 @@ defmodule BlockScoutWeb.Etherscan do
   @stats_ethsupplyexchange_action %{
     name: "ethsupplyexchange",
     description: "Get total supply in Wei from exchange.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [],
     optional_params: [],
     responses: [
@@ -2135,7 +2167,6 @@ defmodule BlockScoutWeb.Etherscan do
   @stats_ethsupply_action %{
     name: "ethsupply",
     description: "Get total supply in Wei from DB.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [],
     optional_params: [],
     responses: [
@@ -2162,7 +2193,6 @@ defmodule BlockScoutWeb.Etherscan do
   @stats_coinsupply_action %{
     name: "coinsupply",
     description: "Get total coin supply from DB minus burnt number.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [],
     optional_params: [],
     responses: [
@@ -2187,7 +2217,6 @@ defmodule BlockScoutWeb.Etherscan do
   @stats_coinprice_action %{
     name: "coinprice",
     description: "Get latest price of native coin in USD and BTC.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [],
     optional_params: [],
     responses: [
@@ -2213,14 +2242,12 @@ defmodule BlockScoutWeb.Etherscan do
   @stats_totalfees_action %{
     name: "totalfees",
     description: "Gets total transaction fees in Wei are paid by users to validators per day.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "date",
         placeholder: "date",
         type: "string",
-        description: "day in ISO 8601 format (yyyy-mm-dd)",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "day in ISO 8601 format (yyyy-mm-dd)"
       }
     ],
     optional_params: [],
@@ -2251,16 +2278,14 @@ defmodule BlockScoutWeb.Etherscan do
 
   @block_eth_block_number_action %{
     name: "eth_block_number",
-    description: "Mimics Ethereum JSON RPC's eth_blockNumber. Returns the lastest block number",
-    getDescription: &__MODULE__.generateDescription/1,
+    description: "Mimics Ethereum JSON RPC's eth_blockNumber. Returns the latest block number",
     required_params: [],
     optional_params: [
       %{
         key: "id",
         placeholder: "request id",
         type: "integer",
-        description: "A nonnegative integer that represents the json rpc request id.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "A nonnegative integer that represents the json rpc request id."
       }
     ],
     responses: [
@@ -2283,14 +2308,12 @@ defmodule BlockScoutWeb.Etherscan do
   @block_getblockreward_action %{
     name: "getblockreward",
     description: "Get block reward by block number.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "blockno",
         placeholder: "blockNumber",
         type: "integer",
-        description: "A nonnegative integer that represents the block number.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A nonnegative integer that represents the block number."
       }
     ],
     optional_params: [],
@@ -2322,21 +2345,18 @@ defmodule BlockScoutWeb.Etherscan do
   @block_getblocknobytime_action %{
     name: "getblocknobytime",
     description: "Get Block Number by Timestamp.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "timestamp",
         placeholder: "blockTimestamp",
         type: "integer",
-        description: "A nonnegative integer that represents the block timestamp (Unix timestamp in seconds).",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A nonnegative integer that represents the block timestamp (Unix timestamp in seconds)."
       },
       %{
         key: "closest",
         placeholder: "before/after",
         type: "string",
-        description: "Direction to find the closest block number to given timestamp. Available values: before/after.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "Direction to find the closest block number to given timestamp. Available values: before/after."
       }
     ],
     optional_params: [],
@@ -2367,51 +2387,42 @@ defmodule BlockScoutWeb.Etherscan do
 
   @contract_listcontracts_action %{
     name: "listcontracts",
-    description: "Get a list of contracts, sorted ascending by the time they were first seen by the explorer. If you provide the filters `not_decompiled`(`4`) or `not_verified(4)` the results will not be sorted for performance reasons.",
-    getDescription: &__MODULE__.generateDescription/1,
+    description: """
+    Get a list of contracts, sorted ascending by the time they were first seen by the explorer.
+
+    If you provide the filter `unverified(2)` the results will not
+    be sorted for performance reasons.
+    """,
     required_params: [],
     optional_params: [
       %{
         key: "page",
         type: "integer",
         description:
-          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction."
       },
       %{
         key: "offset",
         type: "integer",
         description:
-          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction."
       },
       %{
         key: "filter",
         type: "string",
-        description:
-          "verified|decompiled|unverified|not_decompiled|empty, or 1|2|3|4|5 respectively. This requests only contracts with that status.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
-      },
-      %{
-        key: "not_decompiled_with_version",
-        type: "string",
-        description:
-          "Ensures that none of the returned contracts were decompiled with the provided version. Ignored unless filtering for decompiled contracts.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "verified|unverified|empty, or 1|2|3 respectively. This requests only contracts with that status."
       },
       %{
         key: "verified_at_start_timestamp",
         type: "unix timestamp",
         description:
-          "Represents the starting timestamp when contracts verified. Taking into account only with `verified` filter.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "Represents the starting timestamp when contracts verified. Taking into account only with `verified` filter."
       },
       %{
         key: "verified_at_end_timestamp",
         type: "unix timestamp",
         description:
-          "Represents the ending timestamp when contracts verified. Taking into account only with `verified` filter.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+          "Represents the ending timestamp when contracts verified. Taking into account only with `verified` filter."
       }
     ],
     responses: [
@@ -2454,131 +2465,111 @@ defmodule BlockScoutWeb.Etherscan do
     </div>
     </div>
     """,
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "addressHash",
         placeholder: "addressHash",
         type: "string",
-        description: "The address of the contract.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "The address of the contract."
       },
       %{
         key: "name",
         placeholder: "name",
         type: "string",
-        description: "The name of the contract.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "The name of the contract."
       },
       %{
         key: "compilerVersion",
         placeholder: "compilerVersion",
         type: "string",
-        description: "The compiler version for the contract.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "The compiler version for the contract."
       },
       %{
         key: "optimization",
         placeholder: false,
         type: "boolean",
-        description: "Whether or not compiler optimizations were enabled.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "Whether or not compiler optimizations were enabled."
       },
       %{
         key: "contractSourceCode",
         placeholder: "contractSourceCode",
         type: "string",
-        description: "The source code of the contract.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "The source code of the contract."
       }
     ],
     optional_params: [
       %{
         key: "constructorArguments",
         type: "string",
-        description: "The constructor argument data provided.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The constructor argument data provided."
       },
       %{
         key: "autodetectConstructorArguments",
         placeholder: false,
         type: "boolean",
-        description: "Whether or not automatically detect constructor argument.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "Whether or not automatically detect constructor argument."
       },
       %{
         key: "evmVersion",
         placeholder: "evmVersion",
         type: "string",
-        description: "The EVM version for the contract.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The EVM version for the contract."
       },
       %{
         key: "optimizationRuns",
         placeholder: "optimizationRuns",
         type: "integer",
-        description: "The number of optimization runs used during compilation",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The number of optimization runs used during compilation"
       },
       %{
         key: "library1Name",
         type: "string",
-        description: "The name of the first library used.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The name of the first library used."
       },
       %{
         key: "library1Address",
         type: "string",
-        description: "The address of the first library used.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The address of the first library used."
       },
       %{
         key: "library2Name",
         type: "string",
-        description: "The name of the second library used.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The name of the second library used."
       },
       %{
         key: "library2Address",
         type: "string",
-        description: "The address of the second library used.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The address of the second library used."
       },
       %{
         key: "library3Name",
         type: "string",
-        description: "The name of the third library used.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The name of the third library used."
       },
       %{
         key: "library3Address",
         type: "string",
-        description: "The address of the third library used.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The address of the third library used."
       },
       %{
         key: "library4Name",
         type: "string",
-        description: "The name of the fourth library used.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The name of the fourth library used."
       },
       %{
         key: "library4Address",
         type: "string",
-        description: "The address of the fourth library used.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The address of the fourth library used."
       },
       %{
         key: "library5Name",
         type: "string",
-        description: "The name of the fourth library used.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The name of the fourth library used."
       },
       %{
         key: "library5Address",
         type: "string",
-        description: "The address of the fourth library used.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The address of the fourth library used."
       }
     ],
     responses: [
@@ -2634,22 +2625,19 @@ defmodule BlockScoutWeb.Etherscan do
     </div>
     </div>
     """,
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "addressHash",
         placeholder: "addressHash",
         type: "string",
-        description: "The address of the contract.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "The address of the contract."
       }
     ],
     optional_params: [
       %{
         key: "files",
         type: "file[]",
-        description: "Array with sources and metadata files",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "Array with sources and metadata files"
       }
     ],
     responses: [
@@ -2690,43 +2678,37 @@ defmodule BlockScoutWeb.Etherscan do
     </div>
     </div>
     """,
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "addressHash",
         placeholder: "addressHash",
         type: "string",
-        description: "The address of the contract.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "The address of the contract."
       },
       %{
         key: "name",
         placeholder: "name",
         type: "string",
-        description: "The name of the contract.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "The name of the contract."
       },
       %{
         key: "compilerVersion",
         placeholder: "compilerVersion",
         type: "string",
-        description: "The compiler version for the contract.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "The compiler version for the contract."
       },
       %{
         key: "contractSourceCode",
         placeholder: "contractSourceCode",
         type: "string",
-        description: "The source code of the contract.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "The source code of the contract."
       }
     ],
     optional_params: [
       %{
         key: "constructorArguments",
         type: "string",
-        description: "The constructor argument data provided.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The constructor argument data provided."
       }
     ],
     responses: [
@@ -2752,59 +2734,51 @@ defmodule BlockScoutWeb.Etherscan do
     <br/>
     <br/>
     """,
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         name: "solidity-standard-json-input",
         key: "codeformat",
         placeholder: "solidity-standard-json-input",
         type: "string",
-        description: "Format of sourceCode(supported only \"solidity-standard-json-input\")",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "Format of sourceCode(supported only \"solidity-standard-json-input\")"
       },
       %{
         key: "contractaddress",
         placeholder: "contractaddress",
         type: "string",
-        description: "The address of the contract.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "The address of the contract."
       },
       %{
         key: "contractname",
         placeholder: "contractname",
         type: "string",
         description:
-          "The name of the contract. It could be empty string(\"\"), just contract name(\"ContractName\"), or filename and contract name(\"contracts/contract_1.sol:ContractName\")",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+          "The name of the contract. It could be empty string(\"\"), just contract name(\"ContractName\"), or filename and contract name(\"contracts/contract_1.sol:ContractName\")"
       },
       %{
         key: "compilerversion",
         placeholder: "compilerversion",
         type: "string",
-        description: "The compiler version for the contract.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "The compiler version for the contract."
       },
       %{
         key: "sourceCode",
         placeholder: "sourceCode",
         type: "string",
-        description: "Standard input json",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "Standard input json"
       }
     ],
     optional_params: [
       %{
-        key: "constructorArguements",
+        key: "constructorArguments",
         type: "string",
-        description: "The constructor argument data provided.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "The constructor argument data provided."
       },
       %{
         key: "autodetectConstructorArguments",
         placeholder: false,
         type: "boolean",
-        description: "Whether or not automatically detect constructor argument.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "Whether or not automatically detect constructor argument."
       }
     ],
     responses: [
@@ -2821,14 +2795,12 @@ defmodule BlockScoutWeb.Etherscan do
   @contract_checkverifystatus_action %{
     name: "checkverifystatus",
     description: "Return status of the verification attempt (works in addition to verifysourcecode method)",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "guid",
         placeholder: "identifierString",
         type: "string",
-        description: "A string used for identifying verification attempt",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A string used for identifying verification attempt"
       }
     ],
     optional_params: [],
@@ -2846,14 +2818,12 @@ defmodule BlockScoutWeb.Etherscan do
   @contract_getabi_action %{
     name: "getabi",
     description: "Get ABI for verified contract. Also available through a GraphQL 'addresses' query.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "A 160-bit code used for identifying contracts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying contracts."
       }
     ],
     optional_params: [],
@@ -2885,14 +2855,12 @@ defmodule BlockScoutWeb.Etherscan do
   @contract_getsourcecode_action %{
     name: "getsourcecode",
     description: "Get contract source code for verified contract. Also available through a GraphQL 'addresses' query.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "address",
         placeholder: "addressHash",
         type: "string",
-        description: "A 160-bit code used for identifying contracts.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "A 160-bit code used for identifying contracts."
       }
     ],
     optional_params: [],
@@ -2924,22 +2892,19 @@ defmodule BlockScoutWeb.Etherscan do
   @transaction_gettxinfo_action %{
     name: "gettxinfo",
     description: "Get transaction info.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "txhash",
         placeholder: "transactionHash",
         type: "string",
-        description: "Transaction hash. Hash of contents of the transaction.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "Transaction hash. Hash of contents of the transaction."
       }
     ],
     optional_params: [
       %{
         key: "index",
         type: "integer",
-        description: "A nonnegative integer that represents the log index to be used for pagination.",
-        getOptionalParamsDescription: &__MODULE__.generateOptionalParamsDescription/1,
+        description: "A nonnegative integer that represents the log index to be used for pagination."
       }
     ],
     responses: [
@@ -2970,14 +2935,12 @@ defmodule BlockScoutWeb.Etherscan do
   @transaction_gettxreceiptstatus_action %{
     name: "gettxreceiptstatus",
     description: "Get transaction receipt status. Also available through a GraphQL 'transaction' query.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "txhash",
         placeholder: "transactionHash",
         type: "string",
-        description: "Transaction hash. Hash of contents of the transaction.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "Transaction hash. Hash of contents of the transaction."
       }
     ],
     optional_params: [],
@@ -3009,14 +2972,12 @@ defmodule BlockScoutWeb.Etherscan do
   @transaction_getstatus_action %{
     name: "getstatus",
     description: "Get error status and error message. Also available through a GraphQL 'transaction' query.",
-    getDescription: &__MODULE__.generateDescription/1,
     required_params: [
       %{
         key: "txhash",
         placeholder: "transactionHash",
         type: "string",
-        description: "Transaction hash. Hash of contents of the transaction.",
-        getRequiredParamsDescription: &__MODULE__.generateRequiredParamsDescription/1
+        description: "Transaction hash. Hash of contents of the transaction."
       }
     ],
     optional_params: [],
@@ -3067,12 +3028,18 @@ defmodule BlockScoutWeb.Etherscan do
     actions: [@logs_getlogs_action]
   }
 
+  @base_token_actions [
+    @token_gettoken_action,
+    @token_gettokenholders_action
+  ]
+
+  @token_actions if @bridged_tokens_enabled,
+                   do: [@token_bridgedtokenlist_action, @base_token_actions],
+                   else: @base_token_actions
+
   @token_module %{
     name: "token",
-    actions: [
-      @token_gettoken_action,
-      @token_gettokenholders_action
-    ]
+    actions: @token_actions
   }
 
   @stats_module %{
@@ -3142,304 +3109,4 @@ defmodule BlockScoutWeb.Etherscan do
   def coin_usd_type_definition(coin) do
     "#{coin} price in US dollars."
   end
-
-  def generateDescription(namespace) do
-    case namespace do
-      "eth_get_balance" ->
-        gettext("Mimics Ethereum JSON RPC's eth_getBalance. Returns the balance as of the provided block (defaults to latest)")
-      "balance" ->
-        gettext("Get balance for address. Also available through a GraphQL 'addresses' query. If the balance hasn't been updated in a long time, we will double check with the node to fetch the absolute latest balance. This will not be reflected in the current request, but once it is updated, subsequent requests will show the updated balance. If you want to know whether or not we are checking for another balance, use the `balancemulti` action. That contains a property called `stale` that will let you know to recheck that balance in the near future.")
-      "balancemulti" ->
-        gettext("Get balance for multiple addresses. Also available through a GraphQL 'addresses' query. If the balance hasn't been updated in a long time, we will double check with the node to fetch the absolute latest balance. This will not be reflected in the current request, but once it is updated, subsequent requests will show the updated balance. You can know that this is taking place via the `stale` attribute, which is set to `true` if a new balance is being fetched.")
-      "pendingtxlist" ->
-        gettext("Get pending transactions by address.")
-      "txlist" ->
-        gettext("Get transactions by address. Up to a maximum of 10,000 transactions. Also available through a GraphQL 'address' query.")
-      "txlistinternal" ->
-        gettext("Get internal transactions by transaction or address hash. Up to a maximum of 10,000 internal transactions. Also available through a GraphQL 'transaction' query.")
-      "tokentx" ->
-        gettext("Get token transfer events by address. Up to a maximum of 10,000 token transfer events. Also available through a GraphQL 'token_transfers' query.")
-      "tokenbalance" ->
-        gettext("Get token account balance for token contract address.")
-      "tokenlist" ->
-        gettext("Get list of tokens owned by address.")
-      "getminedblocks" ->
-        gettext("Get list of blocks mined by address.")
-      "listaccounts" ->
-        gettext("Get a list of accounts and their balances, sorted ascending by the time they were first seen by the explorer.")
-      "getLogs" ->
-        gettext("Get event logs for an address and/or topics. Up to a maximum of 1,000 event logs.")
-      "getToken" ->
-        gettext("Get <a href='https://github.com/ethereum/EIPs/issues/20'>ERC-20</a> or <a href='https://github.com/ethereum/EIPs/issues/721'>ERC-721</a> token by contract address.")
-      "getTokenHolders" ->
-        gettext("Get token holders by contract address.")
-      "tokensupply" ->
-        gettext("Get <a href='https://github.com/ethereum/EIPs/issues/20'>ERC-20</a> or <a href='https://github.com/ethereum/EIPs/issues/721'>ERC-721</a> token total supply by contract address.")
-      "ethsupplyexchange" ->
-        gettext("Get total supply in Wei from exchange.")
-      "ethsupply" ->
-        gettext("Get total supply in Wei from DB.")
-      "coinsupply" ->
-        gettext("Get total coin supply from DB minus burnt number.")
-      "coinprice" ->
-        gettext("Get latest price of native coin in USD and BTC.")
-      "totalfees" ->
-        gettext("Gets total transaction fees in Wei are paid by users to validators per day.")
-      "eth_block_number" ->
-        gettext("Mimics Ethereum JSON RPC's eth_blockNumber. Returns the lastest block number")
-      "getblockreward" ->
-        gettext("Get block reward by block number.")
-      "getblocknobytime" ->
-        gettext("Get Block Number by Timestamp.")
-      "listcontracts" ->
-        gettext("Get a list of contracts, sorted ascending by the time they were first seen by the explorer. If you provide the filters `not_decompiled`(`4`) or `not_verified(4)` the results will not be sorted for performance reasons.")
-      "getabi" ->
-        gettext("Get ABI for verified contract. Also available through a GraphQL 'addresses' query.")
-      "getsourcecode" ->
-        gettext("Get contract source code for verified contract. Also available through a GraphQL 'addresses' query.")
-      "gettxinfo" ->
-        gettext("Get transaction info.")
-      "gettxreceiptstatus" ->
-        gettext("Get transaction receipt status. Also available through a GraphQL 'transaction' query.")
-      "getstatus" ->
-        gettext("Get error status and error message. Also available through a GraphQL 'transaction' query.")
-      "verify" ->
-        gettext("Verify a contract with its source code and contract creation information. <br/> <br/> <p class=\"api-doc-list-item-text\">curl POST example:</p> <br/> <div class='tab-content'> <div class='tab-pane fade show active'> <div class=\"tile tile-muted p-1\"> <div class=\"m-2\"> curl -d '{\"addressHash\":\"0xc63BB6555C90846afACaC08A0F0Aa5caFCB382a1\",\"compilerVersion\":\"v0.5.4+commit.9549d8ff\", \"contractSourceCode\":\"pragma solidity ^0.5.4; \ncontract Test {\n}\",\"name\":\"Test\",\"optimization\":false}' -H \"Content-Type: application/json\" -X POST  \"https://blockscout.com/poa/sokol/api?module=contract&action=verify\" </pre> </div> </div> </div>")
-      "verify_via_sourcify" ->
-        gettext("Verify a contract through <a href=\"https://sourcify.dev\">Sourcify</a>.<br/> a) if smart-contract already verified on Sourcify, it will automatically fetch the data from the <a href=\"https://repo.sourcify.dev\">repo</a><br/> b) otherwise you have to upload source files and JSON metadata file(s). <br/> <br/> <p class=\"api-doc-list-item-text\">POST body example:</p> <br/> <div class='tab-content'> <div class='tab-pane fade show active'> <div class=\"tile tile-muted p-1\"> <div class=\"m-2\"> --6e1e4c11657c62dc1e4349d024de9e28<br/> Content-Disposition: form-data; name=\"addressHash\"<br/> <br/> 0xb77b7443e0F32F1FEBf0BE0fBd7124D135d0a525<br/> <br/> --6e1e4c11657c62dc1e4349d024de9e28<br/> Content-Disposition: form-data; name=\"files[0]\"; filename=\"contract.sol\"<br/> Content-Type: application/json<br/> <br/> ...Source code...<br/> <br/> --6e1e4c11657c62dc1e4349d024de9e28<br/> Content-Disposition: form-data; name=\"files[1]\"; filename=\"metadata.json\"<br/> Content-Type: application/json<br/> <br/> ...JSON metadata...<br/> <br/> --6e1e4c11657c62dc1e4349d024de9e28--<br/> </pre> </div> </div> </div>")
-      "verify_vyper_contract" ->
-        gettext("Verify a vyper contract with its source code and contract creation information. <br/> <br/> <p class=\"api-doc-list-item-text\">curl POST example:</p> <br/> <div class='tab-content'> <div class='tab-pane fade show active'> <div class=\"tile tile-muted p-1\"> <div class=\"m-2\"> curl --location --request POST 'http://localhost:4000/api?module=contract&action=verify_vyper_contract' --form 'contractSourceCode=\"SOURCE_CODE\"' --form 'name=\"Vyper_contract\"' --form 'addressHash=\"0xE60B1B8bD493569a3E945be50A6c89d29a560Fa1\"' --form 'compilerVersion=\"v0.2.12\"' </pre> </div> </div> </div>")
-      "verifysourcecode" ->
-        gettext("Verify a contract with Standard input JSON file. Its interface the same as <a href=\"https://docs.etherscan.io/tutorials/verifying-contracts-programmatically\">Etherscan</a>'s API endpoint <br/> <br/>")
-      "checkverifystatus" ->
-        gettext("Return status of the verification attempt (works in addition to verifysourcecode method)")
-    end
-  end
-
-  def generateRequiredParamsDescription(namespace) do
-    case namespace do
-      "eth_get_balance-address" ->
-        gettext("The address of the account.")
-      "balance-address" ->
-        gettext("A 160-bit code used for identifying accounts.")
-      "balancemulti-address" ->
-        gettext("A 160-bit code used for identifying accounts. Separate addresses by comma. Maximum of 20 addresses.")
-      "pendingtxlist-address" ->
-        gettext("A 160-bit code used for identifying accounts.")
-      "txlist-address" ->
-        gettext("A 160-bit code used for identifying accounts.")
-      "txlistinternal-txhash" ->
-        gettext("Transaction hash. Hash of contents of the transaction. A transaction hash or address hash is required.")
-      "tokentx-address" ->
-        gettext("A 160-bit code used for identifying accounts.")
-      "tokenbalance-contractaddress" ->
-        gettext("A 160-bit code used for identifying contracts.")
-      "tokenbalance-address" ->
-        gettext("A 160-bit code used for identifying accounts.")
-      "tokenlist-address" ->
-        gettext("A 160-bit code used for identifying accounts.")
-      "getminedblocks-address" ->
-        gettext("A 160-bit code used for identifying accounts.")
-      "getLogs-fromBlock" ->
-        gettext("A nonnegative integer that represents the starting block number. The use of 'latest' is also supported.")
-      "getLogs-toBlock" ->
-        gettext("A nonnegative integer that represents the ending block number. The use of 'latest' is also supported.")
-      "getLogs-address" ->
-        gettext("A 160-bit code used for identifying contracts. An address and/or topic{x} is required.")
-      "getLogs-topic0" ->
-        gettext("A string equal to the first topic. A topic{x} and/or address is required.")
-      "getToken-contractaddress" ->
-        gettext("A 160-bit code used for identifying contracts.")
-      "getTokenHolders-contractaddress" ->
-        gettext("A 160-bit code used for identifying contracts.")
-      "tokensupply-contractaddress" ->
-        gettext("A 160-bit code used for identifying contracts.")
-      "totalfees-date" ->
-        gettext("day in ISO 8601 format (yyyy-mm-dd)")
-      "getblockreward-blockno" ->
-        gettext("A nonnegative integer that represents the block number.")
-      "getblocknobytime-timestamp" ->
-        gettext("A nonnegative integer that represents the block timestamp (Unix timestamp in seconds).")
-      "getblocknobytime-closest" ->
-        gettext("Direction to find the closest block number to given timestamp. Available values: before/after.")
-      "verify-addressHash" ->
-        gettext("The address of the contract.")
-      "verify-name" ->
-        gettext("The name of the contract.")
-      "verify-compilerVersion" ->
-        gettext("The compiler version for the contract.")
-      "verify-optimization" ->
-        gettext("Whether or not compiler optimizations were enabled.")
-      "verify-contractSourceCode" ->
-        gettext("The source code of the contract.")
-      "verify_via_sourcify-addressHash" ->
-        gettext("The address of the contract.")
-      "verify_vyper_contract-addressHash" ->
-        gettext("The address of the contract.")
-      "verify_vyper_contract-name" ->
-        gettext("The name of the contract.")
-      "verify_vyper_contract-compilerVersion" ->
-        gettext("The compiler version for the contract.")
-      "verify_vyper_contract-contractSourceCode" ->
-        gettext("The source code of the contract.")
-      "verifysourcecode-codeformat" ->
-        gettext("Format of sourceCode(supported only \"solidity-standard-json-input\")")
-      "verifysourcecode-contractaddress" ->
-        gettext("The address of the contract.")
-      "verifysourcecode-contractname" ->
-        gettext("The name of the contract. It could be empty string(\"\"), just contract name(\"ContractName\"), or filename and contract name(\"contracts/contract_1.sol:ContractName\")")
-      "verifysourcecode-compilerversion" ->
-        gettext("The compiler version for the contract.")
-      "verifysourcecode-sourceCode" ->
-        gettext("Standard input json")
-      "checkverifystatus-guid" ->
-        gettext("A string used for identifying verification attempt")
-      "getabi-address" ->
-        gettext("A 160-bit code used for identifying contracts.")
-      "getsourcecode-address" ->
-        gettext("A 160-bit code used for identifying contracts.")
-      "gettxinfo-txhash" ->
-        gettext("Transaction hash. Hash of contents of the transaction.")
-      "gettxreceiptstatus-txhash" ->
-        gettext("Transaction hash. Hash of contents of the transaction.")
-      "getstatus-txhash" ->
-        gettext("Transaction hash. Hash of contents of the transaction.")
-    end
-  end
-
-  def generateOptionalParamsDescription(namespace) do
-    case namespace do
-      "eth_get_balance-block" ->
-        gettext("Either the block number as a string, or one of latest, earliest or pending latest will be the latest balance in a *consensus* block. earliest will be the first recorded balance for the address. pending will be the latest balance in consensus *or* nonconcensus blocks.")
-      "pendingtxlist-page" ->
-        gettext("A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.")
-      "pendingtxlist-offset" ->
-        gettext("A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.")
-      "txlist-sort" ->
-        gettext("A string representing the order by block number direction. Defaults to descending order. Available values: asc, desc")
-      "txlist-start_block" ->
-        gettext("A nonnegative integer that represents the starting block number.")
-      "txlist-end_block" ->
-        gettext("A nonnegative integer that represents the ending block number.")
-      "txlist-page" ->
-        gettext("A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.")
-      "txlist-offset" ->
-        gettext("A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.")
-      "txlist-filter_by" ->
-        gettext("A string representing the field to filter by. If none is given it returns transactions that match to, from, or contract address. Available values: to, from")
-      "txlist-start_timestamp" ->
-        gettext("Represents the starting block timestamp.")
-      "txlist-end_timestamp" ->
-        gettext("Represents the ending block timestamp.")
-      "txlistinternal-address" ->
-        gettext("A 160-bit code used for identifying accounts. An address hash or transaction hash is required.")
-      "txlistinternal-sort" ->
-        gettext("A string representing the order by block number direction. Defaults to ascending order. Available values: asc, desc. WARNING: Only available if 'address' is provided.")
-      "txlistinternal-start_block" ->
-        gettext("A nonnegative integer that represents the starting block number. WARNING: Only available if 'address' is provided.")
-      "txlistinternal-end_block" ->
-        gettext("A nonnegative integer that represents the ending block number. WARNING: Only available if 'address' is provided.")
-      "txlistinternal-page" ->
-        gettext("A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction. WARNING: Only available if 'address' is provided.")
-      "txlistinternal-offset" ->
-        gettext("A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction. WARNING: Only available if 'address' is provided.")
-      "tokentx-contractaddress" ->
-        gettext("A 160-bit code used for identifying contracts.")
-      "tokentx-sort" ->
-        gettext("A string representing the order by block number direction. Defaults to ascending order. Available values: asc, desc")
-      "tokentx-start_block" ->
-        gettext("A nonnegative integer that represents the starting block number.")
-      "tokentx-end_block" ->
-        gettext("A nonnegative integer that represents the ending block number.")
-      "tokentx-page" ->
-        gettext("A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.")
-      "tokentx-offset" ->
-        gettext("A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.")
-      "getminedblocks-page" ->
-        gettext("A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.")
-      "getminedblocks-offset" ->
-        gettext("A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.")
-      "listaccounts-page" ->
-        gettext("A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.")
-      "listaccounts-offset" ->
-        gettext("A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.")
-      "getLogs-topic1" ->
-        gettext("A string equal to the second topic. A topic{x} and/or address is required.")
-      "getLogs-topic2" ->
-        gettext("A string equal to the third topic. A topic{x} and/or address is required.")
-      "getLogs-topic3" ->
-        gettext("A string equal to the fourth topic. A topic{x} and/or address is required.")
-      "getLogs-topic0_1_opr" ->
-        gettext("A string representing the and|or operator for topic0 and topic1. Required if topic0 and topic1 is used. Available values: and, or")
-      "getLogs-topic0_2_opr" ->
-        gettext("A string representing the and|or operator for topic0 and topic2. Required if topic0 and topic2 is used. Available values: and, or")
-      "getLogs-topic0_3_opr" ->
-        gettext("A string representing the and|or operator for topic0 and topic3. Required if topic0 and topic3 is used. Available values: and, or")
-      "getLogs-topic1_2_opr" ->
-        gettext("A string representing the and|or operator for topic1 and topic2. Required if topic1 and topic2 is used. Available values: and, or")
-      "getLogs-topic1_3_opr" ->
-        gettext("A string representing the and|or operator for topic1 and topic3. Required if topic1 and topic3 is used. Available values: and, or")
-      "getLogs-topic2_3_opr" ->
-        gettext("A string representing the and|or operator for topic2 and topic3. Required if topic2 and topic3 is used. Available values: and, or")
-      "getTokenHolders-page" ->
-        gettext("A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.")
-      "getTokenHolders-offset" ->
-        gettext("A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.")
-      "eth_block_number-id" ->
-        gettext("A nonnegative integer that represents the json rpc request id.")
-      "verify-constructorArguments" ->
-        gettext("The constructor argument data provided.")
-      "verify-autodetectConstructorArguments" ->
-        gettext("Whether or not automatically detect constructor argument.")
-      "verify-evmVersion" ->
-        gettext("The EVM version for the contract.")
-      "verify-optimizationRuns" ->
-        gettext("The number of optimization runs used during compilation")
-      "verify-library1Name" ->
-        gettext("The name of the first library used.")
-      "verify-library1Address" ->
-        gettext("The address of the first library used.")
-      "verify-library2Name" ->
-        gettext("The name of the second library used.")
-      "verify-library2Address" ->
-        gettext("The address of the second library used.")
-      "verify-library3Name" ->
-        gettext("The name of the third library used.")
-      "verify-library3Address" ->
-        gettext("The address of the third library used.")
-      "verify-library4Name" ->
-        gettext("The name of the fourth library used.")
-      "verify-library4Address" ->
-        gettext("The address of the fourth library used.")
-      "verify-library5Name" ->
-        gettext("The name of the fourth library used.")
-      "verify-library5Address" ->
-        gettext("The address of the fourth library used.")
-      "verify_via_sourcify-files" ->
-        gettext("Array with sources and metadata files")
-      "verify_vyper_contract-constructorArguments" ->
-        gettext("The constructor argument data provided.")
-      "verifysourcecode-constructorArguements" ->
-        gettext("The constructor argument data provided.")
-      "verifysourcecode-autodetectConstructorArguments" ->
-        gettext("Whether or not automatically detect constructor argument.")
-      "gettxinfo-index" ->
-        gettext("A nonnegative integer that represents the log index to be used for pagination.")
-      "listcontracts-page" ->
-        gettext("A nonnegative integer that represents the page number to be used for pagination. 'offset' must be provided in conjunction.")
-      "listcontracts-offset" ->
-        gettext("A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction.")
-      "listcontracts-filter" ->
-        gettext("verified|decompiled|unverified|not_decompiled|empty, or 1|2|3|4|5 respectively. This requests only contracts with that status")
-      "listcontracts-not_decompiled_with_version" ->
-        gettext("Ensures that none of the returned contracts were decompiled with the provided version. Ignored unless filtering for decompiled contracts.")
-      "listcontracts-verified_at_start_timestamp" ->
-        gettext("Represents the starting timestamp when contracts verified. Taking into account only with `verified` filter.")
-      "listcontracts-verified_at_end_timestamp" ->
-        gettext("Represents the ending timestamp when contracts verified. Taking into account only with `verified` filter.")
-
-
-    end
-  end
-
 end

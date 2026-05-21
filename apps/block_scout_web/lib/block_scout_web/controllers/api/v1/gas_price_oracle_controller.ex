@@ -30,13 +30,15 @@ defmodule BlockScoutWeb.API.V1.GasPriceOracleController do
     |> send_resp(status, result)
   end
 
-  def result(gas_prices) do
-    gas_prices
+  defp result(gas_prices) do
+    %{slow: gas_prices[:slow][:price], average: gas_prices[:average][:price], fast: gas_prices[:fast][:price]}
     |> Jason.encode!()
   end
 
   def error({:error, error}) do
-    Logger.error(fn -> ["Something went wrong while estimates gas prices in the gas price oracle: ", inspect(error)] end)
+    Logger.error(fn ->
+      ["Something went wrong while estimates gas prices in the gas price oracle: ", inspect(error)]
+    end)
 
     %{
       "error_code" => 6001,

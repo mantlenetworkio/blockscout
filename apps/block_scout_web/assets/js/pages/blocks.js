@@ -17,7 +17,7 @@ export const initialState = {
 
 export const blockReducer = withMissingBlocks(baseReducer)
 
-function baseReducer(state = initialState, action) {
+function baseReducer (state = initialState, action) {
   switch (action.type) {
     case 'ELEMENTS_LOAD': {
       return Object.assign({}, state, omit(action, 'type'))
@@ -28,12 +28,7 @@ function baseReducer(state = initialState, action) {
       })
     }
     case 'RECEIVED_NEW_BLOCK': {
-      if (
-        state.channelDisconnected ||
-        state.beyondPageOne ||
-        state.blockType !== 'block'
-      )
-        return state
+      if (state.channelDisconnected || state.beyondPageOne || state.blockType !== 'block') return state
 
       const blockNumber = getBlockNumber(action.msg.blockHtml)
       const minBlock = getBlockNumber(last(state.items))
@@ -51,17 +46,18 @@ function baseReducer(state = initialState, action) {
 
 const elements = {
   '[data-selector="channel-disconnected-message"]': {
-    render($el, state) {
+    render ($el, state) {
+      // @ts-ignore
       if (state.channelDisconnected && !window.loading) $el.show()
     }
   }
 }
 
-function getBlockNumber(blockHtml) {
+function getBlockNumber (blockHtml) {
   return $(blockHtml).data('blockNumber')
 }
 
-function withMissingBlocks(reducer) {
+function withMissingBlocks (reducer) {
   return (...args) => {
     const result = reducer(...args)
 
@@ -73,16 +69,14 @@ function withMissingBlocks(reducer) {
       return acc
     }, {})
 
-    const blockNumbers = keys(blockNumbersToItems).map((x) => parseInt(x, 10))
-    const minBlock = min(blockNumbers)
-    const maxBlock = max(blockNumbers)
-    //if (maxBlock - minBlock > 100) return result
+    const blockNumbers = keys(blockNumbersToItems).map(x => parseInt(x, 10))
+    const minBlock = min(blockNumbers) || 0
+    const maxBlock = max(blockNumbers) || 0
+    if (maxBlock - minBlock > 100) return result
 
     return Object.assign({}, result, {
-      items: rangeRight(minBlock, maxBlock + 1).map(
-        (blockNumber) =>
-          blockNumbersToItems[blockNumber] || placeHolderBlock(blockNumber)
-      )
+      items: rangeRight(minBlock, maxBlock + 1)
+        .map((blockNumber) => blockNumbersToItems[blockNumber] || placeHolderBlock(blockNumber))
     })
   }
 }
@@ -92,14 +86,11 @@ const $uncleListPage = $('[data-page="uncle-list"]')
 const $reorgListPage = $('[data-page="reorg-list"]')
 if ($blockListPage.length || $uncleListPage.length || $reorgListPage.length) {
   window.onbeforeunload = () => {
+    // @ts-ignore
     window.loading = true
   }
 
-  const blockType = $blockListPage.length
-    ? 'block'
-    : $uncleListPage.length
-    ? 'uncle'
-    : 'reorg'
+  const blockType = $blockListPage.length ? 'block' : $uncleListPage.length ? 'uncle' : 'reorg'
 
   const store = createAsyncLoadStore(
     $blockListPage.length ? blockReducer : baseReducer,
@@ -108,30 +99,34 @@ if ($blockListPage.length || $uncleListPage.length || $reorgListPage.length) {
   )
   connectElements({ store, elements })
 
-  const blocksChannel = socket.channel('blocks:new_block', {})
+  const blocksChannel = socket.channel('blocks_old:new_block', {})
   blocksChannel.join()
-  blocksChannel.onError(() =>
-    store.dispatch({
-      type: 'CHANNEL_DISCONNECTED'
-    })
-  )
-  blocksChannel.on('new_block', (msg) =>
-    store.dispatch({
-      type: 'RECEIVED_NEW_BLOCK',
-      msg: humps.camelizeKeys(msg)
-    })
-  )
+  blocksChannel.onError(() => store.dispatch({
+    type: 'CHANNEL_DISCONNECTED'
+  }))
+  blocksChannel.on('new_block', (msg) => store.dispatch({
+    type: 'RECEIVED_NEW_BLOCK',
+    msg: humps.camelizeKeys(msg)
+  }))
 }
 
-export function placeHolderBlock(blockNumber) {
+export function placeHolderBlock (blockNumber) {
   return `
-    <div  data-selector="place-holder" data-block-number="${blockNumber}">
+    <div class="my-3" data-selector="place-holder" data-block-number="${blockNumber}">
       <div
-        class="table-tile tile tile-type-block d-flex align-items-center"
+        class="tile tile-type-block d-flex align-items-center fade-up"
+        style="min-height: 90px;"
       >
-        <div class="table-tile-row placeholder-tile">
-          <span class="tile-title p-0 m-0" style="width: 15%;">${blockNumber}</span>
-          <div class="tile-transactions p-0 m-0">${window.localized['Block Processing']}</div>
+        <span class="loading-spinner-small ml-1 mr-4">
+          <span class="loading-spinner-block-1"></span>
+          <span class="loading-spinner-block-2"></span>
+        </span>
+        <div>
+          <span class="tile-title pr-0 pl-0">${blockNumber}</span>
+          <div class="tile-transactions">${
+            // @ts-ignore
+            window.localized['Block Processing']
+          }</div>
         </div>
       </div>
     </div>

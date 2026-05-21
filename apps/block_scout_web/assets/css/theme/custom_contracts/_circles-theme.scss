@@ -7,7 +7,7 @@ $border: #E3E5EB;
 $text: #333;
 $text2: #A4A9B4;
 
-$c-dark-color: rgba(255, 255, 255, 0.05);
+$c-dark-color: #313355;
 $c-dark-color-secondary: #3f426c;
 $c-dark-text-color: #8a8dba;
 
@@ -272,7 +272,7 @@ $c-dark-text-color: #8a8dba;
 	}
 
 	// download csv button
-	.download-all-transactions .download-all-transactions-link svg path {
+	.download-all-items .download-all-items-link svg path {
 		fill: $c-primary;
 	}
 

@@ -1,5 +1,3 @@
-<% is_proxy = smart_contract_is_proxy?(@token) %>
-
 <section class="container">
   <%= render(
     OverviewView,
@@ -13,98 +11,12 @@
   <section>
     <div class="card">
       <%= render OverviewView, "_tabs.html", assigns %>
-
-
-          <div class="card-body">
-
-      <div class="mb-4">
-
-        <div class="contract-tabs">
-          <ul class="nav nav-tabs" id="addressContractTab" role="tablist">
-              <li class="nav-item" role="presentation">
-                  <button class="nav-link active" id="code-tab" data-toggle="tab" data-target="#code" type="button" role="tab" aria-controls="code" aria-selected="true">
-                      <%=  gettext("Code") %>
-                  </button>
-              </li>
-              <%= if smart_contract_with_read_only_functions?(@token) do %>
-                  <li class="nav-item" role="presentation">
-                      <button class="nav-link" id="read-contract-tab" data-toggle="tab" data-target="#read-contract" type="button" role="tab" aria-controls="read-contract" aria-selected="true">
-                          <%=  gettext("Read Contract") %>
-                      </button>
-                  </li>
-              <% end %>
-              <%= if is_proxy do %>
-                  <li class="nav-item" role="presentation">
-                      <button class="nav-link" id="read-proxy-tab" data-toggle="tab" data-target="#read-proxy" type="button" role="tab" aria-controls="read-proxy" aria-selected="false">
-                          <%=  gettext("Read Proxy") %>
-                      </button>
-                  </li>
-              <% end %>
-              <%= if smart_contract_with_write_functions?(@token)do %>
-                  <li class="nav-item" role="presentation">
-                      <button class="nav-link" id="write-contract-tab" data-toggle="tab" data-target="#write-contract" type="button" role="tab" aria-controls="write-contract" aria-selected="false">
-                          <%=  gettext("Write Contract") %>
-                      </button>
-                  </li>
-              <% end %>
-              <%= if smart_contract_with_write_functions?(@token) && is_proxy do %>
-                  <li class="nav-item" role="presentation">
-                      <button class="nav-link" id="write-proxy-tab" data-toggle="tab" data-target="#write-proxy" type="button" role="tab" aria-controls="write-proxy" aria-selected="false">
-                          <%=  gettext("Write Proxy") %>
-                      </button>
-                  </li>
-              <% end %>
-          </ul>
-        </div>
-
-      </div>
-
-        <%=
-          for status <- ["error", "warning", "success", "question"] do
-            render BlockScoutWeb.CommonComponentsView, "_modal_status.html", status: status
-          end
-        %>
-        <%= render BlockScoutWeb.SmartContractView, "_pending_contract_write.html" %>
-
-      <div class="tab-content" id="addressContractTabContent">
-        <div class="tab-pane fade show active" id="code" role="tabpanel" aria-labelledby="code-tab">
-           <%= render BlockScoutWeb.AddressContractView, "_code.html", address: @address, conn: @conn %>
-        </div>
-
-         <%= if smart_contract_with_read_only_functions?(@token) do %>
-          <div class="tab-pane fade" id="read-contract" role="tabpanel" aria-labelledby="read-contract-tab">
-            <%= render BlockScoutWeb.AddressReadContractView, "_read_contract.html", address: @address, conn: @conn %>
-          </div>
-        <% end %>
-
-         <%= if is_proxy do %>
-            <div class="tab-pane fade" id="read-proxy" role="tabpanel" aria-labelledby="read-proxy-tab">
-              <%= render BlockScoutWeb.AddressReadProxyView, "_read_proxy.html", address: @address, conn: @conn %>
-            </div>
-        <% end %>
-
-        <%= if smart_contract_with_write_functions?(@token) do %>
-          <div class="tab-pane fade" id="write-contract" role="tabpanel" aria-labelledby="write-contract-tab">
-            <%= render BlockScoutWeb.AddressWriteContractView, "_write_contract.html", address: @address, conn: @conn %>
-          </div>
-        <% end %>
-
-        <%= if smart_contract_with_write_functions?(@token) && is_proxy do %>
-          <div class="tab-pane fade" id="write-proxy" role="tabpanel" aria-labelledby="write-proxy-tab">
-            <%= render BlockScoutWeb.AddressWriteProxyView, "_write_proxy.html", address: @address, conn: @conn %>
-          </div>
-        <% end %>
-
-
-
-      </div>
-
-
-
-    </div>
-
       <!-- loaded via AJAX -->
-
+      <div class="card-body" data-smart-contract-functions data-hash="<%= Address.checksum(@token.contract_address.hash) %>" data-type="<%= @type %>" data-action="<%= @action %>" data-url="<%= smart_contract_path(@conn, :index) %>">
+        <div class="tile tile-muted text-center">
+          <%= render BlockScoutWeb.CommonComponentsView, "_loading_spinner.html", loading_text: gettext("Loading...") %>
+        </div>
+      </div>
     </div>
   </section>
   <script defer data-cfasync="false" src="<%= static_path(@conn, "/js/token-contract.js") %>"></script>

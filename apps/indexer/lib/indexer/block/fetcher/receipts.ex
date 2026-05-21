@@ -1,11 +1,35 @@
 defmodule Indexer.Block.Fetcher.Receipts do
   @moduledoc """
-  Fetches transaction receipts after the transactions have been fetched with the blocks in `Indexer.BlockFetcher`.
+    Fetches and processes transaction receipts and logs for block indexing.
+
+    Makes batched JSON-RPC requests to retrieve receipts and logs after initial
+    block data is fetched. Provides configurable concurrency and batch sizes for
+    optimized fetching.
   """
 
   require Logger
 
+  alias EthereumJSONRPC.Receipts
   alias Indexer.Block
+
+  @doc """
+    Fetches transaction receipts and logs in batches with configurable concurrency.
+
+    Processes transaction parameters in chunks, making concurrent requests to retrieve
+    receipts and logs. Empty transaction lists return empty results immediately.
+
+    ## Parameters
+    - `state`: Block fetcher state containing JSON-RPC, concurrency and batch size
+      configuration
+    - `transaction_params`: List of transaction parameter maps to fetch receipts for
+
+    ## Returns
+    - `{:ok, %{logs: list(), receipts: list()}}` - Successfully fetched receipts
+      and logs with block numbers added where missing
+    - `{:error, reason}` - Error occurred during fetch or processing
+  """
+  @spec fetch(Block.Fetcher.t(module()), [map()]) :: {:ok, %{logs: [map()], receipts: [map()]}} | {:error, term()}
+  def fetch(state, transaction_params)
 
   def fetch(%Block.Fetcher{} = _state, []), do: {:ok, %{logs: [], receipts: []}}
 
@@ -16,9 +40,26 @@ defmodule Indexer.Block.Fetcher.Receipts do
     Logger.debug("fetching transaction receipts", count: Enum.count(transaction_params))
     stream_opts = [max_concurrency: state.receipts_concurrency, timeout: :infinity]
 
-    transaction_params
+    {block_numbers, filtered_transaction_params} =
+      if Application.get_env(:ethereum_jsonrpc, :receipts_by_block?) do
+        split_transaction_params(transaction_params)
+      else
+        {[], transaction_params}
+      end
+
+    filtered_transaction_params
     |> Enum.chunk_every(state.receipts_batch_size)
-    |> Task.async_stream(&EthereumJSONRPC.fetch_transaction_receipts(&1, json_rpc_named_arguments), stream_opts)
+    |> Enum.concat(block_numbers)
+    |> Task.async_stream(
+      fn
+        block_number when is_integer(block_number) ->
+          Receipts.fetch_by_block_numbers([block_number], json_rpc_named_arguments)
+
+        transactions when is_list(transactions) ->
+          EthereumJSONRPC.fetch_transaction_receipts(transactions, json_rpc_named_arguments)
+      end,
+      stream_opts
+    )
     |> Enum.reduce_while({:ok, %{logs: [], receipts: []}}, fn
       {:ok, {:ok, %{logs: logs, receipts: receipts}}}, {:ok, %{logs: acc_logs, receipts: acc_receipts}} ->
         {:cont, {:ok, %{logs: acc_logs ++ logs, receipts: acc_receipts ++ receipts}}}
@@ -35,6 +76,23 @@ defmodule Indexer.Block.Fetcher.Receipts do
     end
   end
 
+  @doc """
+    Merges transaction receipts with their corresponding transactions.
+
+    Combines transaction parameters with receipt parameters, preserving the original
+    created contract address if the receipt would override it with nil.
+
+    ## Parameters
+    - `transactions_params`: List of transaction parameter maps
+    - `receipts_params`: List of receipt parameter maps
+
+    ## Returns
+    - List of merged transaction maps containing both transaction and receipt data
+  """
+  @spec put(
+          [%{required(:hash) => EthereumJSONRPC.hash(), optional(atom()) => any()}],
+          [%{required(:transaction_hash) => EthereumJSONRPC.hash(), optional(atom()) => any()}]
+        ) :: [map()]
   def put(transactions_params, receipts_params) when is_list(transactions_params) and is_list(receipts_params) do
     transaction_hash_to_receipt_params =
       Enum.into(receipts_params, %{}, fn %{transaction_hash: transaction_hash} = receipt_params ->
@@ -45,6 +103,8 @@ defmodule Indexer.Block.Fetcher.Receipts do
       receipts_params = Map.fetch!(transaction_hash_to_receipt_params, transaction_hash)
       merged_params = Map.merge(transaction_params, receipts_params)
 
+      # Preserve the created_contract_address_hash from transaction_params if receipts_params
+      # would override it with nil
       if transaction_params[:created_contract_address_hash] && is_nil(receipts_params[:created_contract_address_hash]) do
         Map.put(merged_params, :created_contract_address_hash, transaction_params[:created_contract_address_hash])
       else
@@ -53,14 +113,26 @@ defmodule Indexer.Block.Fetcher.Receipts do
     end)
   end
 
+  # Updates block numbers in transaction logs by matching them with their parent transactions.
+  #
+  # For logs with missing block numbers, finds the corresponding transaction and copies its
+  # block number to the log. Leaves logs with existing block numbers unchanged.
+  #
+  # ## Parameters
+  # - `params`: Map containing logs and other optional data
+  # - `transaction_params`: List of transaction parameter maps with block numbers
+  #
+  # ## Returns
+  # - Updated params map with block numbers added to logs where missing
+  @spec set_block_number_to_logs(
+          %{:logs => list(), optional(atom()) => any()},
+          [%{:hash => EthereumJSONRPC.hash(), optional(atom()) => any()}]
+        ) :: %{:logs => list(), optional(atom()) => any()}
   defp set_block_number_to_logs(%{logs: logs} = params, transaction_params) do
     logs_with_block_numbers =
       Enum.map(logs, fn %{transaction_hash: transaction_hash, block_number: block_number} = log_params ->
         if is_nil(block_number) do
-          transaction =
-            Enum.find(transaction_params, fn transaction ->
-              transaction[:hash] == transaction_hash
-            end)
+          transaction = find_transaction_by_hash(transaction_params, transaction_hash)
 
           %{log_params | block_number: transaction[:block_number]}
         else
@@ -69,5 +141,31 @@ defmodule Indexer.Block.Fetcher.Receipts do
       end)
 
     %{params | logs: logs_with_block_numbers}
+  end
+
+  # Finds a transaction in the list of transaction parameters by its hash.
+  @spec find_transaction_by_hash(
+          [%{:hash => EthereumJSONRPC.hash(), optional(atom()) => any()}],
+          EthereumJSONRPC.hash()
+        ) ::
+          %{:hash => EthereumJSONRPC.hash(), optional(atom()) => any()} | nil
+  defp find_transaction_by_hash(transaction_params, transaction_hash) do
+    Enum.find(transaction_params, fn transaction ->
+      transaction[:hash] == transaction_hash
+    end)
+  end
+
+  defp split_transaction_params(transaction_params) do
+    max_receipts_by_block = Application.get_env(:ethereum_jsonrpc, :max_receipts_by_block)
+
+    transaction_params
+    |> Enum.group_by(& &1.block_number)
+    |> Enum.reduce({[], []}, fn {block_number, transaction_params}, {blocks_acc, transactions_acc} ->
+      if Enum.count(transaction_params) > max_receipts_by_block do
+        {blocks_acc, transaction_params ++ transactions_acc}
+      else
+        {[block_number | blocks_acc], transactions_acc}
+      end
+    end)
   end
 end

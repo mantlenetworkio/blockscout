@@ -1,19 +1,19 @@
 defmodule BlockScoutWeb.TransactionView do
   use BlockScoutWeb, :view
 
-  alias BlockScoutWeb.{AccessHelpers, AddressView, BlockView, TabHelpers}
+  alias BlockScoutWeb.{AccessHelper, AddressView, BlockView, TabHelper}
   alias BlockScoutWeb.Account.AuthController
   alias BlockScoutWeb.Cldr.Number
-  alias Explorer.{Chain, CustomContractsHelpers, Repo}
-  alias Explorer.Chain.Block.Reward
+  alias Explorer.{Chain, CustomContractsHelper, Repo}
   alias Explorer.Chain.{Address, Block, InternalTransaction, Transaction, Wei}
-  alias Explorer.Counters.AverageBlockTime
-  alias Explorer.ExchangeRates.Token
+  alias Explorer.Chain.Block.Reward
+  alias Explorer.Chain.Cache.Counters.AverageBlockTime
+  alias Explorer.Market.Token
   alias Timex.Duration
-  require Logger
-  import BlockScoutWeb.Gettext
+
+  use Gettext, backend: BlockScoutWeb.Gettext
   import BlockScoutWeb.AddressView, only: [from_address_hash: 1, short_token_id: 2, tag_name_to_label: 1]
-  import BlockScoutWeb.Tokens.Helpers
+  import BlockScoutWeb.Tokens.Helper
 
   @tabs ["token-transfers", "internal-transactions", "logs", "raw-trace", "state"]
 
@@ -33,14 +33,12 @@ defmodule BlockScoutWeb.TransactionView do
 
   def block_number(%Transaction{block_number: nil}), do: gettext("Block Pending")
 
-  def block_number(%Transaction{block: block}),
-    do: [view_module: BlockView, partial: "_link.html", block: block, hideLabel: true]
+  def block_number(%Transaction{block_number: number, block_hash: hash}),
+    do: [view_module: BlockView, partial: "_link.html", block: %Block{number: number, hash: hash}]
 
-  def block_number(%Reward{block: block}),
-    do: [view_module: BlockView, partial: "_link.html", block: block, hideLabel: true]
+  def block_number(%Reward{block: block}), do: [view_module: BlockView, partial: "_link.html", block: block]
 
-  def block_timestamp(%Transaction{block_number: nil, inserted_at: time}), do: time
-  def block_timestamp(%Transaction{block: %Block{timestamp: time}}), do: time
+  def block_timestamp(%Transaction{} = transaction), do: Transaction.block_timestamp(transaction)
   def block_timestamp(%Reward{block: %Block{timestamp: time}}), do: time
 
   def value_transfer?(%Transaction{input: %{bytes: bytes}}) when bytes in [<<>>, nil] do
@@ -146,6 +144,7 @@ defmodule BlockScoutWeb.TransactionView do
       amount: nil,
       amounts: [],
       token_ids: token_transfer.token_ids,
+      token_type: token_transfer.token_type,
       to_address_hash: token_transfer.to_address_hash,
       from_address_hash: token_transfer.from_address_hash
     }
@@ -160,6 +159,7 @@ defmodule BlockScoutWeb.TransactionView do
       amount: nil,
       amounts: amounts,
       token_ids: token_transfer.token_ids,
+      token_type: token_transfer.token_type,
       to_address_hash: token_transfer.to_address_hash,
       from_address_hash: token_transfer.from_address_hash
     }
@@ -173,6 +173,7 @@ defmodule BlockScoutWeb.TransactionView do
       amount: token_transfer.amount,
       amounts: [],
       token_ids: token_transfer.token_ids,
+      token_type: token_transfer.token_type,
       to_address_hash: token_transfer.to_address_hash,
       from_address_hash: token_transfer.from_address_hash
     }
@@ -189,18 +190,7 @@ defmodule BlockScoutWeb.TransactionView do
       if existing_entry do
         acc1
         |> Enum.map(fn entry ->
-          if entry.to_address_hash == token_transfer.to_address_hash &&
-               entry.from_address_hash == token_transfer.from_address_hash &&
-               entry.token == token_transfer.token do
-            updated_entry = %{
-              entry
-              | amount: Decimal.add(new_entry.amount, entry.amount)
-            }
-
-            updated_entry
-          else
-            entry
-          end
+          process_entry(entry, new_entry, token_transfer)
         end)
       else
         [new_entry | acc1]
@@ -209,11 +199,29 @@ defmodule BlockScoutWeb.TransactionView do
     {new_acc1, acc2}
   end
 
+  def process_entry(entry, new_entry, token_transfer) do
+    if entry.to_address_hash == token_transfer.to_address_hash &&
+         entry.from_address_hash == token_transfer.from_address_hash &&
+         entry.token == token_transfer.token do
+      updated_entry = %{
+        entry
+        | amount: Decimal.add(new_entry.amount, entry.amount)
+      }
+
+      updated_entry
+    else
+      entry
+    end
+  end
+
   def token_type_name(type) do
     case type do
       :erc20 -> gettext("ERC-20 ")
       :erc721 -> gettext("ERC-721 ")
       :erc1155 -> gettext("ERC-1155 ")
+      :erc404 -> gettext("ERC-404 ")
+      :zrc2 -> gettext("ZRC-2 ")
+      :erc7984 -> gettext("ERC-7984 ")
       _ -> ""
     end
   end
@@ -232,7 +240,7 @@ defmodule BlockScoutWeb.TransactionView do
         avg_time
         |> Duration.to_seconds()
 
-      {:ok, "<= #{avg_time_in_secs} #{gettext("seconds")}"}
+      {:ok, "<= #{avg_time_in_secs} seconds"}
     end
   end
 
@@ -267,7 +275,7 @@ defmodule BlockScoutWeb.TransactionView do
     left
     |> Timex.diff(right, :milliseconds)
     |> Duration.from_milliseconds()
-    |> Timex.format_duration(Explorer.Counters.AverageBlockTimeDurationFormat)
+    |> Timex.format_duration(Explorer.Chain.Cache.Counters.Helper.AverageBlockTimeDurationFormat)
     |> case do
       {:error, _} = error -> error
       duration -> {:ok, duration}
@@ -278,7 +286,7 @@ defmodule BlockScoutWeb.TransactionView do
     case block do
       %Block{consensus: true} ->
         {:ok, confirmations} = Chain.confirmations(block, named_arguments)
-        BlockScoutWeb.Cldr.Number.to_string!(confirmations, format: "#,###")
+        Number.to_string!(confirmations, format: "#,###")
 
       _ ->
         0
@@ -295,7 +303,7 @@ defmodule BlockScoutWeb.TransactionView do
         end
 
       _ ->
-        "blocks"
+        ""
     end
   end
 
@@ -304,7 +312,7 @@ defmodule BlockScoutWeb.TransactionView do
   def contract_creation?(_), do: false
 
   def fee(%Transaction{} = transaction) do
-    {_, value} = Chain.fee(transaction, :wei)
+    {_, value} = Transaction.fee(transaction, :wei)
     value
   end
 
@@ -313,15 +321,26 @@ defmodule BlockScoutWeb.TransactionView do
   end
 
   def formatted_fee(%Transaction{} = transaction, opts) do
-    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-    da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
-
     transaction
-    |> Chain.fee(:wei)
-    |> fee_to_denomination(l1_fee, da_fee, opts)
+    |> Transaction.fee(:wei)
+    |> fee_to_denomination(opts)
     |> case do
       {:actual, value} -> value
       {:maximum, value} -> "#{gettext("Max of")} #{value}"
+    end
+  end
+
+  def formatted_action_amount(data, field_name) do
+    data
+    |> Map.get(field_name)
+    |> Decimal.new()
+    |> Number.to_string!(format: "#,##0.##################")
+  end
+
+  def transaction_action_string_to_address(address) do
+    case Chain.string_to_address_hash(address) do
+      {:ok, address_hash} -> Chain.hash_to_address(address_hash)
+      _ -> {:error, nil}
     end
   end
 
@@ -329,8 +348,8 @@ defmodule BlockScoutWeb.TransactionView do
     Chain.transaction_to_status(transaction)
   end
 
-  def transaction_revert_reason(transaction) do
-    transaction |> Chain.transaction_to_revert_reason() |> decoded_revert_reason(transaction)
+  def transaction_revert_reason(transaction, options \\ []) do
+    transaction |> Chain.transaction_to_revert_reason() |> decoded_revert_reason(transaction, options)
   end
 
   def get_pure_transaction_revert_reason(nil), do: nil
@@ -347,158 +366,6 @@ defmodule BlockScoutWeb.TransactionView do
       _ -> gettext("Confirmed")
     end
   end
-
-  def get_tx_status_cls1(tx_status) do
-    case tx_status do
-      "0x0" ->
-        ""
-
-      "0x1" ->
-        "transaction_detail_status_item_active"
-
-      "0x2" ->
-        "transaction_detail_status_item_active"
-
-      "0x3" ->
-        "transaction_detail_status_item_active"
-    end
-  end
-
-  def get_tx_status_cls2(tx_status) do
-    case tx_status do
-      "0x0" ->
-        ""
-
-      "0x1" ->
-        ""
-
-      "0x2" ->
-        "transaction_detail_status_item_active"
-
-      "0x3" ->
-        "transaction_detail_status_item_active"
-    end
-  end
-
-  def get_tx_status_cls3(tx_status) do
-    case tx_status do
-      "0x0" ->
-        ""
-
-      "0x1" ->
-        ""
-
-      "0x2" ->
-        ""
-
-      "0x3" ->
-        "transaction_detail_status_item_active"
-    end
-  end
-
-  def get_tx_status_cls1(%{tx_status: nil}), do: ""
-  def get_tx_status_cls2(%{tx_status: nil}), do: ""
-  def get_tx_status_cls3(%{tx_status: nil}), do: ""
-
-  def get_tx_status_icon_cls1(tx_status, is_dark) do
-    case tx_status do
-      "0x0" ->
-        if is_dark do
-          "right_icon_0_dark.svg"
-        else
-          "right_icon_0.svg"
-        end
-
-      "0x1" ->
-        if is_dark do
-          "right_icon_1_dark.svg"
-        else
-          "right_icon_1.svg"
-        end
-
-      "0x2" ->
-        if is_dark do
-          "right_icon_1_dark.svg"
-        else
-          "right_icon_1.svg"
-        end
-
-      "0x3" ->
-        if is_dark do
-          "right_icon_1_dark.svg"
-        else
-          "right_icon_1.svg"
-        end
-    end
-  end
-
-  def get_tx_status_icon_cls2(tx_status, is_dark) do
-    case tx_status do
-      "0x0" ->
-        if is_dark do
-          "right_icon_0_dark.svg"
-        else
-          "right_icon_0.svg"
-        end
-
-      "0x1" ->
-        if is_dark do
-          "right_icon_0_dark.svg"
-        else
-          "right_icon_0.svg"
-        end
-
-      "0x2" ->
-        if is_dark do
-          "right_icon_1_dark.svg"
-        else
-          "right_icon_1.svg"
-        end
-
-      "0x3" ->
-        if is_dark do
-          "right_icon_1_dark.svg"
-        else
-          "right_icon_1.svg"
-        end
-    end
-  end
-
-  def get_tx_status_icon_cls3(tx_status, is_dark) do
-    case tx_status do
-      "0x0" ->
-        if is_dark do
-          "right_icon_0_dark.svg"
-        else
-          "right_icon_0.svg"
-        end
-
-      "0x1" ->
-        if is_dark do
-          "right_icon_0_dark.svg"
-        else
-          "right_icon_0.svg"
-        end
-
-      "0x2" ->
-        if is_dark do
-          "right_icon_0_dark.svg"
-        else
-          "right_icon_0.svg"
-        end
-
-      "0x3" ->
-        if is_dark do
-          "right_icon_1_dark.svg"
-        else
-          "right_icon_1.svg"
-        end
-    end
-  end
-
-  def get_tx_status_icon_cls1(%{tx_status: nil}, is_dark), do: ""
-  def get_tx_status_icon_cls2(%{tx_status: nil}, is_dark), do: ""
-  def get_tx_status_icon_cls3(%{tx_status: nil}, is_dark), do: ""
 
   def formatted_result(status) do
     case status do
@@ -518,7 +385,7 @@ defmodule BlockScoutWeb.TransactionView do
   end
 
   def gas(%type{gas: gas}) when is_transaction_type(type) do
-    BlockScoutWeb.Cldr.Number.to_string!(gas)
+    Number.to_string!(gas)
   end
 
   def skip_decoding?(transaction) do
@@ -526,11 +393,11 @@ defmodule BlockScoutWeb.TransactionView do
   end
 
   def decoded_input_data(transaction) do
-    Transaction.decoded_input_data(transaction)
+    Transaction.decoded_input_data(transaction, [])
   end
 
-  def decoded_revert_reason(revert_reason, transaction) do
-    Transaction.decoded_revert_reason(transaction, revert_reason)
+  def decoded_revert_reason(revert_reason, transaction, options) do
+    Transaction.decoded_revert_reason(transaction, revert_reason, options)
   end
 
   @doc """
@@ -540,110 +407,24 @@ defmodule BlockScoutWeb.TransactionView do
     format_wei_value(gas_price, unit)
   end
 
-  def gas_price_native(%Transaction{gas_price: gas_price}, unit) when unit in ~w(wei gwei ether)a do
-    format_wei_value(gas_price, unit)
-  end
-
-  def da_gas_price(%Transaction{da_gas_price: da_gas_price}, unit) when unit in ~w(wei gwei ether)a do
-    if da_gas_price == nil,
-      do: format_wei_value(%Wei{value: Decimal.new(0)}, unit),
-      else: format_wei_value(da_gas_price, unit)
-  end
-
-  def l2_fee(%Transaction{gas_price: gas_price, gas: gas, gas_used: gas_used}, unit) when unit in ~w(wei gwei ether)a do
-    actual_gas = if gas_used == nil, do: gas, else: gas_used
-
-    gas_price
-    |> Wei.multi(actual_gas)
-    |> Decimal.to_string(:normal)
-  end
-
-  def formatted_fee_to_real_time_usd(%Transaction{} = transaction, opts) do
-    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-    da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
-    real_time_price = transaction.real_time_price
-
-    transaction
-    |> Chain.fee(:wei)
-    |> fee_to_denomination_with_no_unit(l1_fee, da_fee, opts, real_time_price)
-  end
-
-  def formatted_fee_to_history_usd(%Transaction{} = transaction, opts) do
-    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-    da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
-    token_price_history = transaction.token_price_history
-
-    transaction
-    |> Chain.fee(:wei)
-    |> fee_to_denomination_with_no_unit(l1_fee, da_fee, opts, token_price_history)
-  end
-
-  def formatted_l2_fee_to_real_time_usd(%Transaction{} = transaction) do
-    gas_price = transaction.gas_price
-    gas = transaction.gas
-    gas_used = transaction.gas_used
-    actual_gas = if gas_used == nil, do: gas, else: gas_used
-    real_time_price = transaction.real_time_price
-
-    gas_price
-    |> Wei.multi(actual_gas)
-    |> Decimal.mult(real_time_price)
-    |> Decimal.round(8)
-  end
-
-  def formatted_l2_fee_to_history_usd(%Transaction{} = transaction) do
-    gas_price = transaction.gas_price
-    gas = transaction.gas
-    gas_used = transaction.gas_used
-    actual_gas = if gas_used == nil, do: gas, else: gas_used
-    token_price_history = transaction.token_price_history
-
-    gas_price
-    |> Wei.multi(actual_gas)
-    |> Decimal.mult(token_price_history)
-    |> Decimal.round(8)
-  end
-
-  def l1_fee_to_real_time_usd(%Transaction{} = transaction) do
-    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-    real_time_price = transaction.real_time_price
-    value = format_wei_value(l1_fee, :ether, include_unit_label: false)
-    decimal = Decimal.new(value)
-    token_value = Decimal.mult(decimal, real_time_price)
-    Decimal.round(token_value, 8)
-  end
-
-  def l1_fee_to_history_usd(%Transaction{} = transaction) do
-    l1_fee = if transaction.l1_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.l1_fee
-    token_price_history = transaction.token_price_history
-    value = format_wei_value(l1_fee, :ether, include_unit_label: false)
-    decimal = Decimal.new(value)
-    token_value = Decimal.mult(decimal, token_price_history)
-    Decimal.round(token_value, 8)
-  end
-
-  def da_fee_to_real_time_usd(%Transaction{} = transaction) do
-    da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
-    real_time_price = transaction.real_time_price
-    value = format_wei_value(da_fee, :ether, include_unit_label: false)
-    decimal = Decimal.new(value)
-    token_value = Decimal.mult(decimal, real_time_price)
-    Decimal.round(token_value, 8)
-  end
-
-  def da_fee_to_history_usd(%Transaction{} = transaction) do
-    da_fee = if transaction.da_fee == nil, do: Wei.from(Decimal.new(0), :wei), else: transaction.da_fee
-    token_price_history = transaction.token_price_history
-    value = format_wei_value(da_fee, :ether, include_unit_label: false)
-    decimal = Decimal.new(value)
-    token_value = Decimal.mult(decimal, token_price_history)
-    Decimal.round(token_value, 8)
+  def l1_gas_price(transaction, unit) when unit in ~w(wei gwei ether)a do
+    case Map.get(transaction, :l1_gas_price) do
+      nil -> nil
+      value -> format_wei_value(value, unit)
+    end
   end
 
   def gas_used(%Transaction{gas_used: nil}), do: gettext("Pending")
 
   def gas_used(%Transaction{gas_used: gas_used}) do
     Number.to_string!(gas_used)
+  end
+
+  def l1_gas_used(transaction) do
+    case Map.get(transaction, :l1_gas_used) do
+      nil -> gettext("Pending")
+      value -> Number.to_string!(value)
+    end
   end
 
   def gas_used_perc(%Transaction{gas_used: nil}), do: nil
@@ -660,58 +441,12 @@ defmodule BlockScoutWeb.TransactionView do
     end
   end
 
-  # def l1_gas_price(%Transaction{l1_gas_price: nil}, _unit), do: gettext("Pending")
-
-  # def l1_gas_price(%Transaction{l1_gas_price: l1_gas_price}, unit) when unit in ~w(wei gwei ether)a do
-  #  format_wei_value(l1_gas_price, unit)
-  # end
-
-  def l1_gas_price(%Transaction{} = transaction, unit) when unit in ~w(wei gwei ether)a do
-    l1_gas_price = if transaction.l1_gas_price == nil, do: 0, else: transaction.l1_gas_price
-    format_wei_value(l1_gas_price, unit)
-  end
-
-  def l1_gas_price_native(%Transaction{} = transaction, unit) when unit in ~w(wei gwei ether)a do
-    l1_gas_price = if transaction.l1_gas_price == nil, do: 0, else: transaction.l1_gas_price
-    format_wei_value(l1_gas_price, unit)
-  end
-
-  def l1_fee(%Transaction{l1_fee: nil}, _unit), do: gettext("Pending")
-
-  def l1_fee(%Transaction{l1_fee: l1_fee}, unit) when unit in ~w(wei gwei ether)a do
-    format_wei_value(l1_fee, unit)
-  end
-
-  def da_fee(%Transaction{da_fee: nil}, _unit), do: "0 #{Explorer.coin_name()}"
-
-  def da_fee(%Transaction{da_fee: da_fee}, unit) when unit in ~w(wei gwei ether)a do
-    format_wei_value(da_fee, unit)
-  end
-
-  def l1_gas_used(%Transaction{l1_gas_used: nil}), do: gettext("Pending")
-
-  def l1_gas_used(%Transaction{l1_gas_used: l1_gas_used}) do
-    l1_gas_used
-  end
-
-  def da_gas_used(%Transaction{da_gas_used: nil}), do: "0"
-
-  def da_gas_used(%Transaction{da_gas_used: da_gas_used}) do
-    da_gas_used
-  end
-
-  def l1_fee_scalar(%Transaction{l1_fee_scalar: nil}), do: gettext("Pending")
-
-  def l1_fee_scalar(%Transaction{l1_fee_scalar: l1_fee_scalar}) do
-    l1_fee_scalar
-  end
-
   def hash(%Transaction{hash: hash}) do
     to_string(hash)
   end
 
   def involves_contract?(%Transaction{from_address: from_address, to_address: to_address}) do
-    AddressView.contract?(from_address) || AddressView.contract?(to_address)
+    Address.smart_contract?(from_address) || Address.smart_contract?(to_address)
   end
 
   def involves_token_transfers?(%Transaction{token_transfers: []}), do: false
@@ -789,22 +524,10 @@ defmodule BlockScoutWeb.TransactionView do
     format_wei_value(value, :ether, include_unit_label: false)
   end
 
-  defp fee_to_denomination({fee_type, fee}, l1_fee, da_fee, opts) do
+  defp fee_to_denomination({fee_type, fee}, opts) do
     denomination = Keyword.get(opts, :denomination)
     include_label? = Keyword.get(opts, :include_label, true)
-    l1_and_da_fee = Wei.sum(l1_fee, da_fee)
-
-    {fee_type,
-     format_wei_value(Wei.sum(Wei.from(fee, :wei), l1_and_da_fee), denomination, include_unit_label: include_label?)}
-  end
-
-  defp fee_to_denomination_with_no_unit({fee_type, fee}, l1_fee, da_fee, opts, token_price) do
-    denomination = Keyword.get(opts, :denomination)
-    l1_and_da_fee = Wei.sum(l1_fee, da_fee)
-    value = format_wei_value(Wei.sum(Wei.from(fee, :wei), l1_and_da_fee), denomination, include_unit_label: false)
-    decimal = Decimal.new(value)
-    token_value = Decimal.mult(decimal, token_price)
-    Decimal.round(token_value, 8)
+    {fee_type, format_wei_value(Wei.from(fee, :wei), denomination, include_unit_label: include_label?)}
   end
 
   @doc """
@@ -819,7 +542,7 @@ defmodule BlockScoutWeb.TransactionView do
   """
   def current_tab_name(request_path) do
     @tabs
-    |> Enum.filter(&TabHelpers.tab_active?(&1, request_path))
+    |> Enum.filter(&TabHelper.tab_active?(&1, request_path))
     |> tab_name()
   end
 
@@ -854,7 +577,7 @@ defmodule BlockScoutWeb.TransactionView do
   end
 
   defp show_tenderly_link? do
-    System.get_env("SHOW_TENDERLY_LINK") == "true"
+    Application.get_env(:block_scout_web, :show_tenderly_link)
   end
 
   defp tenderly_chain_path do
@@ -862,7 +585,7 @@ defmodule BlockScoutWeb.TransactionView do
   end
 
   def get_max_length do
-    string_value = Application.get_env(:block_scout_web, :max_length_to_show_string_without_trimming)
+    string_value = Application.get_env(:block_scout_web, :contract)[:max_length_to_show_string_without_trimming]
 
     case Integer.parse(string_value) do
       {integer, ""} -> integer
@@ -871,40 +594,30 @@ defmodule BlockScoutWeb.TransactionView do
   end
 
   def trim(length, string) do
-    %{show: String.slice(string, 0..length), hide: String.slice(string, (length + 1)..String.length(string))}
-  end
-
-  defp template_to_string(template) when is_list(template) do
-    template_to_string(Enum.at(template, 1))
-  end
-
-  defp template_to_string(template) when is_tuple(template) do
-    safe_to_string(template)
+    %{show: String.slice(string, 0..length), hide: String.slice(string, (length + 1)..-1//1)}
   end
 
   # Function decodes revert reason of the transaction
-  @spec decoded_revert_reason(Transaction.t() | nil) :: binary() | nil
-  def decoded_revert_reason(transaction) do
-    revert_reason = get_pure_transaction_revert_reason(transaction)
-
+  @spec decode_revert_reason_as_utf8(binary() | nil) :: binary() | nil
+  def decode_revert_reason_as_utf8(revert_reason) do
     case revert_reason do
+      nil ->
+        nil
+
       "0x" <> hex_part ->
-        proccess_hex_revert_reason(hex_part)
+        decode_hex_revert_reason_as_utf8(hex_part)
 
       hex_part ->
-        proccess_hex_revert_reason(hex_part)
+        decode_hex_revert_reason_as_utf8(hex_part)
     end
   end
 
-  # Function converts hex revert reason to the binary
-  @spec proccess_hex_revert_reason(nil) :: nil
-  defp proccess_hex_revert_reason(nil), do: nil
-
-  @spec proccess_hex_revert_reason(binary()) :: binary()
-  defp proccess_hex_revert_reason(hex_revert_reason) do
-    case Integer.parse(hex_revert_reason, 16) do
-      {number, ""} ->
-        :binary.encode_unsigned(number)
+  # Function converts hex revert reason to the utf8 binary
+  @spec decode_hex_revert_reason_as_utf8(binary()) :: binary()
+  def decode_hex_revert_reason_as_utf8(hex_revert_reason) do
+    case Base.decode16(hex_revert_reason, case: :mixed) do
+      {:ok, revert_reason} ->
+        revert_reason
 
       _ ->
         hex_revert_reason

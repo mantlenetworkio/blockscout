@@ -66,11 +66,6 @@ input.profile-item {
   @include media-breakpoint-down(md) {
     margin: 0;
   }
-  .table{
-    td, th {
-      word-break: break-all;
-    }
-  }
 }
 
 .form-error {

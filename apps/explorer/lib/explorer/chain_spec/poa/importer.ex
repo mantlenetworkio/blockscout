@@ -5,11 +5,11 @@ defmodule Explorer.ChainSpec.POA.Importer do
 
   require Logger
 
+  alias Explorer.Chain.Block.{EmissionReward, Range}
   alias Explorer.Chain.Wei
+  alias Explorer.ChainSpec.GenesisData
   alias Explorer.Repo
   alias Explorer.SmartContract.Reader
-  alias Explorer.Chain.Block.{EmissionReward, Range}
-  alias Explorer.ChainSpec.GenesisData
 
   import Ecto.Query
 
@@ -39,7 +39,7 @@ defmodule Explorer.ChainSpec.POA.Importer do
 
   def import_emission_rewards do
     if is_nil(rewards_contract_address()) do
-      Logger.warn(fn -> "No rewards contract address is defined" end)
+      Logger.warning(fn -> "No rewards contract address is defined" end)
     else
       block_reward = block_reward_amount()
       emission_funds = emission_funds_amount()

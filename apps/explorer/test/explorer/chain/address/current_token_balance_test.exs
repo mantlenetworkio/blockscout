@@ -157,7 +157,7 @@ defmodule Explorer.Chain.Address.CurrentTokenBalanceTest do
         address.hash
         |> CurrentTokenBalance.last_token_balances()
         |> Repo.all()
-        |> Enum.map(fn {token_balance, _} -> token_balance.address_hash end)
+        |> Enum.map(fn token_balance -> token_balance.address_hash end)
 
       assert token_balances == [current_token_balance.address_hash]
     end
@@ -195,9 +195,36 @@ defmodule Explorer.Chain.Address.CurrentTokenBalanceTest do
         address.hash
         |> CurrentTokenBalance.last_token_balances()
         |> Repo.all()
-        |> Enum.map(fn {token_balance, _} -> token_balance.address_hash end)
+        |> Enum.map(fn token_balance -> token_balance.address_hash end)
 
       assert token_balances == [current_token_balance_a.address_hash]
+    end
+  end
+
+  describe "count_token_holders_from_token_hash" do
+    test "returns the most current count about token holders" do
+      address_a = insert(:address, hash: "0xe49fedd93960a0267b3c3b2c1e2d66028e013fee")
+      address_b = insert(:address, hash: "0x5f26097334b6a32b7951df61fd0c5803ec5d8354")
+
+      %Token{contract_address_hash: contract_address_hash} = insert(:token)
+
+      insert(
+        :address_current_token_balance,
+        address: address_a,
+        block_number: 1000,
+        token_contract_address_hash: contract_address_hash,
+        value: 5000
+      )
+
+      insert(
+        :address_current_token_balance,
+        address: address_b,
+        block_number: 1002,
+        token_contract_address_hash: contract_address_hash,
+        value: 1000
+      )
+
+      assert CurrentTokenBalance.count_token_holders_from_token_hash(contract_address_hash) == 2
     end
   end
 end

@@ -1,8 +1,8 @@
 <section class="address-overview" data-page="address-details" data-page-address-hash="<%= @address.hash %>" data-async-counters="<%= @counters_path %>">
   <%= render BlockScoutWeb.Advertisement.TextAdView, "index.html", conn: @conn %>
-  <% dark_forest_addresses_list_0_4 = CustomContractsHelpers.get_custom_addresses_list(:dark_forest_addresses) %>
-  <% dark_forest_addresses_list_0_5 = CustomContractsHelpers.get_custom_addresses_list(:dark_forest_addresses_v_0_5) %>
-  <% circles_addresses_list = CustomContractsHelpers.get_custom_addresses_list(:circles_addresses) %>
+  <% dark_forest_addresses_list_0_4 = CustomContractsHelper.get_custom_addresses_list(:dark_forest_addresses) %>
+  <% dark_forest_addresses_list_0_5 = CustomContractsHelper.get_custom_addresses_list(:dark_forest_addresses_v_0_5) %>
+  <% circles_addresses_list = CustomContractsHelper.get_custom_addresses_list(:circles_addresses) %>
   <% current_address = "0x" <> Base.encode16(@address.hash.bytes, case: :lower) %>
   <% created_from_address_hash = if from_address_hash(@address), do: "0x" <> Base.encode16(from_address_hash(@address).bytes, case: :lower), else: nil %>
   <div class="row js-ad-dependant-mb-2 js-ad-dependant-mb-5-reverse">
@@ -26,7 +26,7 @@
             <% true -> %>
               <%= nil %>
           <% end %>
-          <h1 class="card-title lg-card-title mb-2-desktop address-detail-title-container">
+          <h1 class="card-title lg-card-title mb-2-desktop">
             <div class="title-with-label"><%= address_title(@address) %> <%= gettext "Details" %></div>
             <%= render BlockScoutWeb.AddressView, "_labels.html", address_hash: @address.hash, tags: @tags %>
             <!-- buttons -->
@@ -40,10 +40,10 @@
               <%= render BlockScoutWeb.CommonComponentsView, "_btn_qr_code.html" %>
             </span>
           </h1>
-          <h3 class="address-detail-hash-title mb-4 <%= if BlockScoutWeb.AddressView.contract?(@address) do %>contract-address<% end %>" data-test="address_detail_hash"><%= @address %></h3>
+          <h3 class="address-detail-hash-title mb-4 <%= if Address.smart_contract?(@address) do %>contract-address<% end %>" data-test="address_detail_hash"><%= @address %></h3>
           <!-- Verify in other explorers -->
           <!--
-          <%# <%= render "_verify_other_explorers.html", hash: @address.hash, type: "address" %> %>
+          <%= render "_verify_other_explorers.html", hash: @address.hash, type: "address" %>
           -->
           <% address_name = primary_name(@address) %>
           <%= cond do %>
@@ -67,7 +67,7 @@
                 </dd>
               </dl>
             <% address_name -> %>
-              <%= if contract?(@address) do %>
+              <%= if Address.smart_contract?(@address) do %>
                 <dl class="row">
                   <dt class="col-sm-4 col-md-4 col-lg-3 text-muted">
                     <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
@@ -94,7 +94,7 @@
           <% end %>
           <!-- Creator -->
           <% from_address_hash = from_address_hash(@address) %>
-          <%= if contract?(@address) do %>
+          <%= if Address.smart_contract?(@address) do %>
             <dl class="row">
               <dt class="col-sm-4 col-md-4 col-lg-3 text-muted">
                 <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
@@ -116,15 +116,18 @@
                     "data-test": "transaction_hash_link"
                   ) %>
                 <% else %>
-                  <%= gettext("Contract was precompiled and created at genesis") %>
+                  <p class="alert alert-danger" role="alert"><%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
+                text: gettext("Contract was precompiled and created at genesis or contract creation transaction is missing") %><%= gettext("Error: Could not determine contract creator.") %></p>
                 <% end %>
               </dd>
             </dl>
           <% end %>
           <!-- Implementation -->
           <%= if @is_proxy do %>
-            <% {implementation_address_, name} = SmartContract.get_implementation_address_hash(@address.smart_contract) %>
-            <% implementation_address = implementation_address_ || "0x0000000000000000000000000000000000000000" %>
+            <% implementation = Implementation.get_implementation(@address.smart_contract) %>
+            <% implementation_address_ = implementation && Enum.at(implementation.address_hashes, 0) %>
+            <% name = implementation && Enum.at(implementation.names, 0) %>
+            <% implementation_address = if is_nil(implementation_address_), do: "0x0000000000000000000000000000000000000000", else: to_string(implementation_address_) %>
             <dl class="row">
               <dt class="col-sm-4 col-md-4 col-lg-3 text-muted">
                 <%= render BlockScoutWeb.CommonComponentsView, "_i_tooltip_2.html",
@@ -151,15 +154,15 @@
             <dd data-selector="current-coin-balance" class="col-sm-8 col-md-8 col-lg-9" data-test="address_balance">
               <%= balance(@address) %>
               <%= if !match?({:pending, _}, @coin_balance_status) && !empty_exchange_rate?(@exchange_rate) do %>
-                <% usd_value = to_string(@exchange_rate.usd_value) %>
+                <% fiat_value = to_string(@exchange_rate.fiat_value) %>
                 <span class="address-current-balance">
                   (<span
                     data-wei-value="<%= if @address.fetched_coin_balance, do: @address.fetched_coin_balance.value %>"
-                    data-usd-exchange-rate="<%= @exchange_rate.usd_value %>"
+                    data-usd-exchange-rate="<%= @exchange_rate.fiat_value %>"
                     data-placement="top"
                     data-toggle="tooltip"
                     data-html="true"
-                    title='<%= "@ " <> usd_value <> "/" <> Explorer.coin_name() %>'
+                    title='<%= "@ " <> fiat_value <> "/" <> Explorer.coin_name() %>'
                   >
                   </span>)
                 </span>
@@ -188,15 +191,15 @@
               <%= if @conn.request_path |> String.contains?("/transactions") do %>
                 <a href="#txs" class="page-link bs-label large btn-no-border-link-to-tems" data-selector="transaction-count">
                   <%= if @address.transactions_count do %>
-                    <%= Number.Delimit.number_to_delimited(@address.transactions_count, precision: 0) %>
+                    <%= Number.Delimit.number_to_delimited(@address.transactions_count, precision: 0) %> <%= gettext("Transactions") %>
                   <% else %>
                     <%= render BlockScoutWeb.CommonComponentsView, "_loading_spinner.html", loading_text: gettext("Fetching transactions...") %>
                   <% end %>
                 </a>
               <% else %>
-                <a href="<%= AccessHelpers.get_path(@conn, :address_transaction_path, :index, @address.hash)%>#txs" class="page-link bs-label large btn-no-border-link-to-tems" data-selector="transaction-count">
+                <a href="<%= AccessHelper.get_path(@conn, :address_transaction_path, :index, @address.hash)%>#txs" class="page-link bs-label large btn-no-border-link-to-tems" data-selector="transaction-count">
                   <%= if @address.token_transfers_count do %>
-                    <%= Number.Delimit.number_to_delimited(@address.transactions_count, precision: 0) %>
+                    <%= Number.Delimit.number_to_delimited(@address.transactions_count, precision: 0) %> <%= gettext("Transactions") %>
                   <% else %>
                     <%= render BlockScoutWeb.CommonComponentsView, "_loading_spinner.html", loading_text: gettext("Fetching transactions...") %>
                   <% end %>
@@ -215,15 +218,15 @@
               <%= if @conn.request_path |> String.contains?("/token-transfers") do %>
                 <a href="#transfers" class="page-link bs-label large btn-no-border-link-to-tems" data-selector="transfer-count">
                   <%= if @address.token_transfers_count do %>
-                    <%= Number.Delimit.number_to_delimited(@address.token_transfers_count, precision: 0) %>
+                    <%= Number.Delimit.number_to_delimited(@address.token_transfers_count, precision: 0) %> <%= gettext("Transfers") %>
                   <% else %>
                     <%= render BlockScoutWeb.CommonComponentsView, "_loading_spinner.html", loading_text: gettext("Fetching transfers...") %>
                   <% end %>
                 </a>
               <% else %>
-                <a href="<%= AccessHelpers.get_path(@conn, :address_token_transfers_path, :index, @address.hash)%>#transfers" class="page-link bs-label large btn-no-border-link-to-tems" data-selector="transfer-count">
+                <a href="<%= AccessHelper.get_path(@conn, :address_token_transfers_path, :index, @address.hash)%>#transfers" class="page-link bs-label large btn-no-border-link-to-tems" data-selector="transfer-count">
                   <%= if @address.token_transfers_count do %>
-                    <%= Number.Delimit.number_to_delimited(@address.token_transfers_count, precision: 0) %>
+                    <%= Number.Delimit.number_to_delimited(@address.token_transfers_count, precision: 0) %> <%= gettext("Transfers") %>
                   <% else %>
                     <%= render BlockScoutWeb.CommonComponentsView, "_loading_spinner.html", loading_text: gettext("Fetching transfers...") %>
                   <% end %>

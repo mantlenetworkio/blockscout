@@ -107,44 +107,6 @@ $tooltip-background-color: $btn-line-color !default;
         width: 150px !important;
     }
 }
-.tooltip-inner {
-    .custom-tooltip-container{
-        //width: 275px;
-        p{
-            margin-bottom: 0;
-        }
-        
-        .custom-tooltip-total-title{
-            font-family: 'Nunito';
-            font-style: normal;
-            font-weight: 800;
-            font-size: 14px;
-            line-height: 22px;
-            color: #15181C;
-            overflow: visible;
-            padding-bottom: 8px;
-            border-bottom: 1px solid #AED9D6;
-            margin-bottom: 8px;
-            white-space: nowrap;
-        }
-        .custom-tooltip-title{
-            font-family: 'Nunito';
-            font-weight: 900;
-            font-size: 14px;
-            text-align: start;
-            color: #2B3034;
-            line-height: 22px;
-        }
-        .custom-tooltip-content{
-            font-family: 'Nunito';
-            font-weight: 600;
-            font-size: 12px;
-            text-align: start;
-            color: #585F65;
-            line-height: 22px;
-        }
-    }
-}
 
 .custom-tooltip {
     font-family: Nunito, "Helvetica Neue", Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";

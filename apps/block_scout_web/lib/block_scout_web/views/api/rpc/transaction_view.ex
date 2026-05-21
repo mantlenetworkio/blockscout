@@ -2,6 +2,7 @@ defmodule BlockScoutWeb.API.RPC.TransactionView do
   use BlockScoutWeb, :view
 
   alias BlockScoutWeb.API.RPC.RPCView
+  alias Explorer.Chain.Transaction
 
   def render("gettxinfo.json", %{
         transaction: transaction,
@@ -14,7 +15,7 @@ defmodule BlockScoutWeb.API.RPC.TransactionView do
   end
 
   def render("gettxreceiptstatus.json", %{status: status}) do
-    prepared_status = prepare_tx_receipt_status(status)
+    prepared_status = prepare_transaction_receipt_status(status)
     RPCView.render("show.json", data: %{"status" => prepared_status})
   end
 
@@ -26,13 +27,13 @@ defmodule BlockScoutWeb.API.RPC.TransactionView do
     RPCView.render("error.json", assigns)
   end
 
-  defp prepare_tx_receipt_status(""), do: ""
+  defp prepare_transaction_receipt_status(""), do: ""
 
-  defp prepare_tx_receipt_status(nil), do: ""
+  defp prepare_transaction_receipt_status(nil), do: ""
 
-  defp prepare_tx_receipt_status(:ok), do: "1"
+  defp prepare_transaction_receipt_status(:ok), do: "1"
 
-  defp prepare_tx_receipt_status(_), do: "0"
+  defp prepare_transaction_receipt_status(_), do: "0"
 
   defp prepare_error("") do
     %{
@@ -58,9 +59,10 @@ defmodule BlockScoutWeb.API.RPC.TransactionView do
   defp prepare_transaction(transaction, block_height, logs, next_page_params) do
     %{
       "hash" => "#{transaction.hash}",
-      "timeStamp" => "#{DateTime.to_unix(transaction.block.timestamp)}",
+      "timeStamp" => "#{DateTime.to_unix(Transaction.block_timestamp(transaction))}",
       "blockNumber" => "#{transaction.block_number}",
-      "confirmations" => "#{block_height - transaction.block_number}",
+      "confirmations" =>
+        if(is_nil(transaction.block_number), do: "0", else: "#{block_height - transaction.block_number}"),
       "success" => if(transaction.status == :ok, do: true, else: false),
       "from" => "#{transaction.from_address_hash}",
       "to" => "#{transaction.to_address_hash}",

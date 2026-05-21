@@ -1,8 +1,8 @@
 .bs-label {
     display: inline-block;
     padding: 0 5px;
-    background: rgba(233, 160, 19, 0.1);
-    color: #DF9300;
+    background: #f5f6fa;
+    color: #77838f;
     border-radius: 5px;
     &.large {
         font-size: 14px;
@@ -10,11 +10,6 @@
     font-size: 12px;
     padding: 5px;
     line-height: normal;
-    vertical-align: bottom;
-    max-width: 200px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
 
     &.right {
         margin-left: auto;

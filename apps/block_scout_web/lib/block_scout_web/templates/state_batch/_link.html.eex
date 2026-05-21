@@ -1,3 +1,0 @@
-<%= link(
-    @batch_index,
-    to: state_batch_path(BlockScoutWeb.Endpoint, :show, @batch_index)) %>

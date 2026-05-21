@@ -58,6 +58,7 @@ export function reducer (state = initialState, action) {
 const elements = {
   '[data-selector="channel-disconnected-message"]': {
     render ($el, state) {
+      // @ts-ignore
       if (state.channelDisconnected && !window.loading) $el.show()
     }
   },
@@ -83,14 +84,15 @@ const elements = {
 const $transactionListPage = $('[data-page="transaction-list"]')
 if ($transactionListPage.length) {
   window.onbeforeunload = () => {
+    // @ts-ignore
     window.loading = true
   }
-  // Receive new tx from server by websocket
+
   const store = createAsyncLoadStore(reducer, initialState, 'dataset.identifierHash')
 
   connectElements({ store, elements })
 
-  const transactionsChannel = socket.channel('transactions:new_transaction')
+  const transactionsChannel = socket.channel('transactions_old:new_transaction')
   transactionsChannel.join()
   transactionsChannel.onError(() => store.dispatch({
     type: 'CHANNEL_DISCONNECTED'

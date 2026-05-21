@@ -2,8 +2,8 @@ defmodule Explorer.Visualize.Sol2uml do
   @moduledoc """
     Adapter for sol2uml visualizer with https://github.com/blockscout/blockscout-rs/blob/main/visualizer
   """
-  alias Explorer.Utility.RustService
-  alias HTTPoison.Response
+  alias Explorer.HttpClient
+  alias Explorer.Utility.Microservice
   require Logger
 
   @post_timeout 60_000
@@ -13,14 +13,14 @@ defmodule Explorer.Visualize.Sol2uml do
     http_post_request(visualize_contracts_url(), body)
   end
 
-  def http_post_request(url, body) do
+  defp http_post_request(url, body) do
     headers = [{"Content-Type", "application/json"}]
 
-    case HTTPoison.post(url, Jason.encode!(body), headers, recv_timeout: @post_timeout) do
-      {:ok, %Response{body: body, status_code: 200}} ->
-        proccess_visualizer_response(body)
+    case HttpClient.post(url, Jason.encode!(body), headers, recv_timeout: @post_timeout) do
+      {:ok, %{body: body, status_code: 200}} ->
+        process_visualizer_response(body)
 
-      {:ok, %Response{body: body, status_code: status_code}} ->
+      {:ok, %{body: body, status_code: status_code}} ->
         Logger.error(fn -> ["Invalid status code from visualizer: #{status_code}. body: ", inspect(body)] end)
         {:error, "failed to visualize contract"}
 
@@ -40,28 +40,28 @@ defmodule Explorer.Visualize.Sol2uml do
     end
   end
 
-  def proccess_visualizer_response(body) when is_binary(body) do
+  def process_visualizer_response(body) when is_binary(body) do
     case Jason.decode(body) do
       {:ok, decoded} ->
-        proccess_visualizer_response(decoded)
+        process_visualizer_response(decoded)
 
       _ ->
         {:error, body}
     end
   end
 
-  def proccess_visualizer_response(%{"svg" => svg}) do
+  def process_visualizer_response(%{"svg" => svg}) do
     {:ok, svg}
   end
 
-  def proccess_visualizer_response(other), do: {:error, other}
+  def process_visualizer_response(other), do: {:error, other}
 
   def visualize_contracts_url, do: "#{base_api_url()}" <> "/solidity:visualize-contracts"
 
   def base_api_url, do: "#{base_url()}" <> "/api/v1"
 
   def base_url do
-    RustService.base_url(__MODULE__)
+    Microservice.base_url(__MODULE__)
   end
 
   def enabled?, do: Application.get_env(:explorer, __MODULE__)[:enabled]

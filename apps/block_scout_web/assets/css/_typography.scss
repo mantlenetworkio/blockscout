@@ -1,17 +1,6 @@
-$common-link-color: #65B3AE !default;
+$common-link-color: $primary !default;
 $blue: #4b89fb !default;
 $success: #34c0ad !default;
-
-@font-face {
-	font-family: GT;
-	src: url('./GTWalsheimPro-Medium.woff2') format('woff2');
-  font-weight: normal;
-}
-@font-face {
-	font-family: GT;
-	src: url('./GTWalsheimPro-Bold.woff2') format('woff2');
-  font-weight: bold;
-}
 
 body {
   font-family: $font-family;
@@ -59,12 +48,12 @@ p {
 }
 
 a {
-  //color: $common-link-color;
+  color: $common-link-color;
   text-decoration: none;
 
   &:hover,
   &:focus {
-    //color: darken($common-link-color, 20%);
+    color: darken($common-link-color, 20%);
     text-decoration: underline;
   }
 
@@ -85,7 +74,7 @@ textarea.form-control {
 
 .contract-address {
   display: inline-block;
-  text-decoration: none;
+  text-decoration: underline;
   text-decoration-style: dashed;
   &:hover {
     text-decoration-style: none;

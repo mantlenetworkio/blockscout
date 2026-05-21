@@ -2,6 +2,7 @@ import $ from 'jquery'
 import { openErrorModal, openWarningModal, openSuccessModal, openModalWithMessage } from '../modals'
 import { compareChainIDs, formatError, formatTitleAndError, getContractABI, getCurrentAccountPromise, getMethodInputs, prepareMethodArgs } from './common_helpers'
 import BigNumber from 'bignumber.js'
+import { commonPath } from '../path_helper'
 
 export const queryMethod = (isWalletEnabled, url, $methodId, args, type, functionName, $responseContainer, isCustomABI) => {
   const data = {
@@ -48,9 +49,9 @@ export const callMethod = (isWalletEnabled, $functionInputs, explorerChainId, $f
     .then((walletChainId) => {
       compareChainIDs(explorerChainId, walletChainId)
         .then(() => getCurrentAccountPromise(window.web3.currentProvider))
-        /* .catch(error => {
+        .catch(error => {
           openWarningModal('Unauthorized', formatError(error))
-        }) */
+        })
         .then((currentAccount) => {
           if (functionName) {
             const TargetContract = new window.web3.eth.Contract(contractAbi, contractAddress)
@@ -59,7 +60,7 @@ export const callMethod = (isWalletEnabled, $functionInputs, explorerChainId, $f
             methodToCall
               .on('error', function (error) {
                 const titleAndError = formatTitleAndError(error)
-                const message = titleAndError.message + (titleAndError.txHash ? `<br><a href="/tx/${titleAndError.txHash}">More info</a>` : '')
+                const message = titleAndError.message + (titleAndError.txHash ? `<br><a href="${commonPath}/tx/${titleAndError.txHash}">More info</a>` : '')
                 openErrorModal(titleAndError.title.length ? titleAndError.title : `Error in sending transaction for method "${functionName}"`, message, false)
               })
               .on('transactionHash', function (txHash) {
@@ -98,7 +99,7 @@ function onTransactionHash (txHash, functionName) {
     })
       .then(txReceipt => {
         if (txReceipt) {
-          const successMsg = `Successfully sent <a href="/tx/${txHash}">transaction</a> for method "${functionName}"`
+          const successMsg = `Successfully sent <a href="${commonPath}/tx/${txHash}">transaction</a> for method "${functionName}"`
           openSuccessModal('Success', successMsg)
           clearInterval(txReceiptPollingIntervalId)
         }

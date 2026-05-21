@@ -11,6 +11,7 @@ defmodule Explorer.Chain.Import.Runner.Address.TokenBalances do
   alias Explorer.Chain.Address.TokenBalance
   alias Explorer.Chain.Import
   alias Explorer.Prometheus.Instrumenter
+  alias Explorer.Utility.MissingBalanceOfToken
 
   @behaviour Import.Runner
 
@@ -42,11 +43,20 @@ defmodule Explorer.Chain.Import.Runner.Address.TokenBalances do
       |> Map.put_new(:timeout, @timeout)
       |> Map.put(:timestamps, timestamps)
 
-    Multi.run(multi, :address_token_balances, fn repo, _ ->
+    multi
+    |> Multi.run(:filter_placeholders, fn _, _ ->
       Instrumenter.block_import_stage_runner(
-        fn -> insert(repo, changes_list, insert_options) end,
+        fn -> filter_placeholders(changes_list) end,
         :block_referencing,
-        :token_blances,
+        :token_balances,
+        :filter_placeholders
+      )
+    end)
+    |> Multi.run(:address_token_balances, fn repo, %{filter_placeholders: filtered_changes_list} ->
+      Instrumenter.block_import_stage_runner(
+        fn -> insert(repo, filtered_changes_list, insert_options) end,
+        :block_referencing,
+        :token_balances,
         :address_token_balances
       )
     end)
@@ -54,6 +64,19 @@ defmodule Explorer.Chain.Import.Runner.Address.TokenBalances do
 
   @impl Import.Runner
   def timeout, do: @timeout
+
+  @doc """
+  Filters out changes with empty `value` or `value_fetched_at` for tokens that doesn't implement `balanceOf` function.
+  """
+  @spec filter_placeholders([map()]) :: {:ok, [map()]}
+  def filter_placeholders(changes_list) do
+    {placeholders, filled_balances} =
+      Enum.split_with(changes_list, fn balance_params ->
+        is_nil(Map.get(balance_params, :value_fetched_at)) or is_nil(Map.get(balance_params, :value))
+      end)
+
+    {:ok, filled_balances ++ MissingBalanceOfToken.filter_token_balances_params(placeholders, false)}
+  end
 
   @spec insert(Repo.t(), [map()], %{
           optional(:on_conflict) => Import.Runner.on_conflict(),
@@ -69,10 +92,11 @@ defmodule Explorer.Chain.Import.Runner.Address.TokenBalances do
     ordered_changes_list =
       changes_list
       |> Enum.map(fn change ->
-        if Map.has_key?(change, :token_id) and Map.get(change, :token_type) == "ERC-1155" do
-          change
-        else
-          Map.put(change, :token_id, nil)
+        cond do
+          Map.has_key?(change, :token_id) and Map.get(change, :token_type) == "ERC-1155" -> change
+          Map.get(change, :token_type) == "ERC-404" and Map.has_key?(change, :token_id) -> Map.put(change, :value, nil)
+          Map.get(change, :token_type) == "ERC-404" and Map.has_key?(change, :value) -> Map.put(change, :token_id, nil)
+          true -> Map.put(change, :token_id, nil)
         end
       end)
       |> Enum.group_by(fn %{
@@ -84,16 +108,14 @@ defmodule Explorer.Chain.Import.Runner.Address.TokenBalances do
         {token_contract_address_hash, token_id, address_hash, block_number}
       end)
       |> Enum.map(fn {_, grouped_address_token_balances} ->
-        if Enum.count(grouped_address_token_balances) > 1 do
-          Enum.max_by(grouped_address_token_balances, fn balance -> Map.get(balance, :value_fetched_at) end)
-        else
-          Enum.at(grouped_address_token_balances, 0)
-        end
+        process_grouped_address_token_balances(grouped_address_token_balances)
       end)
       |> Enum.sort_by(&{&1.token_contract_address_hash, &1.token_id, &1.address_hash, &1.block_number})
 
     {:ok, inserted_changes_list} =
-      if Enum.count(ordered_changes_list) > 0 do
+      if Enum.empty?(ordered_changes_list) do
+        {:ok, []}
+      else
         Import.insert_changes_list(
           repo,
           ordered_changes_list,
@@ -105,11 +127,17 @@ defmodule Explorer.Chain.Import.Runner.Address.TokenBalances do
           timeout: timeout,
           timestamps: timestamps
         )
-      else
-        {:ok, []}
       end
 
     {:ok, inserted_changes_list}
+  end
+
+  defp process_grouped_address_token_balances(grouped_address_token_balances) do
+    if Enum.count(grouped_address_token_balances) > 1 do
+      Enum.max_by(grouped_address_token_balances, fn balance -> Map.get(balance, :value_fetched_at) end)
+    else
+      Enum.at(grouped_address_token_balances, 0)
+    end
   end
 
   defp default_on_conflict do
@@ -120,6 +148,8 @@ defmodule Explorer.Chain.Import.Runner.Address.TokenBalances do
           value: fragment("COALESCE(EXCLUDED.value, ?)", token_balance.value),
           value_fetched_at: fragment("EXCLUDED.value_fetched_at"),
           token_type: fragment("EXCLUDED.token_type"),
+          refetch_after: fragment("EXCLUDED.refetch_after"),
+          retries_count: fragment("EXCLUDED.retries_count"),
           inserted_at: fragment("LEAST(EXCLUDED.inserted_at, ?)", token_balance.inserted_at),
           updated_at: fragment("GREATEST(EXCLUDED.updated_at, ?)", token_balance.updated_at)
         ]

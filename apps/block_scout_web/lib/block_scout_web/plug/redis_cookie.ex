@@ -4,11 +4,14 @@ defmodule BlockScoutWeb.Plug.RedisCookie do
     Added Redis to have a possibility to invalidate session
   """
 
-  require Logger
-  @behaviour Plug.Session.Store
+  import Explorer.Helper, only: [redis_key: 1]
 
   alias Plug.Crypto
   alias Plug.Crypto.{KeyGenerator, MessageEncryptor, MessageVerifier}
+
+  require Logger
+
+  @behaviour Plug.Session.Store
 
   @impl true
   def init(opts) do
@@ -72,7 +75,7 @@ defmodule BlockScoutWeb.Plug.RedisCookie do
          Logger.log(
            log,
            "Plug.Session could not decode incoming session cookie. Reason: " <>
-             Exception.message(e)
+             Exception.format(:error, e, __STACKTRACE__)
          )
 
          %{}
@@ -192,21 +195,28 @@ defmodule BlockScoutWeb.Plug.RedisCookie do
   defp build_rotating_opts(opts, _), do: Map.put(opts, :rotating_options, [])
 
   defp store_to_redis(cookie) do
-    Redix.command(:redix, ["SET", hash(cookie), 1])
+    Redix.command(:redix, [
+      "SET",
+      redis_key(hash(cookie)),
+      1,
+      "EX",
+      Application.get_env(:block_scout_web, :session_cookie_ttl)
+    ])
 
     cookie
   end
 
   defp remove_from_redis(sid) do
-    Redix.command(:redix, ["DEL", sid])
+    Redix.command(:redix, ["DEL", redis_key(sid)])
   end
 
   defp check_in_redis({sid, map}, _cookie) when is_nil(sid) or map == %{}, do: {nil, %{}}
 
   defp check_in_redis({_sid, session}, cookie) do
     hash = hash(cookie)
+    key = redis_key(hash)
 
-    case Redix.command(:redix, ["GET", hash]) do
+    case Redix.command(:redix, ["GET", key]) do
       {:ok, one} when one in [1, "1"] ->
         {hash, session}
 

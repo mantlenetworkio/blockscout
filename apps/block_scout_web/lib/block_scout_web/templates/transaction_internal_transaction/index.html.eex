@@ -2,63 +2,23 @@
   <%= render BlockScoutWeb.TransactionView, "overview.html", assigns %>
   <div class="card">
     <%= render BlockScoutWeb.TransactionView, "_tabs.html", assigns %>
-    <div class="card-body txn-list-container" data-async-load data-async-listing="<%= @current_path %>">
+    <div class="card-body" data-async-load data-async-listing="<%= @current_path %>">
       <h1 class="card-title list-title-description"><%= gettext "Internal Transactions" %></h1>
 
       <div class="list-top-pagination-container-wrapper">
         <%= render BlockScoutWeb.CommonComponentsView, "_pagination_container.html", position: "top", cur_page_number: "1", show_pagination_limit: true, data_next_page_button: true, data_prev_page_button: true %>
       </div>
 
-
-
-      <div class="table-tile-header txn-list-table-head-container">
-          <span style="width: 2%;">
-          &nbsp;
-          </span>
-          <span style="width: 10%;">
-            <%= gettext "Txn Hash" %>
-          </span>
-          <span style="width: 10%;">
-            <%= gettext "Txn Type" %>
-          </span>
-          <span style="width: 9%;">
-              <%= gettext "Method" %>
-          </span>
-          <span style="width: 8%;">
-            <%= gettext "Block" %>
-          </span>
-          <span style="width: 10%;">
-            <%= gettext "Age" %>
-          </span>
-          <span style="width: 14%;">
-            <%= gettext "From" %>
-          </span>
-          <span style="width: 3%;">
-          &nbsp;
-          </span>
-          <span style="width: 14%;">
-            <%= gettext "To" %>
-          </span>
-          <span style="width: 10%;">
-            <%= gettext "Value" %>
-          </span>
-          <span style="width: 10%;">
-            <%= gettext "Txn Fee" %>
-          </span>
-        </div>
-
-            <button data-error-message class="alert alert-danger col-12 text-left" style="display: none;">
+      <button data-error-message class="alert alert-danger col-12 text-left" style="display: none;">
         <span href="#" class="alert-link"><%= gettext("Something went wrong, click to reload.") %></span>
       </button>
-
-
       <div data-empty-response-message style="display: none;">
         <div class="tile tile-muted text-center" data-selector="empty-logs-list">
           <%= gettext "There are no internal transactions for this transaction." %>
         </div>
       </div>
 
-      <div data-items class="table-list-page">
+      <div data-items>
         <%= render BlockScoutWeb.CommonComponentsView, "_tile-loader.html" %>
       </div>
 

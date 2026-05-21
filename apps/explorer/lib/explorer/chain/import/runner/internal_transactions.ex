@@ -8,13 +8,27 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
 
   alias Ecto.Adapters.SQL
   alias Ecto.{Changeset, Multi, Repo}
-  alias Explorer.Chain.{Block, Hash, Import, InternalTransaction, PendingBlockOperation, Transaction}
+  alias EthereumJSONRPC.Utility.RangesHelper
+
+  alias Explorer.Chain.{
+    Address,
+    Block,
+    Import,
+    InternalTransaction,
+    PendingOperationsHelper,
+    PendingTransactionOperation,
+    Transaction,
+    TransactionError
+  }
+
+  alias Explorer.Chain.Events.Publisher
   alias Explorer.Chain.Import.Runner
+  alias Explorer.Migrator.DeleteZeroValueInternalTransactions
   alias Explorer.Prometheus.Instrumenter
   alias Explorer.Repo, as: ExplorerRepo
-  alias Explorer.Utility.MissingBlockRange
+  alias Explorer.Utility.{AddressIdToAddressHash, MissingBlockRange}
 
-  import Ecto.Query, only: [from: 2, or_where: 3]
+  import Ecto.Query
 
   @behaviour Runner
 
@@ -32,8 +46,8 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
   @impl Runner
   def imported_table_row do
     %{
-      value_type: "[%{index: non_neg_integer(), transaction_hash: Explorer.Chain.Hash.t()}]",
-      value_description: "List of maps of the `t:Explorer.Chain.InternalTransaction.t/0` `index` and `transaction_hash`"
+      value_type: "[InternalTransaction.t()]",
+      value_description: "List of maps of the `t:Explorer.Chain.InternalTransaction.t/0`"
     }
   end
 
@@ -63,17 +77,17 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
         :acquire_blocks
       )
     end)
-    |> Multi.run(:acquire_pending_internal_txs, fn repo, %{acquire_blocks: block_hashes} ->
+    |> Multi.run(:acquire_pending_internal_transactions, fn repo, %{acquire_blocks: block_hashes} ->
       Instrumenter.block_import_stage_runner(
-        fn -> acquire_pending_internal_txs(repo, block_hashes) end,
+        fn -> acquire_pending_internal_transactions(repo, block_hashes, changes_list) end,
         :block_pending,
         :internal_transactions,
-        :acquire_pending_internal_txs
+        :acquire_pending_internal_transactions
       )
     end)
-    |> Multi.run(:acquire_transactions, fn repo, %{acquire_pending_internal_txs: pending_block_hashes} ->
+    |> Multi.run(:acquire_transactions, fn repo, %{acquire_pending_internal_transactions: pending_ops_hashes} ->
       Instrumenter.block_import_stage_runner(
-        fn -> acquire_transactions(repo, pending_block_hashes) end,
+        fn -> acquire_transactions(repo, pending_ops_hashes) end,
         :block_pending,
         :internal_transactions,
         :acquire_transactions
@@ -117,25 +131,30 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
         :valid_internal_transactions_without_first_traces_of_trivial_transactions
       )
     end)
-    |> Multi.run(:remove_left_over_internal_transactions, fn repo,
-                                                             %{
-                                                               valid_internal_transactions: valid_internal_transactions
-                                                             } ->
+    |> Multi.run(:maybe_shrink_internal_transactions_params, fn _,
+                                                                %{
+                                                                  valid_internal_transactions_without_first_traces_of_trivial_transactions:
+                                                                    valid_internal_transactions_without_first_traces_of_trivial_transactions
+                                                                } ->
       Instrumenter.block_import_stage_runner(
-        fn -> remove_left_over_internal_transactions(repo, valid_internal_transactions) end,
+        fn ->
+          maybe_shrink_internal_transactions_params(
+            valid_internal_transactions_without_first_traces_of_trivial_transactions
+          )
+        end,
         :block_pending,
         :internal_transactions,
-        :remove_left_over_internal_transactions
+        :maybe_shrink_internal_transactions_params
       )
     end)
     |> Multi.run(:internal_transactions, fn repo,
                                             %{
-                                              valid_internal_transactions_without_first_traces_of_trivial_transactions:
-                                                valid_internal_transactions_without_first_traces_of_trivial_transactions
+                                              maybe_shrink_internal_transactions_params:
+                                                maybe_shrink_internal_transactions_params
                                             } ->
       Instrumenter.block_import_stage_runner(
         fn ->
-          insert(repo, valid_internal_transactions_without_first_traces_of_trivial_transactions, insert_options)
+          insert(repo, maybe_shrink_internal_transactions_params, insert_options)
         end,
         :block_pending,
         :internal_transactions,
@@ -154,26 +173,44 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
         :update_transactions
       )
     end)
-    |> Multi.run(:remove_consensus_of_invalid_blocks, fn repo, %{invalid_block_numbers: invalid_block_numbers} ->
+    |> Multi.run(:set_refetch_needed_for_invalid_blocks, fn repo, %{invalid_block_numbers: invalid_block_numbers} ->
       Instrumenter.block_import_stage_runner(
-        fn -> remove_consensus_of_invalid_blocks(repo, invalid_block_numbers) end,
+        fn -> set_refetch_needed_for_invalid_blocks(repo, invalid_block_numbers, timestamps) end,
         :block_pending,
         :internal_transactions,
-        :remove_consensus_of_invalid_blocks
+        :set_refetch_needed_for_invalid_blocks
       )
     end)
     |> Multi.run(:update_pending_blocks_status, fn repo,
                                                    %{
-                                                     acquire_pending_internal_txs: pending_block_hashes,
-                                                     remove_consensus_of_invalid_blocks: invalid_block_hashes
+                                                     acquire_pending_internal_transactions: pending_ops_hashes,
+                                                     set_refetch_needed_for_invalid_blocks: invalid_block_hashes
                                                    } ->
       Instrumenter.block_import_stage_runner(
-        fn -> update_pending_blocks_status(repo, pending_block_hashes, invalid_block_hashes) end,
+        fn -> update_pending_blocks_status(repo, pending_ops_hashes, invalid_block_hashes) end,
         :block_pending,
         :internal_transactions,
         :update_pending_blocks_status
       )
     end)
+    |> Multi.run(:empty_selfdestructed_contracts_bytecode, fn repo,
+                                                              %{
+                                                                valid_internal_transactions: valid_internal_transactions
+                                                              } ->
+      Instrumenter.block_import_stage_runner(
+        fn -> empty_selfdestructed_contracts_bytecode(repo, valid_internal_transactions, timestamps) end,
+        :block_pending,
+        :internal_transactions,
+        :empty_selfdestructed_contracts_bytecode
+      )
+    end)
+  end
+
+  @impl Runner
+  def prepare_data(changes_list) do
+    changes_list
+    |> maybe_reject_zero_value()
+    |> adjust_insert_params()
   end
 
   def run_insert_only(changes_list, %{timestamps: timestamps} = options) when is_map(options) do
@@ -188,11 +225,17 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
     internal_transactions_params = Enum.filter(changes_list, &Map.has_key?(&1, :type))
 
     # Enforce ShareLocks tables order (see docs: sharelocks.md)
-    Multi.new()
-    |> Multi.run(:internal_transactions, fn repo, _ ->
-      insert(repo, internal_transactions_params, insert_options)
-    end)
-    |> ExplorerRepo.transaction()
+    with {:ok, data} <-
+           Multi.new()
+           |> Multi.run(:prepare_data, fn _, _ ->
+             {:ok, prepare_data(internal_transactions_params)}
+           end)
+           |> Multi.run(:internal_transactions, fn repo, %{prepare_data: prepared_data} ->
+             insert(repo, prepared_data, insert_options)
+           end)
+           |> ExplorerRepo.transaction() do
+      Publisher.broadcast(data, :on_demand)
+    end
   end
 
   @impl Runner
@@ -203,19 +246,24 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
           required(:timeout) => timeout,
           required(:timestamps) => Import.timestamps()
         }) ::
-          {:ok, [%{index: non_neg_integer, transaction_hash: Hash.t()}]}
+          {:ok, [InternalTransaction.t()]}
           | {:error, [Changeset.t()]}
   defp insert(repo, valid_internal_transactions, %{timeout: timeout, timestamps: timestamps} = options)
        when is_list(valid_internal_transactions) do
     on_conflict = Map.get_lazy(options, :on_conflict, &default_on_conflict/0)
 
-    ordered_changes_list = Enum.sort_by(valid_internal_transactions, &{&1.transaction_hash, &1.index})
+    ordered_changes_list =
+      valid_internal_transactions
+      |> Enum.map(fn internal_transaction ->
+        Map.put(internal_transaction, :trace_address, nil)
+      end)
+      |> Enum.sort_by(&{&1.transaction_index, &1.index})
 
     {:ok, internal_transactions} =
       Import.insert_changes_list(
         repo,
         ordered_changes_list,
-        conflict_target: [:block_hash, :block_index],
+        conflict_target: [:block_number, :transaction_index, :index],
         for: InternalTransaction,
         on_conflict: on_conflict,
         returning: true,
@@ -231,49 +279,43 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
       internal_transaction in InternalTransaction,
       update: [
         set: [
-          block_number: fragment("EXCLUDED.block_number"),
           call_type: fragment("EXCLUDED.call_type"),
-          created_contract_address_hash: fragment("EXCLUDED.created_contract_address_hash"),
+          call_type_enum: fragment("EXCLUDED.call_type_enum"),
+          created_contract_address_id: fragment("EXCLUDED.created_contract_address_id"),
           created_contract_code: fragment("EXCLUDED.created_contract_code"),
-          error: fragment("EXCLUDED.error"),
-          from_address_hash: fragment("EXCLUDED.from_address_hash"),
+          error_id: fragment("EXCLUDED.error_id"),
+          from_address_id: fragment("EXCLUDED.from_address_id"),
           gas: fragment("EXCLUDED.gas"),
           gas_used: fragment("EXCLUDED.gas_used"),
-          index: fragment("EXCLUDED.index"),
           init: fragment("EXCLUDED.init"),
           input: fragment("EXCLUDED.input"),
           output: fragment("EXCLUDED.output"),
-          to_address_hash: fragment("EXCLUDED.to_address_hash"),
-          trace_address: fragment("EXCLUDED.trace_address"),
-          transaction_hash: fragment("EXCLUDED.transaction_hash"),
-          transaction_index: fragment("EXCLUDED.transaction_index"),
+          to_address_id: fragment("EXCLUDED.to_address_id"),
           type: fragment("EXCLUDED.type"),
           value: fragment("EXCLUDED.value"),
           inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", internal_transaction.inserted_at),
           updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", internal_transaction.updated_at)
-          # Don't update `block_hash` as it is used for the conflict target
-          # Don't update `block_index` as it is used for the conflict target
+          # Don't update `block_number` as it is used for the conflict target
+          # Don't update `transaction_index` as it is used for the conflict target
+          # Don't update `index` as it is used for the conflict target
         ]
       ],
       # `IS DISTINCT FROM` is used because it allows `NULL` to be equal to itself
       where:
         fragment(
-          "(EXCLUDED.transaction_hash, EXCLUDED.index, EXCLUDED.call_type, EXCLUDED.created_contract_address_hash, EXCLUDED.created_contract_code, EXCLUDED.error, EXCLUDED.from_address_hash, EXCLUDED.gas, EXCLUDED.gas_used, EXCLUDED.init, EXCLUDED.input, EXCLUDED.output, EXCLUDED.to_address_hash, EXCLUDED.trace_address, EXCLUDED.transaction_index, EXCLUDED.type, EXCLUDED.value) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-          internal_transaction.transaction_hash,
-          internal_transaction.index,
+          "(EXCLUDED.call_type, EXCLUDED.call_type_enum, EXCLUDED.created_contract_address_id, EXCLUDED.created_contract_code, EXCLUDED.error_id, EXCLUDED.from_address_id, EXCLUDED.gas, EXCLUDED.gas_used, EXCLUDED.init, EXCLUDED.input, EXCLUDED.output, EXCLUDED.to_address_id, EXCLUDED.type, EXCLUDED.value) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
           internal_transaction.call_type,
-          internal_transaction.created_contract_address_hash,
+          internal_transaction.call_type_enum,
+          internal_transaction.created_contract_address_id,
           internal_transaction.created_contract_code,
-          internal_transaction.error,
-          internal_transaction.from_address_hash,
+          internal_transaction.error_id,
+          internal_transaction.from_address_id,
           internal_transaction.gas,
           internal_transaction.gas_used,
           internal_transaction.init,
           internal_transaction.input,
           internal_transaction.output,
-          internal_transaction.to_address_hash,
-          internal_transaction.trace_address,
-          internal_transaction.transaction_index,
+          internal_transaction.to_address_id,
           internal_transaction.type,
           internal_transaction.value
         )
@@ -288,50 +330,77 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
 
     query =
       from(
-        b in Block,
-        where: b.number in ^block_numbers and b.consensus,
-        select: b.hash,
+        block in Block,
+        where: block.number in ^block_numbers and block.consensus == true,
+        select: block.hash,
         # Enforce Block ShareLocks order (see docs: sharelocks.md)
-        order_by: [asc: b.hash],
-        lock: "FOR UPDATE"
+        order_by: [asc: block.hash],
+        lock: "FOR NO KEY UPDATE"
       )
 
     {:ok, repo.all(query)}
   end
 
-  defp acquire_pending_internal_txs(repo, block_hashes) do
-    query =
-      from(
-        pending_ops in PendingBlockOperation,
-        where: pending_ops.block_hash in ^block_hashes,
-        select: pending_ops.block_hash,
-        # Enforce PendingBlockOperation ShareLocks order (see docs: sharelocks.md)
-        order_by: [asc: pending_ops.block_hash],
-        lock: "FOR UPDATE"
-      )
+  defp acquire_pending_internal_transactions(repo, block_hashes, changes_list) do
+    case PendingOperationsHelper.pending_operations_type() do
+      "blocks" ->
+        query =
+          block_hashes
+          |> PendingOperationsHelper.block_hash_in_query()
+          |> select([pbo], pbo.block_hash)
+          |> order_by([pbo], asc: pbo.block_hash)
+          |> lock("FOR UPDATE")
 
-    {:ok, repo.all(query)}
+        {:ok, {:block_hashes, repo.all(query)}}
+
+      "transactions" ->
+        transaction_hashes =
+          changes_list
+          |> Enum.reject(&is_nil(Map.get(&1, :transaction_index)))
+          |> Enum.map(&{&1.block_number, &1.transaction_index})
+          |> Enum.uniq()
+          |> Transaction.by_block_number_index_query()
+          |> repo.all()
+          |> Enum.map(& &1.hash)
+
+        query =
+          from(
+            pending_ops in PendingTransactionOperation,
+            where: pending_ops.transaction_hash in ^transaction_hashes,
+            select: pending_ops.transaction_hash,
+            # Enforce PendingTransactionOperation ShareLocks order (see docs: sharelocks.md)
+            order_by: [asc: pending_ops.transaction_hash],
+            lock: "FOR UPDATE"
+          )
+
+        {:ok, {:transaction_hashes, repo.all(query)}}
+    end
   end
 
-  defp acquire_transactions(repo, pending_block_hashes) do
+  defp acquire_transactions(repo, pending_ops_hashes) do
+    dynamic_condition =
+      case pending_ops_hashes do
+        {:block_hashes, block_hashes} -> dynamic([t], t.block_hash in ^block_hashes)
+        {:transaction_hashes, transaction_hashes} -> dynamic([t], t.hash in ^transaction_hashes)
+      end
+
     query =
       from(
         t in Transaction,
-        where: t.block_hash in ^pending_block_hashes,
-        select: map(t, [:hash, :block_hash, :block_number, :cumulative_gas_used]),
+        where: ^dynamic_condition,
+        select: map(t, [:hash, :block_hash, :block_number, :cumulative_gas_used, :status, :index]),
         # Enforce Transaction ShareLocks order (see docs: sharelocks.md)
         order_by: [asc: t.hash],
-        lock: "FOR UPDATE"
+        lock: "FOR NO KEY UPDATE"
       )
 
     {:ok, repo.all(query)}
   end
 
   defp invalid_block_numbers(transactions, internal_transactions_params) do
-    # Finds all mistmatches between transactions and internal transactions
+    # Finds all mismatches between transactions and internal transactions
     # for a block number:
-    # - there are no internal txs for some transactions
-    # - there are internal txs with a different block number than their transactions
+    # - there are no internal transactions for some transactions
     # Returns block numbers where any of these issues is found
 
     # Note: the case "# - there are no transactions for some internal transactions" was removed because it caused the issue https://github.com/blockscout/blockscout/issues/3367
@@ -339,56 +408,116 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
     # common_tuples = MapSet.intersection(required_tuples, candidate_tuples) #should be added
     # |> MapSet.difference(internal_transactions_tuples) should be replaced with |> MapSet.difference(common_tuples)
 
-    transactions_tuples = MapSet.new(transactions, &{&1.hash, &1.block_number})
-
-    internal_transactions_tuples = MapSet.new(internal_transactions_params, &{&1.transaction_hash, &1.block_number})
-
-    all_tuples = MapSet.union(transactions_tuples, internal_transactions_tuples)
+    # Note: for zetachain or if empty traces are explicitly allowed,
+    # the case "# - there are no internal transactions for some transactions" is removed since
+    # there are may be non-traceable transactions
 
     invalid_block_numbers =
-      all_tuples
-      |> MapSet.difference(internal_transactions_tuples)
-      |> MapSet.new(fn {_hash, block_number} -> block_number end)
-      |> MapSet.to_list()
+      if allow_non_traceable_transactions?() do
+        []
+      else
+        transactions_tuples = MapSet.new(transactions, &{&1.index, &1.block_number})
+
+        internal_transactions_tuples =
+          MapSet.new(internal_transactions_params, &{&1.transaction_index, &1.block_number})
+
+        all_tuples = MapSet.union(transactions_tuples, internal_transactions_tuples)
+
+        all_tuples
+        |> MapSet.difference(internal_transactions_tuples)
+        |> MapSet.new(fn {_hash, block_number} -> block_number end)
+        |> MapSet.to_list()
+      end
 
     {:ok, invalid_block_numbers}
   end
 
+  defp allow_non_traceable_transactions? do
+    Application.get_env(:explorer, :chain_type) == :zetachain or
+      (Application.get_env(:explorer, :json_rpc_named_arguments)[:variant] == EthereumJSONRPC.Geth and
+         Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth)[:allow_empty_traces?])
+  end
+
   defp valid_internal_transactions(transactions, internal_transactions_params, invalid_block_numbers) do
-    if Enum.count(transactions) > 0 do
+    if Enum.empty?(transactions) do
+      {:ok, []}
+    else
       blocks_map = Map.new(transactions, &{&1.block_number, &1.block_hash})
 
-      valid_internal_txs =
+      valid_internal_transactions =
         internal_transactions_params
         |> Enum.group_by(& &1.block_number)
         |> Map.drop(invalid_block_numbers)
         |> Enum.flat_map(fn item ->
-          case item do
-            {block_number, entries} ->
-              if Map.has_key?(blocks_map, block_number) do
-                block_hash = Map.fetch!(blocks_map, block_number)
-
-                entries
-                |> Enum.sort_by(&{&1.transaction_hash, &1.index})
-                |> Enum.with_index()
-                |> Enum.map(fn {entry, index} ->
-                  entry
-                  |> Map.put(:block_hash, block_hash)
-                  |> Map.put(:block_index, index)
-                end)
-              else
-                []
-              end
-
-            _ ->
-              []
-          end
+          compose_entry_wrapper(item, blocks_map)
         end)
 
-      {:ok, valid_internal_txs}
-    else
-      {:ok, []}
+      {:ok, valid_internal_transactions}
     end
+  end
+
+  defp compose_entry_wrapper(item, blocks_map) do
+    case item do
+      {block_number, entries} ->
+        compose_entry(entries, block_number, blocks_map)
+
+      _ ->
+        []
+    end
+  end
+
+  defp compose_entry(entries, block_number, blocks_map) do
+    if Map.has_key?(blocks_map, block_number) do
+      entries
+    else
+      []
+    end
+  end
+
+  defp adjust_insert_params(internal_transactions_params) do
+    error_to_error_id_map =
+      internal_transactions_params
+      |> Enum.map(&sanitize_error/1)
+      |> Enum.map(&Map.get(&1, :error))
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> TransactionError.find_or_create_multiple()
+
+    address_hash_to_address_id_map =
+      internal_transactions_params
+      |> Enum.flat_map(fn params ->
+        params
+        |> Map.take([:from_address_hash, :to_address_hash, :created_contract_address_hash])
+        |> Map.values()
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> AddressIdToAddressHash.find_or_create_multiple()
+
+    Enum.map(internal_transactions_params, fn params ->
+      params
+      |> sanitize_error()
+      |> put_error_id(error_to_error_id_map)
+      |> put_address_ids(address_hash_to_address_id_map)
+      |> shift_created_contract_address_id()
+    end)
+  end
+
+  defp put_error_id(entry, error_to_error_id_map) do
+    entry
+    |> Map.delete(:error)
+    |> Map.put(:error_id, Map.get(entry, :error_id) || error_to_error_id_map[Map.get(entry, :error)])
+  end
+
+  defp put_address_ids(entry, address_hash_to_address_id_map) do
+    entry
+    |> Map.drop([:from_address_hash, :to_address_hash, :created_contract_address_hash])
+    |> Map.merge(%{
+      from_address_id: address_hash_to_address_id_map[String.downcase(to_string(entry[:from_address_hash]))],
+      to_address_id: address_hash_to_address_id_map[String.downcase(to_string(entry[:to_address_hash]))],
+      created_contract_address_id:
+        address_hash_to_address_id_map[String.downcase(to_string(entry[:created_contract_address_hash]))]
+    })
   end
 
   defp valid_internal_transactions_without_first_trace(valid_internal_transactions) do
@@ -409,48 +538,70 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
     end
   end
 
+  defp maybe_shrink_internal_transactions_params(internal_transactions) do
+    if Application.get_env(:explorer, :shrink_internal_transactions_enabled) do
+      shrunk_internal_transactions =
+        Enum.map(internal_transactions, fn it ->
+          it
+          |> Map.delete(:output)
+          |> Map.replace(:input, it[:input] && Map.put(it[:input], :bytes, binary_slice(it[:input].bytes, 0, 4)))
+        end)
+
+      {:ok, shrunk_internal_transactions}
+    else
+      {:ok, internal_transactions}
+    end
+  end
+
+  defp maybe_reject_zero_value(internal_transactions) do
+    with true <- Application.get_env(:explorer, DeleteZeroValueInternalTransactions)[:enabled],
+         border_number when is_integer(border_number) <- DeleteZeroValueInternalTransactions.border_number() do
+      Enum.reject(
+        internal_transactions,
+        &(Map.has_key?(&1, :type) and
+            (&1.block_number <= border_number and &1.type == :call and
+               (is_nil(Map.get(&1, :value)) || Decimal.eq?(&1.value.value, 0))))
+      )
+    else
+      _ -> internal_transactions
+    end
+  end
+
+  defp sanitize_error(entry) do
+    error = Map.get(entry, :error)
+
+    sanitized_error =
+      if is_binary(error) and not String.printable?(error) do
+        error
+        |> inspect(binaries: :as_strings)
+        |> String.trim("\"")
+      else
+        error
+      end
+
+    Map.put(entry, :error, sanitized_error)
+  end
+
+  # Shifts the `created_contract_address_id` value to `to_address_id` when applicable.
+
+  # This function handles the migration of contract creation data by copying the
+  # `created_contract_address_id` to `to_address_id` field when:
+  # - `created_contract_address_id` is present (not nil)
+  # - `to_address_id` is nil
+  @spec shift_created_contract_address_id(map()) :: map()
+  defp shift_created_contract_address_id(entry) do
+    case {Map.get(entry, :created_contract_address_id), Map.get(entry, :to_address_id)} do
+      {id, nil} when not is_nil(id) -> Map.put(entry, :to_address_id, id)
+      _ -> entry
+    end
+  end
+
   def defer_internal_transactions_primary_key(repo) do
     # Allows internal_transactions primary key to not be checked during the
     # DB transactions and instead be checked only at the end of it.
     # This allows us to use a more efficient upserting logic, while keeping the
     # uniqueness valid.
     SQL.query(repo, "SET CONSTRAINTS internal_transactions_pkey DEFERRED")
-  end
-
-  def remove_left_over_internal_transactions(repo, valid_internal_transactions) do
-    # Removes internal transactions that were part of a block before a refetch
-    # and have not been upserted with new ones (if any exist).
-
-    case valid_internal_transactions do
-      [] ->
-        {:ok, []}
-
-      _ ->
-        try do
-          delete_query_for_block_hash_block_index =
-            valid_internal_transactions
-            |> Enum.group_by(& &1.block_hash, & &1.block_index)
-            |> Enum.map(fn {block_hash, indexes} -> {block_hash, Enum.max(indexes)} end)
-            |> Enum.reduce(InternalTransaction, fn {block_hash, max_index}, acc ->
-              or_where(acc, [it], it.block_hash == ^block_hash and it.block_index > ^max_index)
-            end)
-
-          # removes old records with the same primary key (transaction hash, transaction index)
-          delete_query =
-            valid_internal_transactions
-            |> Enum.map(fn params -> {params.transaction_hash, params.index} end)
-            |> Enum.reduce(delete_query_for_block_hash_block_index, fn {transaction_hash, index}, acc ->
-              or_where(acc, [it], it.transaction_hash == ^transaction_hash and it.index == ^index)
-            end)
-
-          # ShareLocks order already enforced by `acquire_pending_internal_txs` (see docs: sharelocks.md)
-          {count, result} = repo.delete_all(delete_query, [])
-
-          {:ok, {count, result}}
-        rescue
-          postgrex_error in Postgrex.Error -> {:error, %{exception: postgrex_error}}
-        end
-    end
   end
 
   defp update_transactions(repo, valid_internal_transactions, transactions, %{
@@ -462,83 +613,59 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
     if valid_internal_transactions_count == 0 do
       {:ok, nil}
     else
+      block_number_index_to_hash_map = Map.new(transactions, &{{&1.block_number, &1.index}, &1.hash})
+
       params =
         valid_internal_transactions
-        |> Enum.filter(fn internal_tx ->
-          internal_tx[:index] == 0
+        |> Enum.filter(fn internal_transaction ->
+          internal_transaction[:index] == 0
         end)
         |> Enum.map(fn trace ->
           %{
-            block_hash: Map.get(trace, :block_hash),
             block_number: Map.get(trace, :block_number),
             gas_used: Map.get(trace, :gas_used),
-            transaction_hash: Map.get(trace, :transaction_hash),
-            created_contract_address_hash: Map.get(trace, :created_contract_address_hash),
-            error: Map.get(trace, :error),
-            status: if(is_nil(Map.get(trace, :error)), do: :ok, else: :error)
+            transaction_hash:
+              Map.fetch!(block_number_index_to_hash_map, {trace[:block_number], trace[:transaction_index]}),
+            created_contract_address_hash:
+              AddressIdToAddressHash.id_to_hash(Map.get(trace, :created_contract_address_id)),
+            error: TransactionError.id_to_error(Map.get(trace, :error_id)),
+            status: if(is_nil(Map.get(trace, :error_id)), do: :ok, else: :error)
           }
         end)
-        |> Enum.filter(fn transaction_hash -> transaction_hash != nil end)
 
       transaction_hashes =
         valid_internal_transactions
-        |> MapSet.new(& &1.transaction_hash)
+        |> MapSet.new(&{&1.block_number, &1.transaction_index})
         |> MapSet.to_list()
+        |> then(fn block_numbers_indexes -> Map.take(block_number_index_to_hash_map, block_numbers_indexes) end)
+        |> Map.values()
 
       json_rpc_named_arguments = Application.fetch_env!(:indexer, :json_rpc_named_arguments)
+
+      valid_internal_transactions_with_hashes =
+        Enum.map(valid_internal_transactions, fn it ->
+          transaction_hash = Map.fetch!(block_number_index_to_hash_map, {it[:block_number], it[:transaction_index]})
+          Map.put(it, :transaction_hash, transaction_hash)
+        end)
 
       result =
         Enum.reduce_while(params, 0, fn first_trace, transaction_hashes_iterator ->
           transaction_hash = Map.get(first_trace, :transaction_hash)
 
-          transaction_from_db =
-            transactions
-            |> Enum.find(fn transaction ->
-              transaction.hash == transaction_hash
-            end)
+          transaction_from_db = find_transaction(transactions, transaction_hash)
 
-          cond do
-            !transaction_from_db ->
-              transaction_receipt_from_node =
-                fetch_transaction_receipt_from_node(transaction_hash, json_rpc_named_arguments)
-
-              update_transactions_inner(
-                repo,
-                valid_internal_transactions,
-                transaction_hashes,
-                transaction_hashes_iterator,
-                timeout,
-                timestamps,
-                first_trace,
-                transaction_receipt_from_node
-              )
-
-            transaction_from_db && Map.get(transaction_from_db, :cumulative_gas_used) ->
-              update_transactions_inner(
-                repo,
-                valid_internal_transactions,
-                transaction_hashes,
-                transaction_hashes_iterator,
-                timeout,
-                timestamps,
-                first_trace
-              )
-
-            true ->
-              transaction_receipt_from_node =
-                fetch_transaction_receipt_from_node(transaction_hash, json_rpc_named_arguments)
-
-              update_transactions_inner(
-                repo,
-                valid_internal_transactions,
-                transaction_hashes,
-                transaction_hashes_iterator,
-                timeout,
-                timestamps,
-                first_trace,
-                transaction_receipt_from_node
-              )
-          end
+          update_transactions_inner_wrapper(
+            transaction_from_db,
+            repo,
+            valid_internal_transactions_with_hashes,
+            transaction_hash,
+            json_rpc_named_arguments,
+            transaction_hashes,
+            transaction_hashes_iterator,
+            timeout,
+            timestamps,
+            first_trace
+          )
         end)
 
       case result do
@@ -551,10 +678,77 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
     end
   end
 
-  defp get_trivial_tx_hashes_with_error_in_internal_tx(internal_transactions) do
+  defp find_transaction(transactions, transaction_hash) do
+    transactions
+    |> Enum.find(fn transaction ->
+      transaction.hash == transaction_hash
+    end)
+  end
+
+  # credo:disable-for-next-line
+  defp update_transactions_inner_wrapper(
+         transaction_from_db,
+         repo,
+         valid_internal_transactions,
+         transaction_hash,
+         json_rpc_named_arguments,
+         transaction_hashes,
+         transaction_hashes_iterator,
+         timeout,
+         timestamps,
+         first_trace
+       ) do
+    cond do
+      !transaction_from_db ->
+        transaction_receipt_from_node = fetch_transaction_receipt_from_node(transaction_hash, json_rpc_named_arguments)
+
+        update_transactions_inner(
+          repo,
+          valid_internal_transactions,
+          transaction_hashes,
+          transaction_hashes_iterator,
+          timeout,
+          timestamps,
+          first_trace,
+          transaction_from_db,
+          transaction_receipt_from_node
+        )
+
+      transaction_from_db && Map.get(transaction_from_db, :cumulative_gas_used) ->
+        update_transactions_inner(
+          repo,
+          valid_internal_transactions,
+          transaction_hashes,
+          transaction_hashes_iterator,
+          timeout,
+          timestamps,
+          first_trace,
+          transaction_from_db
+        )
+
+      true ->
+        transaction_receipt_from_node = fetch_transaction_receipt_from_node(transaction_hash, json_rpc_named_arguments)
+
+        update_transactions_inner(
+          repo,
+          valid_internal_transactions,
+          transaction_hashes,
+          transaction_hashes_iterator,
+          timeout,
+          timestamps,
+          first_trace,
+          transaction_from_db,
+          transaction_receipt_from_node
+        )
+    end
+  end
+
+  defp get_trivial_transaction_hashes_with_error_in_internal_transaction(internal_transactions) do
     internal_transactions
-    |> Enum.filter(fn internal_tx -> internal_tx[:index] != 0 && !is_nil(internal_tx[:error]) end)
-    |> Enum.map(fn internal_tx -> internal_tx[:transaction_hash] end)
+    |> Enum.filter(fn internal_transaction ->
+      internal_transaction[:index] != 0 && !is_nil(internal_transaction[:error_id])
+    end)
+    |> Enum.map(fn internal_transaction -> internal_transaction[:transaction_hash] end)
     |> MapSet.new()
   end
 
@@ -584,6 +778,7 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
     end
   end
 
+  # credo:disable-for-next-line
   defp update_transactions_inner(
          repo,
          valid_internal_transactions,
@@ -592,17 +787,21 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
          timeout,
          timestamps,
          first_trace,
+         transaction_from_db,
          transaction_receipt_from_node \\ nil
        ) do
     valid_internal_transactions_count = Enum.count(valid_internal_transactions)
-    txs_with_error_in_internal_txs = get_trivial_tx_hashes_with_error_in_internal_tx(valid_internal_transactions)
+
+    transactions_with_error_in_internal_transactions =
+      get_trivial_transaction_hashes_with_error_in_internal_transaction(valid_internal_transactions)
 
     set =
       generate_transaction_set_to_update(
         first_trace,
+        transaction_from_db,
         transaction_receipt_from_node,
         timestamps,
-        txs_with_error_in_internal_txs
+        transactions_with_error_in_internal_transactions
       )
 
     update_query =
@@ -633,20 +832,21 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
 
   def generate_transaction_set_to_update(
         first_trace,
+        transaction_from_db,
         transaction_receipt_from_node,
         timestamps,
-        txs_with_error_in_internal_txs
+        transactions_with_error_in_internal_transactions
       ) do
     default_set = [
       created_contract_address_hash: first_trace.created_contract_address_hash,
-      error: first_trace.error,
-      status: first_trace.status,
       updated_at: timestamps.updated_at
     ]
 
+    # we don't save reverted trace outputs, but if we did, we could also set :revert_reason here
     set =
       default_set
-      |> Keyword.put_new(:block_hash, first_trace.block_hash)
+      |> put_status_in_update_set(first_trace, transaction_from_db)
+      |> put_error_in_update_set(first_trace, transaction_from_db, transaction_receipt_from_node)
       |> Keyword.put_new(:block_number, first_trace.block_number)
       |> Keyword.put_new(:index, transaction_receipt_from_node && transaction_receipt_from_node.transaction_index)
       |> Keyword.put_new(
@@ -654,8 +854,11 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
         transaction_receipt_from_node && transaction_receipt_from_node.cumulative_gas_used
       )
       |> Keyword.put_new(
-        :has_error_in_internal_txs,
-        if(Enum.member?(txs_with_error_in_internal_txs, first_trace.transaction_hash), do: true, else: false)
+        :has_error_in_internal_transactions,
+        if(Enum.member?(transactions_with_error_in_internal_transactions, first_trace.transaction_hash),
+          do: true,
+          else: false
+        )
       )
 
     set_with_gas_used =
@@ -670,23 +873,40 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
     filtered_set
   end
 
-  defp remove_consensus_of_invalid_blocks(repo, invalid_block_numbers) do
-    minimal_block = EthereumJSONRPC.first_block_to_fetch(:trace_first_block)
+  defp put_status_in_update_set(update_set, first_trace, %{status: nil}),
+    do: Keyword.put_new(update_set, :status, first_trace.status)
 
-    if Enum.count(invalid_block_numbers) > 0 do
-      update_query =
+  defp put_status_in_update_set(update_set, _first_trace, _transaction_from_db), do: update_set
+
+  defp put_error_in_update_set(update_set, first_trace, _transaction_from_db, %{status: :error}),
+    do: Keyword.put_new(update_set, :error, first_trace.error)
+
+  defp put_error_in_update_set(update_set, first_trace, %{status: :error}, _transaction_receipt_from_node),
+    do: Keyword.put_new(update_set, :error, first_trace.error)
+
+  defp put_error_in_update_set(update_set, first_trace, _transaction_from_db, _transaction_receipt_from_node) do
+    case update_set[:status] do
+      :error -> Keyword.put_new(update_set, :error, first_trace.error)
+      _ -> update_set
+    end
+  end
+
+  defp set_refetch_needed_for_invalid_blocks(repo, invalid_block_numbers, %{updated_at: updated_at}) do
+    if Enum.empty?(invalid_block_numbers) do
+      {:ok, []}
+    else
+      update_block_query =
         from(
-          b in Block,
-          where: b.number in ^invalid_block_numbers and b.consensus,
-          where: b.number > ^minimal_block,
-          select: b.hash,
+          block in Block,
+          where: block.number in ^invalid_block_numbers and block.consensus == true,
+          where: ^traceable_blocks_dynamic_query(),
+          select: block.hash,
           # ShareLocks order already enforced by `acquire_blocks` (see docs: sharelocks.md)
-          update: [set: [consensus: false]]
+          update: [set: [refetch_needed: true, updated_at: ^updated_at]]
         )
 
       try do
-        {_num, result} = repo.update_all(update_query, [])
-
+        {_num, result} = repo.update_all(update_block_query, [])
         MissingBlockRange.add_ranges_by_block_numbers(invalid_block_numbers)
 
         Logger.debug(fn ->
@@ -702,32 +922,98 @@ defmodule Explorer.Chain.Import.Runner.InternalTransactions do
         postgrex_error in Postgrex.Error ->
           {:error, %{exception: postgrex_error, invalid_block_numbers: invalid_block_numbers}}
       end
-    else
-      {:ok, []}
     end
   end
 
   def update_pending_blocks_status(repo, pending_hashes, invalid_block_hashes) do
-    valid_block_hashes =
-      pending_hashes
-      |> MapSet.new()
-      |> MapSet.difference(MapSet.new(invalid_block_hashes))
-      |> MapSet.to_list()
-
     delete_query =
-      from(
-        pending_ops in PendingBlockOperation,
-        where: pending_ops.block_hash in ^valid_block_hashes
-      )
+      case pending_hashes do
+        {:block_hashes, block_hashes} ->
+          valid_block_hashes =
+            block_hashes
+            |> MapSet.new()
+            |> MapSet.difference(MapSet.new(invalid_block_hashes))
+            |> MapSet.to_list()
+
+          PendingOperationsHelper.block_hash_in_query(valid_block_hashes)
+
+        {:transaction_hashes, transaction_hashes} ->
+          from(
+            pending_ops in PendingTransactionOperation,
+            where: pending_ops.transaction_hash in ^transaction_hashes
+          )
+      end
 
     try do
-      # ShreLocks order already enforced by `acquire_pending_internal_txs` (see docs: sharelocks.md)
+      # ShareLocks order already enforced by `acquire_pending_internal_transactions` (see docs: sharelocks.md)
       {_count, deleted} = repo.delete_all(delete_query, [])
 
       {:ok, deleted}
     rescue
       postgrex_error in Postgrex.Error ->
-        {:error, %{exception: postgrex_error, pending_hashes: valid_block_hashes}}
+        {:error, %{exception: postgrex_error, pending_hashes: pending_hashes}}
+    end
+  end
+
+  defp empty_selfdestructed_contracts_bytecode(repo, valid_internal_transactions, timestamps) do
+    # Find all selfdestruct internal transactions
+    selfdestruct_addresses =
+      valid_internal_transactions
+      |> Enum.filter(&(&1.type == :selfdestruct))
+      |> Enum.map(&{&1.block_number, &1.transaction_index, &1.from_address_id})
+      |> MapSet.new()
+
+    # Find all create/create2 internal transactions in the same transactions
+    created_addresses =
+      valid_internal_transactions
+      |> Enum.filter(&(&1.type in [:create, :create2]))
+      |> Enum.map(&{&1.block_number, &1.transaction_index, Map.get(&1, :created_contract_address_id)})
+      |> Enum.reject(fn {_block_number, _tx_index, address_id} -> is_nil(address_id) end)
+      |> MapSet.new()
+
+    # Filter to find addresses that were selfdestructed but NOT created in the same transaction
+    addresses_to_empty =
+      selfdestruct_addresses
+      |> Enum.reject(fn {block_number, tx_index, address_id} ->
+        MapSet.member?(created_addresses, {block_number, tx_index, address_id})
+      end)
+      |> Enum.map(fn {_block_number, _tx_index, address_id} -> address_id end)
+      |> Enum.uniq()
+      |> AddressIdToAddressHash.ids_to_hashes()
+
+    if Enum.empty?(addresses_to_empty) do
+      {:ok, []}
+    else
+      # Update the addresses to have empty contract_code
+      empty_contract_code = %Explorer.Chain.Data{bytes: <<>>}
+
+      update_query =
+        from(
+          address in Address,
+          where: address.hash in ^addresses_to_empty,
+          update: [set: [contract_code: ^empty_contract_code, updated_at: ^timestamps.updated_at]]
+        )
+
+      {count, _} = repo.update_all(update_query, [])
+
+      Logger.info(
+        "Emptied contract_code for #{count} selfdestructed contracts: #{inspect(addresses_to_empty, limit: :infinity)}"
+      )
+
+      {:ok, count}
+    end
+  end
+
+  defp traceable_blocks_dynamic_query do
+    if RangesHelper.trace_ranges_present?() do
+      block_ranges = RangesHelper.get_trace_block_ranges()
+
+      Enum.reduce(block_ranges, dynamic([_], false), fn
+        _from.._to//_ = range, acc -> dynamic([block], ^acc or block.number in ^range)
+        num_to_latest, acc -> dynamic([block], ^acc or block.number >= ^num_to_latest)
+      end)
+    else
+      dynamic([_], true)
     end
   end
 end

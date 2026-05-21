@@ -3,7 +3,8 @@ defmodule Indexer.BufferedTaskTest do
 
   import Mox
 
-  alias Indexer.{BoundQueue, BufferedTask}
+  alias Explorer.BoundQueue
+  alias Indexer.BufferedTask
   alias Indexer.BufferedTaskTest.{RetryableTask, ShrinkableTask}
 
   @max_batch_size 2
@@ -28,7 +29,8 @@ defmodule Indexer.BufferedTaskTest do
           task_supervisor: BufferedTaskSup,
           flush_interval: @flush_interval,
           max_batch_size: max_batch_size,
-          max_concurrency: 2}
+          max_concurrency: 2,
+          poll: false}
        ]}
     )
   end
@@ -73,13 +75,13 @@ defmodule Indexer.BufferedTaskTest do
 
     refute_receive _
 
-    BufferedTask.buffer(buffer, ~w(12 13 14 15 16))
+    BufferedTask.buffer(buffer, ~w(12 13 14 15 16), false)
     assert_receive {:run, ~w(12 13)}, @assert_receive_timeout
     assert_receive {:run, ~w(14 15)}, @assert_receive_timeout
     assert_receive {:run, ~w(16)}, @assert_receive_timeout
     refute_receive _
 
-    BufferedTask.buffer(buffer, ~w(17))
+    BufferedTask.buffer(buffer, ~w(17), false)
     assert_receive {:run, ~w(17)}, @assert_receive_timeout
     refute_receive _
   end
@@ -89,7 +91,7 @@ defmodule Indexer.BufferedTaskTest do
     {:ok, buffer} = start_buffer(EmptyTask)
     refute_receive _
 
-    BufferedTask.buffer(buffer, ~w(some more entries))
+    BufferedTask.buffer(buffer, ~w(some more entries), false)
 
     assert_receive {:run, ~w(some more)}, @assert_receive_timeout
     assert_receive {:run, ~w(entries)}, @assert_receive_timeout
@@ -112,7 +114,7 @@ defmodule Indexer.BufferedTaskTest do
     Process.register(self(), RetryableTask)
     {:ok, buffer} = start_buffer(RetryableTask)
 
-    BufferedTask.buffer(buffer, [:boom])
+    BufferedTask.buffer(buffer, [:boom], false)
     assert_receive {:run, {0, [:boom]}}, @assert_receive_timeout
     assert_receive {:run, {1, [:boom]}}, @assert_receive_timeout
     refute_receive _
@@ -149,7 +151,7 @@ defmodule Indexer.BufferedTaskTest do
     Process.register(self(), RetryableTask)
     {:ok, buffer} = start_buffer(RetryableTask)
 
-    BufferedTask.buffer(buffer, [1, 2, 3])
+    BufferedTask.buffer(buffer, [1, 2, 3], false)
     assert_receive {:run, {0, [1, 2]}}, @assert_receive_timeout
     assert_receive {:run, {0, [3]}}, @assert_receive_timeout
     assert_receive {:run, {1, [1, 2]}}, @assert_receive_timeout
@@ -171,9 +173,9 @@ defmodule Indexer.BufferedTaskTest do
 
     assert %{buffer: 0, tasks: 0} = BufferedTask.debug_count(buffer)
 
-    BufferedTask.buffer(buffer, [{:sleep, 1_000}])
-    BufferedTask.buffer(buffer, [{:sleep, 1_000}])
-    BufferedTask.buffer(buffer, [{:sleep, 1_000}])
+    BufferedTask.buffer(buffer, [{:sleep, 1_000}], false)
+    BufferedTask.buffer(buffer, [{:sleep, 1_000}], false)
+    BufferedTask.buffer(buffer, [{:sleep, 1_000}], false)
     Process.sleep(200)
 
     assert %{buffer: buffer, tasks: tasks} = BufferedTask.debug_count(buffer)
@@ -186,6 +188,10 @@ defmodule Indexer.BufferedTaskTest do
       start_supervised!({Task.Supervisor, name: BufferedTaskSup})
 
       refute BoundQueue.shrunk?(bound_queue)
+
+      stub(ShrinkableTask, :run, fn _, _ ->
+        :ok
+      end)
 
       assert {:noreply, %BufferedTask{flush_timer: flush_timer}} =
                BufferedTask.handle_info(:flush, %BufferedTask{
@@ -210,6 +216,10 @@ defmodule Indexer.BufferedTaskTest do
       assert BoundQueue.shrunk?(bound_queue)
 
       start_supervised!({Task.Supervisor, name: BufferedTaskSup})
+
+      stub(ShrinkableTask, :run, fn _, _ ->
+        :ok
+      end)
 
       assert {:noreply, %BufferedTask{flush_timer: flush_timer}} =
                BufferedTask.handle_info(:flush, %BufferedTask{
@@ -242,7 +252,8 @@ defmodule Indexer.BufferedTaskTest do
                  flush_timer: nil,
                  task_supervisor: BufferedTaskSup,
                  max_batch_size: 1,
-                 max_concurrency: 1
+                 max_concurrency: 1,
+                 poll: false
                })
 
       refute flush_timer == nil
@@ -259,11 +270,6 @@ defmodule Indexer.BufferedTaskTest do
 
       start_supervised!({Task.Supervisor, name: BufferedTaskSup})
 
-      ShrinkableTask
-      |> expect(:init, fn initial, reducer, _ ->
-        Enum.reduce([2, 3, 4], initial, reducer)
-      end)
-
       assert {:noreply, %BufferedTask{flush_timer: flush_timer}} =
                BufferedTask.handle_info(:flush, %BufferedTask{
                  callback_module: ShrinkableTask,
@@ -278,14 +284,7 @@ defmodule Indexer.BufferedTaskTest do
 
       refute flush_timer == nil
 
-      assert_receive {:"$gen_call", from1, {:push_back, [2, 3]}}, @assert_receive_timeout
-
-      GenServer.reply(from1, :ok)
-
-      assert_receive {:"$gen_call", from2, {:push_back, [4]}}, @assert_receive_timeout
-
-      GenServer.reply(from2, :ok)
-
+      assert_receive :initial_stream, @assert_receive_timeout
       assert_receive :flush, @assert_receive_timeout
     end
   end

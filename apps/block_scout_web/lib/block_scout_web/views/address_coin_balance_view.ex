@@ -1,8 +1,9 @@
 defmodule BlockScoutWeb.AddressCoinBalanceView do
   use BlockScoutWeb, :view
 
-  alias BlockScoutWeb.AccessHelpers
+  alias BlockScoutWeb.AccessHelper
   alias Explorer.Chain.Wei
+  alias Explorer.SmartContract.Helper, as: SmartContractHelper
 
   def format(%Wei{} = value) do
     format_wei_value(value, :ether)

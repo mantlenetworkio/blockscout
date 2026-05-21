@@ -61,11 +61,12 @@ defmodule BlockScoutWeb.ViewingBlocksTest do
         :internal_transaction_create
         |> insert(
           transaction: transaction,
+          transaction_index: transaction.index,
           index: 0,
-          block_hash: transaction.block_hash,
-          block_index: 1
+          created_contract_code: contract_address.contract_code,
+          created_contract_address: contract_address,
+          block_number: transaction.block_number
         )
-        |> with_contract_creation(contract_address)
 
       session
       |> BlockPage.visit_page(block)
@@ -174,7 +175,8 @@ defmodule BlockScoutWeb.ViewingBlocksTest do
 
   describe "viewing reorg blocks list" do
     test "lists uncle blocks", %{session: session} do
-      [reorg | _] = insert_list(10, :block, consensus: false)
+      [reorg | _] = blocks = insert_list(10, :block, consensus: false)
+      Enum.each(blocks, fn b -> insert(:block, number: b.number, consensus: true) end)
 
       session
       |> BlockListPage.visit_reorgs_page()

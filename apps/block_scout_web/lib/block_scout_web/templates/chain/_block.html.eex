@@ -2,24 +2,26 @@
   <div class="tile tile-type-block n-p d-flex flex-column">
     <%= link(
           @block,
-          class: "tile-title tile-title-block-link",
+          class: "tile-title",
           to: block_path(BlockScoutWeb.Endpoint, :show, @block),
           "data-selector": "block-number"
         ) %>
-    <hr />
     <div class="tile-bottom-contents">
       <div class="tile-transactions">
         <span class="mr-2"><%= gettext("%{count} Transactions", count: Enum.count(@block.transactions)) %></span>
         <span class="text-nowrap" data-from-now="<%= @block.timestamp %>"> </span>
       </div>
-     <div class="text-truncate d-none">
-        <%= gettext "Miner" %>
-        <%= render BlockScoutWeb.AddressView,
-          "_link.html",
-          address: @block.miner,
-          contract: false,
-          use_custom_tooltip: false %>
-      </div>
+      <%= if !Application.get_env(:block_scout_web, :hide_block_miner) do %>
+        <div class="text-truncate">
+          <%= gettext "Miner" %>
+          <%= render BlockScoutWeb.AddressView,
+            "_link.html",
+            address: @block.miner,
+            contract: false,
+            use_custom_tooltip: false,
+            custom_classes_tooltip: ["miner-address-tooltip"] %>
+        </div>
+      <% end %>
       <%= if BlockScoutWeb.BlockView.show_reward?(@block.rewards) do %>
         <div class="text-truncate">
           <%= gettext "Reward" %> <%= BlockScoutWeb.BlockView.combined_rewards_value(@block) %>

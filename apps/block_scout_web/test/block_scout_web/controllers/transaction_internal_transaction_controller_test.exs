@@ -1,12 +1,10 @@
 defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
   use BlockScoutWeb.ConnCase
 
-  import Mox
-
-  import BlockScoutWeb.WebRouter.Helpers, only: [transaction_internal_transaction_path: 3]
+  import BlockScoutWeb.Routers.WebRouter.Helpers, only: [transaction_internal_transaction_path: 3]
 
   alias Explorer.Chain.InternalTransaction
-  alias Explorer.ExchangeRates.Token
+  alias Explorer.Market.Token
 
   describe "GET index/3" do
     test "with missing transaction", %{conn: conn} do
@@ -46,18 +44,14 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
         transaction: transaction,
         index: 0,
         block_number: transaction.block_number,
-        transaction_index: transaction.index,
-        block_hash: transaction.block_hash,
-        block_index: 0
+        transaction_index: transaction.index
       )
 
       insert(:internal_transaction,
         transaction: transaction,
         index: 1,
         transaction_index: transaction.index,
-        block_number: transaction.block_number,
-        block_hash: transaction.block_hash,
-        block_index: 1
+        block_number: transaction.block_number
       )
 
       path = transaction_internal_transaction_path(BlockScoutWeb.Endpoint, :index, transaction.hash)
@@ -75,11 +69,6 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
     end
 
     test "includes USD exchange rate value for address in assigns", %{conn: conn} do
-      EthereumJSONRPC.Mox
-      |> expect(:json_rpc, fn %{id: _id, method: "net_version", params: []}, _options ->
-        {:ok, "100"}
-      end)
-
       transaction = insert(:transaction)
 
       conn = get(conn, transaction_internal_transaction_path(BlockScoutWeb.Endpoint, :index, transaction.hash))
@@ -103,10 +92,9 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
           index: 0,
           block_number: transaction.block_number,
           transaction_index: transaction.index,
-          block_hash: transaction.block_hash,
-          block_index: 0
+          created_contract_code: contract_address.contract_code,
+          created_contract_address: contract_address
         )
-        |> with_contract_creation(contract_address)
 
       conn =
         get(
@@ -114,7 +102,7 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
           transaction_internal_transaction_path(
             BlockScoutWeb.Endpoint,
             :index,
-            internal_transaction.transaction_hash
+            internal_transaction.transaction.hash
           )
         )
 
@@ -132,9 +120,7 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
           transaction: transaction,
           index: 0,
           block_number: transaction.block_number,
-          transaction_index: transaction.index,
-          block_hash: transaction.block_hash,
-          block_index: 0
+          transaction_index: transaction.index
         )
 
       second_page_indexes =
@@ -144,9 +130,7 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
             transaction: transaction,
             index: index,
             block_number: transaction.block_number,
-            transaction_index: transaction.index,
-            block_hash: transaction.block_hash,
-            block_index: index
+            transaction_index: transaction.index
           )
         end)
         |> Enum.map(& &1.index)
@@ -179,9 +163,7 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
           transaction: transaction,
           index: index,
           block_number: transaction.block_number,
-          transaction_index: transaction.index,
-          block_hash: transaction.block_hash,
-          block_index: index
+          transaction_index: transaction.index
         )
       end)
 
@@ -210,9 +192,7 @@ defmodule BlockScoutWeb.TransactionInternalTransactionControllerTest do
           transaction: transaction,
           index: index,
           block_number: transaction.block_number,
-          transaction_index: transaction.index,
-          block_hash: transaction.block_hash,
-          block_index: index
+          transaction_index: transaction.index
         )
       end)
 

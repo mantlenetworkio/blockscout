@@ -45,6 +45,7 @@ export function reducer (state, action) {
 const elements = {
   '[data-selector="channel-disconnected-message"]': {
     render ($el, state) {
+      // @ts-ignore
       if (state.channelDisconnected && !window.loading) $el.show()
     }
   }
@@ -52,11 +53,13 @@ const elements = {
 
 if ($('[data-page="token-transfer-list"]')) {
   window.onbeforeunload = () => {
+    // @ts-ignore
     window.loading = true
   }
 
   const store = createAsyncLoadStore(reducer, initialState, 'dataset.identifierHash')
   const addressHash = $('[data-page="token-details"]')[0].dataset.pageAddressHash
+  // @ts-ignore
   const { blockNumber } = humps.camelizeKeys(URI(window.location).query(true))
 
   connectElements({ store, elements })
@@ -67,7 +70,7 @@ if ($('[data-page="token-transfer-list"]')) {
     beyondPageOne: !!blockNumber
   })
 
-  const tokensChannel = subscribeChannel(`tokens:${addressHash}`)
+  const tokensChannel = subscribeChannel(`tokens_old:${addressHash}`)
   tokensChannel.onError(() => store.dispatch({ type: 'CHANNEL_DISCONNECTED' }))
   tokensChannel.on('token_transfer', (msg) => {
     store.dispatch({
@@ -76,7 +79,7 @@ if ($('[data-page="token-transfer-list"]')) {
     })
   })
 
-  const rewardsChannel = subscribeChannel(`rewards:${addressHash}`)
+  const rewardsChannel = subscribeChannel(`rewards_old:${addressHash}`)
   rewardsChannel.onError(() => store.dispatch({ type: 'CHANNEL_DISCONNECTED' }))
   rewardsChannel.on('new_reward', (msg) => {
     store.dispatch({

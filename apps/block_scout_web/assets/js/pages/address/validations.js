@@ -39,6 +39,7 @@ export function reducer (state = initialState, action) {
 const elements = {
   '[data-selector="channel-disconnected-message"]': {
     render ($el, state) {
+      // @ts-ignore
       if (state.channelDisconnected && !window.loading) $el.show()
     }
   }
@@ -46,6 +47,7 @@ const elements = {
 
 if ($('[data-page="blocks-validated"]').length) {
   window.onbeforeunload = () => {
+    // @ts-ignore
     window.loading = true
   }
 
@@ -57,7 +59,7 @@ if ($('[data-page="blocks-validated"]').length) {
     addressHash
   })
 
-  const blocksChannel = socket.channel(`blocks:${addressHash}`, {})
+  const blocksChannel = socket.channel(`blocks_old:${addressHash}`, {})
   blocksChannel.join()
   blocksChannel.onError(() => store.dispatch({
     type: 'CHANNEL_DISCONNECTED'

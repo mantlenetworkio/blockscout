@@ -1,106 +1,121 @@
-name: Publish Docker image on every push to master branch
+name: Publish Docker image on every push to master/dev branches
 
 on:
   push:
     branches:
       - master
+      - dev
+    paths-ignore:
+      - 'CHANGELOG.md'
+      - '**/README.md'
+      - 'docker-compose/*'
 env:
-  OTP_VERSION: '24.3.4.1'
-  ELIXIR_VERSION: '1.13.4'
-  NEXT_RELEASE_VERSION: 5.0.1
+  OTP_VERSION: '27.3.4.6'
+  ELIXIR_VERSION: '1.19.4'
+  RELEASE_VERSION: 11.0.3
+
+permissions:
+  contents: read
+  packages: write
 
 jobs:
   push_to_registry:
-    name: Push Docker image to Docker Hub
-    runs-on: ubuntu-latest
-    outputs:
-      release-version: ${{ steps.output-step.outputs.release-version }}
-      short-sha: ${{ steps.output-step.outputs.short-sha }}
+    name: Push Docker image to GitHub Container Registry
+    runs-on: build
     steps:
-      - name: Check out the repo
-        uses: actions/checkout@v3
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v2
+      - uses: actions/checkout@v5
+      - name: Setup repo
+        uses: ./.github/actions/setup-repo
+        id: setup
         with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          docker-remote-multi-platform: true
+          docker-arm-host: ${{ secrets.ARM_RUNNER_HOSTNAME }}
+          docker-arm-host-key: ${{ secrets.ARM_RUNNER_KEY }}
 
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v4
-        with:
-          images: blockscout/blockscout
-
-      - name: Add SHORT_SHA env property with commit short sha
-        run: echo "SHORT_SHA=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
-
-      - name: Add outputs
-        run: |
-          echo "::set-output name=release-version::${{ env.NEXT_RELEASE_VERSION }}"
-          echo "::set-output name=short-sha::${{ env.SHORT_SHA }}"
-        id: output-step
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v3
+      - name: Build and push Docker image (indexer + API)
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./docker/Dockerfile
           push: true
-          cache-from: type=registry,ref=blockscout/blockscout:buildcache
-          cache-to: type=registry,ref=blockscout/blockscout:buildcache,mode=max
-          tags: blockscout/blockscout:latest, blockscout/blockscout:${{ env.NEXT_RELEASE_VERSION }}-prerelease-${{ env.SHORT_SHA }}
+          cache-from: type=registry,ref=ghcr.io/blockscout/blockscout-private:buildcache
+          cache-to: type=registry,ref=ghcr.io/blockscout/blockscout-private:buildcache,mode=max
+          tags: ghcr.io/blockscout/blockscout-private:${{ github.ref_name }}, ghcr.io/blockscout/blockscout-private:${{ env.RELEASE_VERSION }}.commit.${{ env.SHORT_SHA }}
+          labels: ${{ steps.setup.outputs.docker-labels }}
+          platforms: |
+            linux/amd64
+            linux/arm64/v8
           build-args: |
-            CACHE_EXCHANGE_RATES_PERIOD=
-            DISABLE_READ_API=false
-            API_PATH=
-            NETWORK_PATH=
-            DISABLE_WEBAPP=false
-            DISABLE_WRITE_API=false
-            CACHE_ENABLE_TOTAL_GAS_USAGE_COUNTER=
-            WOBSERVER_ENABLED=false
-            ADMIN_PANEL_ENABLED=false
-            CACHE_ADDRESS_WITH_BALANCES_UPDATE_INTERVAL=
-            DISABLE_BRIDGE_MARKET_CAP_UPDATER=false
-            CACHE_BRIDGE_MARKET_CAP_UPDATE_INTERVAL=
-            SOCKET_ROOT=
+            DECODE_NOT_A_CONTRACT_CALLS=false
+            MIXPANEL_URL=
+            MIXPANEL_TOKEN=
+            AMPLITUDE_URL=
+            AMPLITUDE_API_KEY=
+            BLOCKSCOUT_VERSION=v${{ env.RELEASE_VERSION }}.+commit.${{ env.SHORT_SHA }}
+            RELEASE_VERSION=${{ env.RELEASE_VERSION }}
+
+      - name: Build and push Docker image (indexer)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile
+          push: true
+          tags: ghcr.io/blockscout/blockscout-private:${{ env.RELEASE_VERSION }}.commit.${{ env.SHORT_SHA }}-indexer
+          labels: ${{ steps.setup.outputs.docker-labels }}
+          platforms: |
+            linux/amd64
+            linux/arm64/v8
+          build-args: |
+            DISABLE_API=true
+            DECODE_NOT_A_CONTRACT_CALLS=false
+            MIXPANEL_URL=
+            MIXPANEL_TOKEN=
+            AMPLITUDE_URL=
+            AMPLITUDE_API_KEY=
+            BLOCKSCOUT_VERSION=v${{ env.RELEASE_VERSION }}.+commit.${{ env.SHORT_SHA }}
+            RELEASE_VERSION=${{ env.RELEASE_VERSION }}
 
       - name: Build and push Docker image for frontend
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v6
         with:
           context: .
           file: ./docker/Dockerfile
           push: true
-          cache-from: type=registry,ref=blockscout/blockscout:buildcache
-          tags: blockscout/blockscout:frontend-main
+          cache-from: type=registry,ref=ghcr.io/blockscout/blockscout-private:buildcache
+          tags: ghcr.io/blockscout/blockscout-private:frontend-main
+          labels: ${{ steps.setup.outputs.docker-labels }}
+          platforms: |
+            linux/amd64
+            linux/arm64/v8
           build-args: |
-            CACHE_EXCHANGE_RATES_PERIOD=
-            DISABLE_READ_API=false
-            API_PATH=
-            NETWORK_PATH=
-            DISABLE_WEBAPP=false
-            DISABLE_WRITE_API=false
-            CACHE_ENABLE_TOTAL_GAS_USAGE_COUNTER=
-            WOBSERVER_ENABLED=false
-            ADMIN_PANEL_ENABLED=false
-            CACHE_ADDRESS_WITH_BALANCES_UPDATE_INTERVAL=
-            DISABLE_BRIDGE_MARKET_CAP_UPDATER=false
-            CACHE_BRIDGE_MARKET_CAP_UPDATE_INTERVAL=
-            SOCKET_ROOT=
-            SESSION_COOKIE_DOMAIN=${{ secrets.FRONTEND_MAIN }}
-  tests:
+            SESSION_COOKIE_DOMAIN=k8s-dev.blockscout.com
+            BLOCKSCOUT_VERSION=v${{ env.RELEASE_VERSION }}.+commit.${{ env.SHORT_SHA }}
+            RELEASE_VERSION=${{ env.RELEASE_VERSION }}
+  deploy_e2e:
     needs: push_to_registry
-    uses: blockscout/blockscout-ci-cd/.github/workflows/e2e_new.yaml@master
-    with:
-      blockscoutImage: blockscout/blockscout:${{ needs.push_to_registry.outputs.release-version }}-prerelease-${{ needs.push_to_registry.outputs.short-sha }}
-      blockscoutIngressHost: e2e-blockscout-$GITHUB_SHA_SHORT
-      frontendIngressHost: e2e-blockscout-$GITHUB_SHA_SHORT
-      gethIngressHost: e2e-geth-$GITHUB_SHA_SHORT
-      scVerifierIngressHost: e2e-sc-verifier-$GITHUB_SHA_SHORT
-    secrets: inherit
+    runs-on: ubuntu-latest
+    permissions: write-all
+    steps:
+      - name: Get Vault credentials
+        id: retrieve-vault-secrets
+        uses: hashicorp/vault-action@v2.4.1
+        with:
+          url: https://vault.k8s.blockscout.com
+          role: ci-dev
+          path: github-jwt
+          method: jwt
+          tlsSkipVerify: false
+          exportToken: true
+          secrets: |
+            ci/data/dev/github token | WORKFLOW_TRIGGER_TOKEN ;
+      - name: Trigger deploy
+        uses: convictional/trigger-workflow-and-wait@v1.6.1
+        with:
+          owner: blockscout
+          repo: deployment-values
+          github_token: ${{env.WORKFLOW_TRIGGER_TOKEN}}
+          workflow_file_name: deploy_blockscout.yaml
+          ref: main
+          wait_interval: 30
+          client_payload: '{ "instance": "dev", "globalEnv": "e2e"}'

@@ -3,7 +3,7 @@
 
   <div class="card">
     <%= render BlockScoutWeb.TransactionView, "_tabs.html", assigns %>
-    <div class="card-body txn-list-container" data-async-load data-async-listing="<%= @current_path %>">
+    <div class="card-body" data-async-load data-async-listing="<%= @current_path %>">
       <h2 class="card-title list-title-description"><%= gettext "Token Transfers" %></h2>
 
       <div class="list-top-pagination-container-wrapper">
@@ -14,40 +14,13 @@
           <span href="#" class="alert-link"><%= gettext("Something went wrong, click to reload.") %></span>
         </button>
 
-        <div class="table-tile-header txn-list-table-head-container">
-          <span style="width: 2%;">
-          &nbsp;
-          </span>
-          <span style="width: 20%;">
-            <%= gettext "Txn Hash" %>
-          </span>
-          <span style="width: 10%;">
-            <%= gettext "Txn Type" %>
-          </span>
-          <span style="width: 20%;">
-            <%= gettext "From" %>
-          </span>
-          <span style="width: 3%;">
-          &nbsp;
-          </span>
-          <span style="width: 20%;">
-            <%= gettext "To" %>
-          </span>
-          <span style="width: 10%;">
-            <%= gettext "Token" %>
-          </span>
-          <span style="width: 15%;">
-            <%= gettext "Amount" %>
-          </span>
-        </div>
-
         <div data-empty-response-message style="display: none;">
           <div class="tile tile-muted text-center" data-selector="empty-logs-list">
             <%= gettext "There are no token transfers for this transaction" %>
           </div>
         </div>
 
-        <div data-items class="table-list-page">
+        <div data-items>
           <%= render BlockScoutWeb.CommonComponentsView, "_tile-loader.html" %>
         </div>
 

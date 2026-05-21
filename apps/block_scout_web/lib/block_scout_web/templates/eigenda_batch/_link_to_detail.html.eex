@@ -1,3 +1,0 @@
-<%= link(
-    @da_hash,
-    to: eigenda_batch_path(BlockScoutWeb.Endpoint, :show, @da_hash)) %>

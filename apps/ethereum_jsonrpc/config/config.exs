@@ -6,7 +6,6 @@ config :ethereum_jsonrpc, EthereumJSONRPC.RequestCoordinator,
     duration: :timer.minutes(1),
     table: EthereumJSONRPC.RequestCoordinator.TimeoutCounter
   ],
-  wait_per_timeout: :timer.seconds(20),
   max_jitter: :timer.seconds(2)
 
 # Add this configuration to add global RPC request throttling.
@@ -23,12 +22,10 @@ config :ethereum_jsonrpc, EthereumJSONRPC.Tracer,
   trace_key: :blockscout
 
 config :logger, :ethereum_jsonrpc,
-  # keep synced with `config/config.exs`
-  format: "$dateT$time $metadata[$level] $message\n",
-  metadata:
-    ~w(application fetcher request_id first_block_number last_block_number missing_block_range_count missing_block_count
-       block_number step count error_count shrunk import_id transaction_id)a,
+  metadata: ConfigHelper.logger_metadata(),
   metadata_filter: [application: :ethereum_jsonrpc]
+
+config :tesla, adapter: Tesla.Adapter.Mint
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

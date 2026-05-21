@@ -5,17 +5,16 @@
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
 
-    <%= if System.get_env("REDIRECT_SEO_TO_MAINNET") do %>
-      <link rel="canonical" href="https://explorer.mantle.xyz/" />
-      <meta name="robots" content="noindex">
-    <% end %>
-
-    <%= case @view_module do %>
+    <%= case Phoenix.Controller.view_module(@conn) do %>
       <% Elixir.BlockScoutWeb.ChainView -> %>
         <link rel="stylesheet" href="<%= static_path(@conn, "/css/main-page.css") %>">
         <link rel="preload" href="<%= static_path(@conn, "/js/chain.js") %>" as="script">
         <link rel="preload" href="<%= static_path(@conn, "/js/chart-loader.js") %>" as="script">
         <link rel="preload" href="<%= static_path(@conn, "/js/token-transfers-toggle.js") %>" as="script">
+      <% Elixir.BlockScoutWeb.TransactionView -> %>
+        <link rel="stylesheet" href="<%= static_path(@conn, "/css/app.css") %>">
+        <link rel="stylesheet" href="<%= static_path(@conn, "/css/custom-scrollbar-styles.css") %>">
+        <link rel="preload" href="<%= static_path(@conn, "/js/custom-scrollbar.js") %>" as="script">
       <% _ -> %>
         <link rel="stylesheet" href="<%= static_path(@conn, "/css/app.css") %>">
     <% end %>
@@ -26,36 +25,21 @@
     <link rel="preload" href="<%= static_path(@conn, "/images/icons/fontawesome/bar-chart.svg") %>" as="image" crossorigin>
     <link rel="preload" href="<%= static_path(@conn, "/images/icons/fontawesome/info-circle.svg") %>" as="image" crossorigin>
     <link rel="preload" href="<%= static_path(@conn, "/images/icons/fontawesome/tag.svg") %>" as="image" crossorigin>
-    <link rel="preload" href="<%= static_path(@conn, "/images/icons/fontawesome/discord.svg") %>" as="image" crossorigin>
     <link rel="preload" href="<%= static_path(@conn, "/css/non-critical.css") %>" as="style" onload="this.onload=null;this.rel='stylesheet'">
     <link rel="stylesheet" href="<%= static_path(@conn, "/css/non-critical.css") %>">
-    <%= render_existing(@view_module, "styles.html", assigns) %>
+    <%= render_existing(Phoenix.Controller.view_module(@conn), "styles.html", assigns) %>
 
-    <link rel="apple-touch-icon" sizes="180x180" href="<%= static_path(@conn, "/images/apple-touch-icon.png") %>">
+    <link rel="apple-touch-icon" sizes="180x180" href="<%= static_path(@conn, "/apple-touch-icon.png") %>">
     <link rel="icon" type="image/png" sizes="32x32" href="<%= static_path(@conn, "/images/favicon-32x32.png") %>">
     <link rel="icon" type="image/png" sizes="16x16" href="<%= static_path(@conn, "/images/favicon-16x16.png") %>">
     <link rel="manifest" href="<%= static_path(@conn, "/manifest.webmanifest") %>">
     <link rel="mask-icon" href="<%= static_path(@conn, "/safari-pinned-tab.svg") %>" color="#5bbad5">
-    <link rel="shortcut icon" type='image/x-icon' href="<%= static_path(@conn, "/images/favicon.svg") %>">
+    <link rel="shortcut icon" type='image/x-icon' href="<%= static_path(@conn, "/images/favicon.ico") %>">
     <meta name="msapplication-TileColor" content="#7dd79f">
     <meta name="msapplication-config" content="<%= static_path(@conn, "/browserconfig.xml") %>">
     <meta name="theme-color" content="#ffffff">
 
-
-
-    <%= render_existing(@view_module, "_metatags.html", assigns) || render("_default_title.html") %>
-
-    <%= if  System.get_env("COOKIE3_SITE_ID") do %>
-      <script>
-          var cookie3Options = {"siteId":<%= System.get_env("COOKIE3_SITE_ID") %>,"additionalTracking":true,"cookielessEnabled":true}
-          window._paq = window._paq || [];
-          (function () {
-              var d = document, g = d.createElement('script'), s = d.getElementsByTagName('script')[0];
-              g.async = true; g.src = 'https://cdn.cookie3.co/scripts/analytics/latest/cookie3.analytics.min.js'; s.parentNode.insertBefore(g, s);
-          })();
-      </script>
-    <% end %>
-
+    <%= render_existing(Phoenix.Controller.view_module(@conn), "_metatags.html", assigns) || render("_default_title.html") %>
 
     <script defer data-cfasync="false">
       window.localized = {
@@ -66,262 +50,107 @@
         'Market Cap': '<%= gettext("Market Cap") %>',
         'Price': '<%= gettext("Price") %>',
         'Ether': '<%= Explorer.coin_name() %>',
-        'Tx/Day': '<%= gettext("Tx/Day") %>'
+        'Tx/day': '<%= gettext("Tx/day") %>'
       }
     </script>
-
   </head>
 
   <body>
-    <script defer data-cfasync="false">
-      function getCookie(name) {
-        const value = `; ${document.cookie}`;
-        const parts = value.split(`; ${name}=`);
-        if (parts.length === 2) return parts.pop().split(';').shift();
-      }
-
-      function applyDarkMode() {
-        if (getCookie('chakra-ui-color-mode') === "dark") {
-          document.body.className += " " + "dark-theme-applied";
-          document.body.style.backgroundColor = "#1c1d31";
-        }
-        setTimeout(function(){
-          if(window && window.location && window.location.pathname === '/'){
-            const ele = document.getElementById('navbar-container-bottom-line');
-            if(ele){
-              ele.style.display = 'block';
-            }
-          }
-        },10)
-
-      }
-      window.onload = applyDarkMode()
-    </script>
-    <script defer data-cfasync="false">
-      if (getCookie('chakra-ui-color-mode') === "dark") {
-        if (document.getElementById("top-navbar")) {
-          document.getElementById("top-navbar").style.backgroundColor = "#282945";
-        }
-        if (document.getElementById("navbar-logo")) {
-          document.getElementById("navbar-logo").style.filter = "brightness(0) invert(1)";
-        }
-        let modeChanger = document.getElementById("dark-mode-changer");
-        if (modeChanger) {
-          modeChanger.className += " " + "dark-mode-changer--dark";
-        }
-      }
-    </script>
-    <script defer data-cfasync="false">
-      if (getCookie('chakra-ui-color-mode') === "dark") {
-        const search = document.getElementById("main-search-autocomplete")
-        const searchMobile = document.getElementById("main-search-autocomplete-mobile")
-            if (search && search.style) {
-          search.style.backgroundColor = "rgba(255, 255, 255, 0.05)";
-              search.style.borderColor = "rgba(255, 255, 255, 0.05)";
-        }
-        if (searchMobile && searchMobile.style) {
-          searchMobile.style.backgroundColor = "rgba(255, 255, 255, 0.05)";
-          searchMobile.style.borderColor = "rgba(255, 255, 255, 0.05)";
-        }
-      }
-    </script>
-    <% raw_dark_forest_addresses_0_4 = CustomContractsHelpers.get_raw_custom_addresses_list(:dark_forest_addresses) || "" %>
-    <% raw_dark_forest_addresses_0_5 = CustomContractsHelpers.get_raw_custom_addresses_list(:dark_forest_addresses_v_0_5) || "" %>
-    <% raw_dark_forest_addresses_0_6 = CustomContractsHelpers.get_raw_custom_addresses_list(:dark_forest_addresses_v_0_6) || "" %>
-    <% raw_dark_forest_addresses_0_6_r2 = CustomContractsHelpers.get_raw_custom_addresses_list(:dark_forest_addresses_v_0_6_r2) || "" %>
-    <% raw_dark_forest_addresses = raw_dark_forest_addresses_0_4 %>
-    <% raw_dark_forest_addresses = if raw_dark_forest_addresses_0_5 !== "", do: raw_dark_forest_addresses <> "," <> raw_dark_forest_addresses_0_5, else: raw_dark_forest_addresses %>
-    <% raw_dark_forest_addresses = if raw_dark_forest_addresses_0_6 !== "", do: raw_dark_forest_addresses <> "," <> raw_dark_forest_addresses_0_6, else: raw_dark_forest_addresses %>
-    <% raw_dark_forest_addresses = if raw_dark_forest_addresses_0_6_r2 !== "", do: raw_dark_forest_addresses <> "," <> raw_dark_forest_addresses_0_6_r2, else: raw_dark_forest_addresses %>
-
-    <% raw_circles_addresses = CustomContractsHelpers.get_raw_custom_addresses_list(:circles_addresses) %>
-    <%= cond do %>
-      <% (
-        @view_module == Elixir.BlockScoutWeb.TransactionInternalTransactionView ||
-        @view_module == Elixir.BlockScoutWeb.TransactionLogView ||
-        @view_module == Elixir.BlockScoutWeb.TransactionRawTraceView ||
-        @view_module == Elixir.BlockScoutWeb.TransactionTokenTransferView ||
-        @view_module == Elixir.BlockScoutWeb.TransactionStateView
-      ) -> %>
-        <% to_address = @transaction && @transaction.to_address && "0x" <> Base.encode16(@transaction.to_address.hash.bytes, case: :lower) %>
-        <% {:ok, created_from_address} = if @transaction.to_address_hash, do: Chain.hash_to_address(@transaction.to_address_hash), else: {:ok, nil} %>
-        <% created_from_address_hash_str = if from_address_hash(created_from_address), do: "0x" <> Base.encode16(from_address_hash(created_from_address).bytes, case: :lower), else: nil %>
-        <script>
-          function applyCustomMode() {
-            applyCustomTheme("<%= raw_dark_forest_addresses %>", "dark-forest-theme-applied")
-            applyCustomTheme("<%= raw_circles_addresses %>", "circles-theme-applied")
-          }
-          function applyCustomTheme(contractAddressHashesRaw, customClass) {
-            if (contractAddressHashesRaw !== "") {
-              const contractAddressHashes = contractAddressHashesRaw.split(',').map(hash => hash.toLowerCase())
-              const to_address = "<%= to_address %>"
-              const created_from_address_hash_str = "<%= created_from_address_hash_str %>"
-
-              contractAddressHashes.forEach(contractAddressHash => {
-                if (contractAddressHash == to_address) {
-                  document.body.className += " " + customClass;
-                  return;
-                } else if (contractAddressHash == created_from_address_hash_str) {
-                  document.body.className += " " + customClass;
-                  return;
-                }
-              })
-            }
-
-          }
-
-          window.onload = applyCustomMode()
-        </script>
-      <% (
-        @view_module == Elixir.BlockScoutWeb.AddressTransactionView ||
-        @view_module == Elixir.BlockScoutWeb.AddressTokenTransferView ||
-        @view_module == Elixir.BlockScoutWeb.AddressTokenView ||
-        @view_module == Elixir.BlockScoutWeb.AddressInternalTransactionView ||
-        @view_module == Elixir.BlockScoutWeb.AddressCoinBalanceView ||
-        @view_module == Elixir.BlockScoutWeb.AddressLogsView ||
-        @view_module == Elixir.BlockScoutWeb.AddressValidationView ||
-        @view_module == Elixir.BlockScoutWeb.AddressContractView ||
-        @view_module == Elixir.BlockScoutWeb.AddressReadContractView ||
-        @view_module == Elixir.BlockScoutWeb.AddressReadProxyView ||
-        @view_module == Elixir.BlockScoutWeb.AddressWriteContractView ||
-        @view_module == Elixir.BlockScoutWeb.AddressWriteProxyView
-      ) -> %>
-        <% created_from_address = if @address && from_address_hash(@address), do: "0x" <> Base.encode16(from_address_hash(@address).bytes, case: :lower), else: nil %>
-        <script>
-          function applyCustomMode() {
-            applyCustomTheme("<%= raw_dark_forest_addresses %>", "dark-forest-theme-applied")
-            applyCustomTheme("<%= raw_circles_addresses %>", "circles-theme-applied")
-          }
-          function applyCustomTheme(contractAddressHashesRaw, customClass) {
-            if (contractAddressHashesRaw !== "") {
-              const contractAddressHashes = contractAddressHashesRaw.split(',').map(hash => hash.toLowerCase())
-              const created_from_address = "<%= created_from_address %>"
-              contractAddressHashes.forEach(contractAddressHash => {
-                if (window.location.pathname.toLowerCase().includes(contractAddressHash)) {
-                  document.body.className += " " + customClass;
-                  return;
-                } else if (contractAddressHash == created_from_address) {
-                  document.body.className += " " + customClass;
-                  return;
-                }
-              })
-            }
-          }
-
-          window.onload = applyCustomMode()
-        </script>
-      <% (
-        @view_module == Elixir.BlockScoutWeb.Tokens.TransferView ||
-        @view_module == Elixir.BlockScoutWeb.Tokens.ReadContractView ||
-        @view_module == Elixir.BlockScoutWeb.Tokens.HolderView ||
-        @view_module == Elixir.BlockScoutWeb.Tokens.Instance.TransferView ||
-        @view_module == Elixir.BlockScoutWeb.Tokens.Instance.MetadataView ||
-        @view_module == Elixir.BlockScoutWeb.PageNotFoundView
-      ) -> %>
-        <% {:ok, created_from_address} = if @token && @token.contract_address_hash, do: Chain.hash_to_address(@token.contract_address_hash), else: {:ok, nil} %>
-        <% created_from_address_hash = if from_address_hash(created_from_address), do: "0x" <> Base.encode16(from_address_hash(created_from_address).bytes, case: :lower), else: nil %>
-        <script>
-          function applyCustomMode() {
-            applyCustomTheme("<%= raw_dark_forest_addresses %>", "dark-forest-theme-applied")
-            applyCustomTheme("<%= raw_circles_addresses %>", "circles-theme-applied")
-          }
-          function applyCustomTheme(contractAddressHashesRaw, customClass) {
-            if (contractAddressHashesRaw !== "") {
-              const contractAddressHashes = contractAddressHashesRaw.split(',').map(hash => hash.toLowerCase())
-              const created_from_address_hash = "<%= created_from_address_hash %>"
-              contractAddressHashes.forEach(contractAddressHash => {
-                if (window.location.pathname.toLowerCase().includes(contractAddressHash)) {
-                  document.body.className += " " + customClass;
-                  return;
-                } else if (contractAddressHash == created_from_address_hash) {
-                  document.body.className += " " + customClass;
-                  return;
-                }
-              })
-            }
-          }
-
-          window.onload = applyCustomMode()
-        </script>
-      <% true -> %>
-        <%= nil %>
-    <% end %>
     <div class="layout-container">
+      <!-- Block for passing backend runtime env variables to frontend -->
+      <div id="permanent-dark-mode" class="d-none" ><%= Application.get_env(:block_scout_web, :permanent_dark_mode_enabled) %></div>
+      <div id="permanent-light-mode" class="d-none" ><%= Application.get_env(:block_scout_web, :permanent_light_mode_enabled) %></div>
+      <div id="indexer-first-block" class="d-none" ><%= Application.get_env(:indexer, :first_block) %></div>
+      <input id="js-chain-id" class="d-none" value="<%= Application.get_env(:block_scout_web, :chain_id) %>" />
+      <input id="js-json-rpc" class="d-none" value="<%= Application.get_env(:block_scout_web, :json_rpc) %>" />
+      <input id="js-coin-name" class="d-none" value="<%= Application.get_env(:explorer, :coin_name) %>" />
+      <input id="js-re-captcha-client-key" class="d-none" value="<%= Application.get_env(:block_scout_web, :recaptcha)[:v2_client_key] %>" />
+      <input id="js-re-captcha-v3-client-key" class="d-none" value="<%= Application.get_env(:block_scout_web, :recaptcha)[:v3_client_key] %>" />
+      <input id="js-re-captcha-disabled" class="d-none" value="<%= Application.get_env(:block_scout_web, :recaptcha)[:is_disabled] %>" />
+      <input id="js-network-path" class="d-none" value="<%= Application.get_env(:block_scout_web, BlockScoutWeb.Endpoint)[:url][:path] %>" />
+      <!-- -->
+      <div class="alert alert-warning text-center mb-0 p-3">
+          <%= raw("The new Blockscout UI is now open source! Learn how to <a href='https://docs.blockscout.com/for-developers/deployment/frontend-migration' target='_blank'>deploy it here</a>") %>
+      </div>
       <% show_maintenance_alert = Application.get_env(:block_scout_web, BlockScoutWeb.Chain)[:show_maintenance_alert] %>
       <%= if show_maintenance_alert do %>
-        <div class="alert alert-warning text-center mb-0 p-3" data-selector="indexed-status">
+        <div class="alert alert-warning text-center mb-0 p-3">
           <%= raw(System.get_env("MAINTENANCE_ALERT_MESSAGE")) %>
         </div>
       <% end %>
-      <% indexed_ratio_blocks = Explorer.Chain.indexed_ratio_blocks() %>
-      <% indexed_ratio =
-      case Chain.finished_blocks_indexing?(indexed_ratio_blocks) do
-       false -> indexed_ratio_blocks
-       _ -> Explorer.Chain.indexed_ratio_internal_transactions()
-      end %>
-      <%= render BlockScoutWeb.LayoutView, "_topnav.html", current_user: Conn.get_session(@conn, :current_user), conn: @conn %>
-
+      <% hide_indexing_progress_alert = Application.get_env(:indexer, :hide_indexing_progress_alert) %>
+      <%= unless hide_indexing_progress_alert do %>
+        <% indexed_ratio_blocks = Chain.indexed_ratio_blocks() %>
+        <% indexed_ratio =
+        case Chain.finished_indexing_from_ratio?(indexed_ratio_blocks) do
+        false -> indexed_ratio_blocks
+        _ -> Chain.indexed_ratio_internal_transactions()
+        end %>
+        <%= if not Chain.finished_indexing_from_ratio?(indexed_ratio) do %>
+          <div class="alert alert-warning text-center mb-0 p-3" data-seindexed_ratiolector="indexed-status">
+            <%= render BlockScoutWeb.CommonComponentsView, "_loading_spinner.html" %>
+            <span data-indexed-ratio-blocks="<%= indexed_ratio_blocks %>" data-indexed-ratio="<%= indexed_ratio %>"></span>
+            <%= gettext("- We're indexing this chain right now. Some of the counts may be inaccurate.") %>
+          </div>
+        <% end %>
+      <% end %>
+      <% session = Explorer.Account.enabled?() && Map.get(@conn.private, :plug_session) && Plug.Conn.get_session(@conn, :current_user) %>
+      <%= render BlockScoutWeb.LayoutView, "_topnav.html", current_user: session, conn: @conn %>
+      <%= if session && !session[:email_verified] do %>
+        <p class="alert alert-warning" role="alert" style="margin-bottom: 0"><%= gettext("Please confirm your email address to use the My Account feature.") %> <%= gettext("A confirmation email was sent to") %> <a href="mailto:<%= session[:email] %>"><%=session[:email] %></a> <%= gettext "on sign up. Didn’t receive?" %> <a href="/api/account/v2/email/resend" class="ajax"><%= gettext "Resend verification email" %></a>.</p>
+      <% else %>
+        <p class="alert alert-info" role="alert"><%= Map.get(@conn.private, :phoenix_flash) && Phoenix.Controller.get_flash(@conn, :info) %></p>
+      <% end %>
+      <p class="alert alert-danger" role="alert"><%= Map.get(@conn.private, :phoenix_flash) && Phoenix.Controller.get_flash(@conn, :error) %></p>
       <main class="js-ad-dependant-pt pt-5">
-        <p class="alert alert-info" role="alert"><%= get_flash(@conn, :info) %></p>
-        <p class="alert alert-danger" role="alert"><%= get_flash(@conn, :error) %></p>
         <%= @inner_content %>
       </main>
       <%= render BlockScoutWeb.LayoutView, "_footer.html", assigns %>
     </div>
     <%= if (
-      @view_module != Elixir.BlockScoutWeb.ChainView &&
-      @view_module != Elixir.BlockScoutWeb.BlockView &&
-      @view_module != Elixir.BlockScoutWeb.BlockTransactionView &&
-      @view_module != Elixir.BlockScoutWeb.AddressView &&
-      @view_module != Elixir.BlockScoutWeb.TokensView &&
-      @view_module != Elixir.BlockScoutWeb.TransactionView &&
-      @view_module != Elixir.BlockScoutWeb.StateBatchTransactionView &&
-      @view_module != Elixir.BlockScoutWeb.TxnBatchView &&
-      @view_module != Elixir.BlockScoutWeb.EigendaBatchView &&
-      @view_module != Elixir.BlockScoutWeb.DaBatchTransactionView &&
-      @view_module != Elixir.BlockScoutWeb.StateBatchView &&
-      @view_module != Elixir.BlockScoutWeb.StateBatchView &&
-      @view_module != Elixir.BlockScoutWeb.L2ToL1TxnView &&
-      @view_module != Elixir.BlockScoutWeb.L1ToL2TxnView &&
-      @view_module != Elixir.BlockScoutWeb.PendingTransactionView &&
-      @view_module != Elixir.BlockScoutWeb.TransactionInternalTransactionView &&
-      @view_module != Elixir.BlockScoutWeb.TransactionLogView &&
-      @view_module != Elixir.BlockScoutWeb.TransactionRawTraceView &&
-      @view_module != Elixir.BlockScoutWeb.TransactionTokenTransferView &&
-      @view_module != Elixir.BlockScoutWeb.TransactionStateView &&
-      @view_module != Elixir.BlockScoutWeb.AddressTransactionView &&
-      @view_module != Elixir.BlockScoutWeb.AddressTokenTransferView &&
-      @view_module != Elixir.BlockScoutWeb.AddressTokenView &&
-      @view_module != Elixir.BlockScoutWeb.AddressInternalTransactionView &&
-      @view_module != Elixir.BlockScoutWeb.AddressDepositView &&
-      @view_module != Elixir.BlockScoutWeb.AddressWithdrawView &&
-      @view_module != Elixir.BlockScoutWeb.AddressCoinBalanceView &&
-      @view_module != Elixir.BlockScoutWeb.AddressLogsView &&
-      @view_module != Elixir.BlockScoutWeb.AddressValidationView &&
-      @view_module != Elixir.BlockScoutWeb.AddressContractView &&
-      @view_module != Elixir.BlockScoutWeb.AddressContractVerificationView &&
-      @view_module != Elixir.BlockScoutWeb.AddressContractVerificationViaJsonView &&
-      @view_module != Elixir.BlockScoutWeb.AddressContractVerificationViaFlattenedCodeView &&
-      @view_module != Elixir.BlockScoutWeb.AddressContractVerificationVyperView &&
-      @view_module != Elixir.BlockScoutWeb.AddressReadContractView &&
-      @view_module != Elixir.BlockScoutWeb.AddressReadProxyView &&
-      @view_module != Elixir.BlockScoutWeb.AddressWriteContractView &&
-      @view_module != Elixir.BlockScoutWeb.AddressWriteProxyView &&
-      @view_module != Elixir.BlockScoutWeb.Tokens.TransferView &&
-      @view_module != Elixir.BlockScoutWeb.Tokens.ContractView &&
-      @view_module != Elixir.BlockScoutWeb.Tokens.HolderView &&
-      @view_module != Elixir.BlockScoutWeb.Tokens.InventoryView &&
-      @view_module != Elixir.BlockScoutWeb.Tokens.InstanceView &&
-      @view_module != Elixir.BlockScoutWeb.Tokens.Instance.MetadataView &&
-      @view_module != Elixir.BlockScoutWeb.Tokens.Instance.OverviewView &&
-      @view_module != Elixir.BlockScoutWeb.Tokens.Instance.TransferView &&
-      @view_module != Elixir.BlockScoutWeb.VerifiedContractsView &&
-      @view_module != Elixir.BlockScoutWeb.APIDocsView &&
-      @view_module != Elixir.BlockScoutWeb.Admin.DashboardView &&
-      @view_module != Elixir.BlockScoutWeb.SearchView &&
-      @view_module != Elixir.BlockScoutWeb.AddressContractVerificationViaStandardJsonInputView &&
-      @view_module != Elixir.BlockScoutWeb.AddressContractVerificationViaMultiPartFilesView &&
-      @view_module != Elixir.BlockScoutWeb.StakesView
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.ChainView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.BlockView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.BlockTransactionView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.BlockWithdrawalView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.TokensView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.TransactionView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.PendingTransactionView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.TransactionInternalTransactionView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.TransactionLogView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.TransactionRawTraceView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.TransactionTokenTransferView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.TransactionStateView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressTransactionView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressTokenTransferView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressTokenView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressWithdrawalView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressInternalTransactionView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressCoinBalanceView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressLogsView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressValidationView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressContractView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressContractVerificationView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressContractVerificationViaFlattenedCodeView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressContractVerificationVyperView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressReadContractView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressReadProxyView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressWriteContractView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.AddressWriteProxyView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.Tokens.TransferView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.Tokens.ContractView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.Tokens.HolderView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.Tokens.InventoryView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.Tokens.InstanceView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.Tokens.Instance.MetadataView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.Tokens.Instance.OverviewView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.Tokens.Instance.TransferView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.VerifiedContractsView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.APIDocsView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.Admin.DashboardView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.SearchView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.StakesView &&
+      Phoenix.Controller.view_module(@conn) != Elixir.BlockScoutWeb.WithdrawalView
     ) do %>
       <script defer data-cfasync="false" src="<%= static_path(@conn, "/js/app.js") %>"></script>
     <% end %>
@@ -330,29 +159,23 @@
         render BlockScoutWeb.CommonComponentsView, "_modal_status.html", status: status
       end
     %>
-
-
-    <button class="scroll-top-btn">
-      <svg width="44" height="44" viewBox="0 0 44 44" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M30 22L22.7071 14.7071C22.3166 14.3166 21.6834 14.3166 21.2929 14.7071L14 22" stroke="#4F8F8B" stroke-width="3" stroke-linecap="round"/>
-        <path d="M22 15V31" stroke="#4F8F8B" stroke-width="3" stroke-linecap="round"/>
-      </svg>
-    </button>
-
-
-    <%= render_existing(@view_module, "scripts.html", assigns) %>
-    <%= if @view_module == Elixir.BlockScoutWeb.ChainView do %>
+    <%= render_existing(Phoenix.Controller.view_module(@conn), "scripts.html", assigns) %>
+    <%= if Phoenix.Controller.view_module(@conn) == Elixir.BlockScoutWeb.ChainView do %>
       <script defer data-cfasync="false" src="<%= static_path(@conn, "/js/chain.js") %>"></script>
       <script defer data-cfasync="false" src="<%= static_path(@conn, "/js/chart-loader.js") %>"></script>
       <script defer data-cfasync="false" src="<%= static_path(@conn, "/js/token-transfers-toggle.js") %>"></script>
     <% end %>
+    <%= if Phoenix.Controller.view_module(@conn) == Elixir.BlockScoutWeb.TransactionView do %>
+      <script defer data-cfasync="false" src="<%= static_path(@conn, "/js/custom-scrollbar.js") %>"></script>
+    <% end %>
     <script defer src="<%= static_path(@conn, "/js/autocomplete.js") %>"></script>
-    <%= if @view_module in [Elixir.BlockScoutWeb.AddressContractVerificationView, Elixir.BlockScoutWeb.AddressContractVerificationVyperView, Elixir.BlockScoutWeb.AddressContractVerificationViaFlattenedCodeView] do %>
+    <%= if Phoenix.Controller.view_module(@conn) in [Elixir.BlockScoutWeb.AddressContractVerificationView, Elixir.BlockScoutWeb.AddressContractVerificationVyperView, Elixir.BlockScoutWeb.AddressContractVerificationViaFlattenedCodeView] do %>
       <script defer data-cfasync="false" src="<%= static_path(@conn, "/js/verification-form.js") %>"></script>
     <% end %>
-    <%= if @view_module in [Elixir.BlockScoutWeb.AddressContractVerificationViaMultiPartFilesView, Elixir.BlockScoutWeb.AddressContractVerificationViaJsonView, Elixir.BlockScoutWeb.AddressContractVerificationViaStandardJsonInputView] do %>
+    <%= if Phoenix.Controller.view_module(@conn) in [Elixir.BlockScoutWeb.AddressContractVerificationViaMultiPartFilesView, Elixir.BlockScoutWeb.AddressContractVerificationViaJsonView, Elixir.BlockScoutWeb.AddressContractVerificationViaStandardJsonInputView] do %>
       <script defer data-cfasync="false" src="<%= static_path(@conn, "/js/verification-form.js") %>"></script>
       <script defer data-cfasync="false" src="<%= static_path(@conn, "/js/dropzone.js") %>"></script>
     <% end %>
+    <script defer data-cfasync="false" src="<%= static_path(@conn, "/js/app_extra.js") %>"></script>
   </body>
 </html>

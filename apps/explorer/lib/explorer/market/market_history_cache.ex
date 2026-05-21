@@ -5,7 +5,7 @@ defmodule Explorer.Market.MarketHistoryCache do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Explorer.Counters.Helper
+  alias Explorer.Chain.Cache.Counters.Helper
   alias Explorer.Market.MarketHistory
   alias Explorer.Repo
 
@@ -15,12 +15,15 @@ defmodule Explorer.Market.MarketHistoryCache do
   # 6 hours
   @recent_days 30
 
-  def fetch do
-    if cache_expired?() do
+  def fetch(secondary_coin? \\ false) do
+    @last_update_key
+    |> cache_expired?()
+    |> if do
       update_cache()
     else
       fetch_from_cache(@history_key)
     end
+    |> Enum.filter(&(&1.secondary_coin == secondary_coin?))
   end
 
   def cache_name, do: @cache_name
@@ -31,9 +34,9 @@ defmodule Explorer.Market.MarketHistoryCache do
 
   def recent_days_count, do: @recent_days
 
-  defp cache_expired? do
-    cache_period = market_history_cache_period()
-    updated_at = fetch_from_cache(@last_update_key)
+  defp cache_expired?(key) do
+    cache_period = Application.get_env(:explorer, __MODULE__)[:cache_period]
+    updated_at = fetch_from_cache(key)
 
     cond do
       is_nil(updated_at) -> true
@@ -70,9 +73,5 @@ defmodule Explorer.Market.MarketHistoryCache do
 
   defp put_into_cache(key, value) do
     ConCache.put(@cache_name, key, value)
-  end
-
-  defp market_history_cache_period do
-    Helper.cache_period("CACHE_MARKET_HISTORY_PERIOD", 6)
   end
 end

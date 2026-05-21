@@ -7,7 +7,7 @@ defmodule Indexer.Fetcher.PendingBlockOperationsSanitizer do
 
   import Ecto.Query
 
-  alias Explorer.Chain.PendingBlockOperation
+  alias Explorer.Chain.{PendingBlockOperation, Transaction}
   alias Explorer.Repo
   alias Indexer.Fetcher.InternalTransaction
 
@@ -53,14 +53,16 @@ defmodule Indexer.Fetcher.PendingBlockOperationsSanitizer do
 
     {_, block_numbers} =
       PendingBlockOperation
-      |> with_cte("cte", as: ^cte_query)
+      |> with_cte("cte", as: ^cte_query, materialized: false)
       |> join(:inner, [pbo], po in "cte", on: pbo.block_hash == po.block_hash)
       |> join(:inner, [pbo, po], b in assoc(pbo, :block))
       |> select([pbo, po, b], b.number)
       |> update([pbo, po, b], set: [block_number: b.number])
       |> Repo.update_all([], timeout: @timeout)
 
-    InternalTransaction.async_fetch(block_numbers)
+    transactions = Transaction.get_transactions_of_block_numbers(block_numbers)
+
+    InternalTransaction.async_fetch(block_numbers, transactions, false)
 
     block_numbers
   end

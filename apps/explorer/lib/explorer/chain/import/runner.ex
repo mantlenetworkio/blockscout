@@ -12,7 +12,7 @@ defmodule Explorer.Chain.Import.Runner do
 
   @typedoc """
   Validated changes extracted from a valid `Ecto.Changeset` produced by the `t:changeset_function_name/0` in
-  `c:ecto_schemma_module/0`.
+  `c:ecto_schema_module/0`.
   """
   @type changes :: %{optional(atom) => term()}
 
@@ -22,7 +22,7 @@ defmodule Explorer.Chain.Import.Runner do
   @type changes_list :: [changes]
 
   @type changeset_function_name :: atom
-  @type on_conflict :: :nothing | :replace_all | Ecto.Query.t()
+  @type on_conflict :: :nothing | :replace_all | {:replace, [atom()]} | Ecto.Query.t()
 
   @typedoc """
   Runner-specific options under `c:option_key/0` in all options passed to `c:run/3`.
@@ -31,7 +31,8 @@ defmodule Explorer.Chain.Import.Runner do
           required(:params) => [map()],
           optional(:on_conflict) => on_conflict(),
           optional(:timeout) => timeout,
-          optional(:with) => changeset_function_name()
+          optional(:with) => changeset_function_name(),
+          optional(:fields_to_update) => [atom()]
         }
 
   @doc """
@@ -57,5 +58,10 @@ defmodule Explorer.Chain.Import.Runner do
   """
   @callback runner_specific_options() :: [atom()]
 
-  @optional_callbacks runner_specific_options: 0
+  @doc """
+  The optional function to prepare data for passing it to the changeset.
+  """
+  @callback prepare_data(changes_list) :: changes_list
+
+  @optional_callbacks runner_specific_options: 0, prepare_data: 1
 end

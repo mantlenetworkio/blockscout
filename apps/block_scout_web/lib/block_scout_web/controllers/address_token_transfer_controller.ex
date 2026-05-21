@@ -4,15 +4,16 @@ defmodule BlockScoutWeb.AddressTokenTransferController do
   import BlockScoutWeb.Account.AuthController, only: [current_user: 1]
   import BlockScoutWeb.Models.GetAddressTags, only: [get_address_tags: 2]
 
-  alias BlockScoutWeb.{AccessHelpers, Controller, TransactionView}
-  alias Explorer.ExchangeRates.Token
+  alias BlockScoutWeb.{AccessHelper, Controller, TransactionView}
   alias Explorer.{Chain, Market}
-  alias Explorer.Chain.Address
-  alias Indexer.Fetcher.CoinBalanceOnDemand
+  alias Explorer.Chain.{Address, DenormalizationHelper}
+  alias Indexer.Fetcher.OnDemand.CoinBalance, as: CoinBalanceOnDemand
   alias Phoenix.View
 
   import BlockScoutWeb.Chain,
     only: [current_filter: 1, next_page_params: 3, paging_options: 1, split_list_by_page: 1]
+
+  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
 
   @transaction_necessity_by_association [
     necessity_by_association: %{
@@ -25,13 +26,11 @@ defmodule BlockScoutWeb.AddressTokenTransferController do
       [token_transfers: :token] => :optional,
       [token_transfers: :to_address] => :optional,
       [token_transfers: :from_address] => :optional,
-      [token_transfers: :token_contract_address] => :optional,
-      :block => :required
+      [token_transfers: :token_contract_address] => :optional
     }
   ]
 
-  {:ok, burn_address_hash} = Chain.string_to_address_hash("0x0000000000000000000000000000000000000000")
-
+  {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
   @burn_address_hash burn_address_hash
 
   def index(
@@ -46,7 +45,7 @@ defmodule BlockScoutWeb.AddressTokenTransferController do
          {:ok, token_hash} <- Chain.string_to_address_hash(token_hash_string),
          {:ok, address} <- Chain.hash_to_address(address_hash),
          {:ok, _} <- Chain.token_from_address_hash(token_hash),
-         {:ok, false} <- AccessHelpers.restricted_access?(address_hash_string, params) do
+         {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params) do
       transactions =
         Chain.address_to_transactions_with_token_transfers(
           address_hash,
@@ -75,7 +74,7 @@ defmodule BlockScoutWeb.AddressTokenTransferController do
         Enum.map(transactions_paginated, fn transaction ->
           View.render_to_string(
             TransactionView,
-            "_table_tile_token.html",
+            "_tile.html",
             conn: conn,
             transaction: transaction,
             burn_address_hash: @burn_address_hash,
@@ -100,17 +99,20 @@ defmodule BlockScoutWeb.AddressTokenTransferController do
         conn,
         %{"address_id" => address_hash_string, "address_token_id" => token_hash_string} = params
       ) do
+    ip = AccessHelper.conn_to_ip_string(conn)
+
     with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
          {:ok, token_hash} <- Chain.string_to_address_hash(token_hash_string),
          {:ok, address} <- Chain.hash_to_address(address_hash),
          {:ok, token} <- Chain.token_from_address_hash(token_hash),
-         {:ok, false} <- AccessHelpers.restricted_access?(address_hash_string, params) do
+         {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params) do
       render(
         conn,
         "index.html",
         address: address,
-        coin_balance_status: CoinBalanceOnDemand.trigger_fetch(address),
-        exchange_rate: Market.get_exchange_rate(Explorer.coin()) || Token.null(),
+        coin_balance_status: CoinBalanceOnDemand.trigger_fetch(ip, address),
+        exchange_rate: Market.get_coin_exchange_rate(),
+        filter: params["filter"],
         current_path: Controller.current_full_path(conn),
         token: token,
         counters_path: address_path(conn, :address_counters, %{"id" => Address.checksum(address_hash)}),
@@ -137,9 +139,10 @@ defmodule BlockScoutWeb.AddressTokenTransferController do
       ) do
     with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
          {:ok, address} <- Chain.hash_to_address(address_hash),
-         {:ok, false} <- AccessHelpers.restricted_access?(address_hash_string, params) do
+         {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params) do
       options =
         @transaction_necessity_by_association
+        |> DenormalizationHelper.extend_block_necessity(:required)
         |> Keyword.merge(paging_options(params))
         |> Keyword.merge(current_filter(params))
 
@@ -169,7 +172,7 @@ defmodule BlockScoutWeb.AddressTokenTransferController do
         Enum.map(transactions_paginated, fn transaction ->
           View.render_to_string(
             TransactionView,
-            "_table_tile_token.html",
+            "_tile.html",
             conn: conn,
             transaction: transaction,
             burn_address_hash: @burn_address_hash,
@@ -190,22 +193,21 @@ defmodule BlockScoutWeb.AddressTokenTransferController do
     end
   end
 
-  def index(
-        conn,
-        %{"address_id" => address_hash_string} = params
-      ) do
+  def index(conn, %{"address_id" => address_hash_string} = params) do
+    ip = AccessHelper.conn_to_ip_string(conn)
+
     with {:ok, address_hash} <- Chain.string_to_address_hash(address_hash_string),
          {:ok, address} <- Chain.hash_to_address(address_hash),
-         {:ok, false} <- AccessHelpers.restricted_access?(address_hash_string, params) do
+         {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params) do
       render(
         conn,
         "index.html",
         address: address,
-        coin_balance_status: CoinBalanceOnDemand.trigger_fetch(address),
-        exchange_rate: Market.get_exchange_rate(Explorer.coin()) || Token.null(),
+        coin_balance_status: CoinBalanceOnDemand.trigger_fetch(ip, address),
+        exchange_rate: Market.get_coin_exchange_rate(),
         filter: params["filter"],
-        current_path: Controller.current_full_path(conn),
         counters_path: address_path(conn, :address_counters, %{"id" => Address.checksum(address_hash)}),
+        current_path: Controller.current_full_path(conn),
         tags: get_address_tags(address_hash, current_user(conn))
       )
     else

@@ -1,6 +1,0 @@
-<span
-data-toggle="tooltip" data-placement="top" title="" data-custom-class="" data-original-title="[<%= @token_id %>] <%= token_symbol(@transfer.token) %>"
->
-<%= render BlockScoutWeb.TransactionView, "_link_to_token_instance.html", transfer: @transfer, token_id: @token_id %>
-<%= " " %><%= render BlockScoutWeb.TransactionView, "_link_to_token_symbol.html", transfer: @transfer %>
-</span>

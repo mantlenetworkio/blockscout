@@ -18,24 +18,64 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
   import Plug.Conn
   import Phoenix.Controller, only: [put_view: 2]
 
-  alias BlockScoutWeb.AccessHelpers
   alias BlockScoutWeb.API.APILogger
   alias BlockScoutWeb.API.RPC.RPCView
+
+  alias BlockScoutWeb.API.RPC.{
+    AddressController,
+    BlockController,
+    CeloController,
+    ContractController,
+    LogsController,
+    RPCView,
+    StatsController,
+    TokenController,
+    TransactionController
+  }
+
   alias Phoenix.Controller
   alias Plug.Conn
+
+  @on_load :load_atoms
+
+  @doc """
+  Ensures that the specified controller modules are loaded into memory.
+
+  This function iterates over a predefined list of controller modules and calls `Code.ensure_loaded?/1`
+  on each, which loads the module if it hasn't been loaded yet. This is useful for ensuring that
+  all necessary controllers are available before performing operations that depend on them.
+
+  Returns `:ok` after attempting to load all modules.
+  """
+  @spec load_atoms() :: :ok
+  def load_atoms do
+    Enum.each(
+      [
+        AddressController,
+        BlockController,
+        CeloController,
+        ContractController,
+        LogsController,
+        StatsController,
+        TokenController,
+        TransactionController
+      ],
+      &Code.ensure_loaded?/1
+    )
+
+    :ok
+  end
 
   def init(opts) do
     opts
   end
 
   def call(%Conn{params: %{"module" => module, "action" => action}} = conn, translations) do
-    with true <- valid_api_request_path(conn),
+    with {:valid_api_v1_request, true} <- {:valid_api_v1_request, valid_api_v1_request_path(conn)},
          {:ok, {controller, write_actions}} <- translate_module(translations, module),
          {:ok, action} <- translate_action(action),
          true <- action_accessed?(action, write_actions),
-         :ok <- AccessHelpers.check_rate_limit(conn),
          {:ok, conn} <- call_controller(conn, controller, action) do
-      APILogger.log(conn)
       conn
     else
       {:error, :no_action} ->
@@ -45,8 +85,22 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
         |> Controller.render(:error, error: "Unknown action")
         |> halt()
 
+      {:error, :no_module} ->
+        conn
+        |> put_status(400)
+        |> put_view(RPCView)
+        |> Controller.render(:error, error: "Unknown module")
+        |> halt()
+
       {:error, error} ->
-        Logger.error(fn -> ["Error while calling RPC action", inspect(error)] end)
+        APILogger.error(fn ->
+          redacted_query_string = redact_apikey(conn.query_string)
+
+          [
+            "Error while calling RPC action #{action} in module #{module} with query string #{redacted_query_string}",
+            inspect(error, limit: :infinity, printable_limit: :infinity)
+          ]
+        end)
 
         conn
         |> put_status(500)
@@ -54,8 +108,12 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
         |> Controller.render(:error, error: "Something went wrong.")
         |> halt()
 
-      :rate_limit_reached ->
-        AccessHelpers.handle_rate_limit_deny(conn)
+      {:valid_api_v1_request, false} ->
+        conn
+        |> put_status(404)
+        |> put_view(RPCView)
+        |> Controller.render(:error, error: "Not found")
+        |> halt()
 
       _ ->
         conn
@@ -74,6 +132,14 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
     |> halt()
   end
 
+  @doc """
+  Redacts the API key from the query string.
+  """
+  @spec redact_apikey(String.t()) :: String.t()
+  def redact_apikey(query_string) do
+    String.replace(query_string, ~r/apikey=[^&]*/i, "apikey=[REDACTED]")
+  end
+
   @doc false
   @spec translate_module(map(), String.t()) :: {:ok, {module(), list(atom())}} | {:error, :no_action}
   defp translate_module(translations, module) do
@@ -81,7 +147,7 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
 
     case Map.fetch(translations, module_lowercase) do
       {:ok, module} -> {:ok, module}
-      _ -> {:error, :no_action}
+      _ -> {:error, :no_module}
     end
   end
 
@@ -95,7 +161,7 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
   end
 
   defp action_accessed?(action, write_actions) do
-    conf = Application.get_env(:block_scout_web, BlockScoutWeb.ApiRouter)
+    conf = Application.get_env(:block_scout_web, BlockScoutWeb.Routers.ApiRouter)
 
     if action in write_actions do
       conf[:writing_enabled] || {:error, :no_action}
@@ -117,8 +183,10 @@ defmodule BlockScoutWeb.API.RPC.RPCTranslator do
       {:error, Exception.format(:error, e, __STACKTRACE__)}
   end
 
-  defp valid_api_request_path(conn) do
-    if conn.request_path == "/api" || conn.request_path == "/api/v1" do
+  defp valid_api_v1_request_path(conn) do
+    if String.ends_with?(conn.request_path, "/api") || String.ends_with?(conn.request_path, "/api/") ||
+         String.ends_with?(conn.request_path, "/api/v1") ||
+         String.ends_with?(conn.request_path, "/api/v1/") do
       true
     else
       false

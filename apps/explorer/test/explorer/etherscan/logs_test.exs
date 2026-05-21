@@ -6,6 +6,25 @@ defmodule Explorer.Etherscan.LogsTest do
   alias Explorer.Etherscan.Logs
   alias Explorer.Chain.Transaction
 
+  @first_topic_hex_string_1 "0x7fcf532c15f0a6db0bd6d0e038bea71d30d808c7d98cb3bf7268a95bf5081b65"
+  @first_topic_hex_string_2 "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+  @first_topic_hex_string_3 "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c"
+
+  @second_topic_hex_string_1 "0x00000000000000000000000098a9dc37d3650b5b30d6c12789b3881ee0b70c16"
+  @second_topic_hex_string_2 "0x000000000000000000000000e2680fd7cdbb04e9087a647ad4d023ef6c8fb4e2"
+  @second_topic_hex_string_3 "0x0000000000000000000000005777d92f208679db4b9778590fa3cab3ac9e2168"
+
+  @third_topic_hex_string_1 "0x0000000000000000000000005079fc00f00f30000e0c8c083801cfde000008b6"
+  @third_topic_hex_string_2 "0x000000000000000000000000e2680fd7cdbb04e9087a647ad4d023ef6c8fb4e2"
+  @third_topic_hex_string_3 "0x0000000000000000000000000f6d9bd6fc315bbf95b5c44f4eba2b2762f8c372"
+
+  @fourth_topic_hex_string_1 "0x8c9b7729443a4444242342b2ca385a239a5c1d76a88473e1cd2ab0c70dd1b9c7"
+
+  defp topic(topic_hex_string) do
+    {:ok, topic} = Explorer.Chain.Hash.Full.cast(topic_hex_string)
+    topic
+  end
+
   describe "list_logs/1" do
     test "with empty db" do
       contract_address = build(:contract_address)
@@ -38,14 +57,15 @@ defmodule Explorer.Etherscan.LogsTest do
 
     test "with address with one log response includes all required information" do
       contract_address = insert(:contract_address)
+      block = insert(:block)
 
       transaction =
-        %Transaction{block: block} =
+        %Transaction{} =
         :transaction
-        |> insert(to_address: contract_address)
-        |> with_block()
+        |> insert(to_address: contract_address, block_timestamp: block.timestamp)
+        |> with_block(block)
 
-      log = insert(:log, address: contract_address, transaction: transaction)
+      log = insert(:log, address: contract_address, block: block, block_number: block.number, transaction: transaction)
 
       filter = %{
         from_block: block.number,
@@ -79,7 +99,12 @@ defmodule Explorer.Etherscan.LogsTest do
         |> insert(to_address: contract_address)
         |> with_block()
 
-      insert_list(2, :log, address: contract_address, transaction: transaction)
+      insert_list(2, :log,
+        address: contract_address,
+        transaction: transaction,
+        block_number: block.number,
+        block: block
+      )
 
       filter = %{
         from_block: block.number,
@@ -110,8 +135,19 @@ defmodule Explorer.Etherscan.LogsTest do
         |> insert(to_address: contract_address)
         |> with_block(second_block)
 
-      insert(:log, address: contract_address, transaction: transaction_block1)
-      insert(:log, address: contract_address, transaction: transaction_block2)
+      insert(:log,
+        address: contract_address,
+        transaction: transaction_block1,
+        block: first_block,
+        block_number: first_block.number
+      )
+
+      insert(:log,
+        address: contract_address,
+        transaction: transaction_block2,
+        block: second_block,
+        block_number: second_block.number
+      )
 
       filter = %{
         from_block: second_block.number,
@@ -143,8 +179,19 @@ defmodule Explorer.Etherscan.LogsTest do
         |> insert(to_address: contract_address)
         |> with_block(second_block)
 
-      insert(:log, address: contract_address, transaction: transaction_block1)
-      insert(:log, address: contract_address, transaction: transaction_block2)
+      insert(:log,
+        address: contract_address,
+        transaction: transaction_block1,
+        block: first_block,
+        block_number: first_block.number
+      )
+
+      insert(:log,
+        address: contract_address,
+        transaction: transaction_block2,
+        block: second_block,
+        block_number: second_block.number
+      )
 
       filter = %{
         from_block: first_block.number,
@@ -161,17 +208,53 @@ defmodule Explorer.Etherscan.LogsTest do
     test "paginates logs" do
       contract_address = insert(:contract_address)
 
-      transaction =
-        %Transaction{block: block} =
+      transaction_a =
         :transaction
         |> insert(to_address: contract_address)
         |> with_block()
 
-      inserted_records = insert_list(2000, :log, address: contract_address, transaction: transaction)
+      transaction_b =
+        :transaction
+        |> insert(to_address: contract_address)
+        |> with_block()
+
+      transaction_c =
+        :transaction
+        |> insert(to_address: contract_address)
+        |> with_block()
+
+      inserted_records =
+        for i <- 1..700 do
+          insert(:log,
+            address: contract_address,
+            transaction: transaction_a,
+            block_number: transaction_a.block.number,
+            block: transaction_a.block,
+            index: i
+          )
+        end ++
+          for i <- 1..700 do
+            insert(:log,
+              address: contract_address,
+              transaction: transaction_b,
+              block_number: transaction_b.block.number,
+              block: transaction_b.block,
+              index: i
+            )
+          end ++
+          for i <- 1..600 do
+            insert(:log,
+              address: contract_address,
+              transaction: transaction_c,
+              block_number: transaction_c.block.number,
+              block: transaction_c.block,
+              index: i
+            )
+          end
 
       filter = %{
-        from_block: block.number,
-        to_block: block.number,
+        from_block: transaction_a.block.number,
+        to_block: transaction_c.block.number,
         address_hash: contract_address.hash
       }
 
@@ -183,8 +266,7 @@ defmodule Explorer.Etherscan.LogsTest do
 
       next_page_params = %{
         log_index: last_record.index,
-        transaction_index: last_record.transaction_index,
-        block_number: transaction.block_number
+        block_number: last_record.block_number
       }
 
       second_found_logs = Logs.list_logs(filter, next_page_params)
@@ -210,13 +292,17 @@ defmodule Explorer.Etherscan.LogsTest do
       log1_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some topic"
+        block: block,
+        block_number: block.number,
+        first_topic: topic(@first_topic_hex_string_1)
       ]
 
       log2_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some other topic"
+        block: block,
+        block_number: block.number,
+        first_topic: topic(@first_topic_hex_string_2)
       ]
 
       log1 = insert(:log, log1_details)
@@ -246,15 +332,19 @@ defmodule Explorer.Etherscan.LogsTest do
       log1_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some first topic",
-        second_topic: "some second topic"
+        block: block,
+        block_number: block.number,
+        first_topic: topic(@first_topic_hex_string_1),
+        second_topic: topic(@second_topic_hex_string_1)
       ]
 
       log2_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some first topic",
-        second_topic: "some OTHER second topic"
+        block: block,
+        block_number: block.number,
+        first_topic: topic(@first_topic_hex_string_1),
+        second_topic: topic(@second_topic_hex_string_2)
       ]
 
       _log1 = insert(:log, log1_details)
@@ -287,15 +377,19 @@ defmodule Explorer.Etherscan.LogsTest do
       log1_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some first topic",
-        second_topic: "some second topic"
+        block: block,
+        block_number: block.number,
+        first_topic: topic(@first_topic_hex_string_1),
+        second_topic: topic(@second_topic_hex_string_1)
       ]
 
       log2_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some OTHER first topic",
-        second_topic: "some OTHER second topic"
+        block: block,
+        block_number: block.number,
+        first_topic: topic(@first_topic_hex_string_2),
+        second_topic: topic(@second_topic_hex_string_2)
       ]
 
       log1 = insert(:log, log1_details)
@@ -326,13 +420,17 @@ defmodule Explorer.Etherscan.LogsTest do
       log1_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some first topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_1),
+        block_number: block.number
       ]
 
       log2_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some OTHER first topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_2),
+        block_number: block.number
       ]
 
       _log1 = insert(:log, log1_details)
@@ -363,15 +461,19 @@ defmodule Explorer.Etherscan.LogsTest do
       log1_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some first topic",
-        second_topic: "some second topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_1),
+        second_topic: topic(@second_topic_hex_string_1),
+        block_number: block.number
       ]
 
       log2_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some OTHER first topic",
-        second_topic: "some OTHER second topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_2),
+        second_topic: topic(@second_topic_hex_string_2),
+        block_number: block.number
       ]
 
       _log1 = insert(:log, log1_details)
@@ -404,25 +506,31 @@ defmodule Explorer.Etherscan.LogsTest do
       log1_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some first topic",
-        second_topic: "some second topic",
-        third_topic: "some third topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_1),
+        second_topic: topic(@second_topic_hex_string_1),
+        third_topic: topic(@third_topic_hex_string_1),
+        block_number: block.number
       ]
 
       log2_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some OTHER first topic",
-        second_topic: "some OTHER second topic",
-        third_topic: "some OTHER third topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_2),
+        second_topic: topic(@second_topic_hex_string_2),
+        third_topic: topic(@third_topic_hex_string_2),
+        block_number: block.number
       ]
 
       log3_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some ALT first topic",
-        second_topic: "some ALT second topic",
-        third_topic: "some ALT third topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_3),
+        second_topic: topic(@second_topic_hex_string_3),
+        third_topic: topic(@third_topic_hex_string_3),
+        block_number: block.number
       ]
 
       _log1 = insert(:log, log1_details)
@@ -461,25 +569,31 @@ defmodule Explorer.Etherscan.LogsTest do
       log1_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some first topic",
-        second_topic: "some second topic",
-        third_topic: "some third topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_1),
+        second_topic: topic(@second_topic_hex_string_1),
+        third_topic: topic(@third_topic_hex_string_1),
+        block_number: block.number
       ]
 
       log2_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some OTHER first topic",
-        second_topic: "some OTHER second topic",
-        third_topic: "some OTHER third topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_2),
+        second_topic: topic(@second_topic_hex_string_2),
+        third_topic: topic(@third_topic_hex_string_2),
+        block_number: block.number
       ]
 
       log3_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some ALT first topic",
-        second_topic: "some ALT second topic",
-        third_topic: "some ALT third topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_3),
+        second_topic: topic(@second_topic_hex_string_3),
+        third_topic: topic(@third_topic_hex_string_3),
+        block_number: block.number
       ]
 
       log1 = insert(:log, log1_details)
@@ -518,25 +632,31 @@ defmodule Explorer.Etherscan.LogsTest do
       log1_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some topic",
-        second_topic: "some second topic",
-        third_topic: "some third topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_1),
+        second_topic: topic(@second_topic_hex_string_1),
+        third_topic: topic(@third_topic_hex_string_1),
+        block_number: block.number
       ]
 
       log2_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some topic",
-        second_topic: "some OTHER second topic",
-        third_topic: "some third topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_1),
+        second_topic: topic(@second_topic_hex_string_2),
+        third_topic: topic(@third_topic_hex_string_1),
+        block_number: block.number
       ]
 
       log3_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some topic",
-        second_topic: "some second topic",
-        third_topic: "some third topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_1),
+        second_topic: topic(@second_topic_hex_string_1),
+        third_topic: topic(@third_topic_hex_string_1),
+        block_number: block.number
       ]
 
       log1 = insert(:log, log1_details)
@@ -575,26 +695,32 @@ defmodule Explorer.Etherscan.LogsTest do
       log1_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some topic",
-        second_topic: "some second topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_1),
+        second_topic: topic(@second_topic_hex_string_1),
+        block_number: block.number
       ]
 
       log2_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some OTHER topic",
-        second_topic: "some OTHER second topic",
-        third_topic: "some OTHER third topic",
-        fourth_topic: "some fourth topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_2),
+        second_topic: topic(@second_topic_hex_string_2),
+        third_topic: topic(@third_topic_hex_string_2),
+        fourth_topic: topic(@fourth_topic_hex_string_1),
+        block_number: block.number
       ]
 
       log3_details = [
         address: contract_address,
         transaction: transaction,
-        first_topic: "some topic",
-        second_topic: "some second topic",
-        third_topic: "some third topic",
-        fourth_topic: "some fourth topic"
+        block: block,
+        first_topic: topic(@first_topic_hex_string_1),
+        second_topic: topic(@second_topic_hex_string_1),
+        third_topic: topic(@third_topic_hex_string_1),
+        fourth_topic: topic(@fourth_topic_hex_string_1),
+        block_number: block.number
       ]
 
       log1 = insert(:log, log1_details)
@@ -650,9 +776,26 @@ defmodule Explorer.Etherscan.LogsTest do
         |> insert(to_address: contract_address)
         |> with_block(third_block)
 
-      insert(:log, address: contract_address, transaction: transaction_block3)
-      insert(:log, address: contract_address, transaction: transaction_block1)
-      insert(:log, address: contract_address, transaction: transaction_block2)
+      insert(:log,
+        address: contract_address,
+        transaction: transaction_block3,
+        block: third_block,
+        block_number: third_block.number
+      )
+
+      insert(:log,
+        address: contract_address,
+        transaction: transaction_block1,
+        block: first_block,
+        block_number: first_block.number
+      )
+
+      insert(:log,
+        address: contract_address,
+        transaction: transaction_block2,
+        block: second_block,
+        block_number: second_block.number
+      )
 
       filter = %{
         from_block: first_block.number,

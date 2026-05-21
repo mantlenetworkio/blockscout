@@ -7,32 +7,3 @@ $alert-danger-color: #ff7986 !default;
     border-color: $alert-danger-border-color;
     color: $alert-danger-color;
 }
-.alert-danger-custom {
-    background-color: #CBE9E7;
-    border-radius: 8px;
-    color: $alert-danger-color;
-    padding:0;
-    display:flex;
-    justify-content: center;
-    align-items: center;
-    padding-top:12px !important;
-    padding-bottom:12px !important;
-    width:100%;
-    span {
-        color: #3F7470;
-        padding:0;
-        background: transparent;
-        border:none;
-        margin: 0;
-        height:12px;
-        line-height: 12px;
-    }
-}
-.dark-theme-applied{
-    .alert-danger-custom{
-        background-color: #152928;
-        span{
-            color:#7FD8D2;
-        }
-    }
-}

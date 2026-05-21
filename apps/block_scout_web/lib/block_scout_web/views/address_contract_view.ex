@@ -1,15 +1,18 @@
 defmodule BlockScoutWeb.AddressContractView do
   use BlockScoutWeb, :view
+  use Phoenix.LiveView
 
-  alias ABI.{FunctionSelector, TypeDecoder}
+  require Logger
+
+  import Explorer.Helper, only: [decode_data: 2]
+
+  alias ABI.FunctionSelector
   alias Explorer.Chain
-  alias Explorer.Chain.{Address, Data, InternalTransaction, Transaction, SmartContract}
-
-  alias BlockScoutWeb.{AccessHelpers}
-  alias Explorer.Account.CustomABI
-  alias Explorer.SmartContract.{Helper, Writer}
-
-  import BlockScoutWeb.Account.AuthController, only: [current_user: 1]
+  alias Explorer.Chain.{Address, Data, InternalTransaction, Transaction}
+  alias Explorer.Chain.SmartContract
+  alias Explorer.Chain.SmartContract.Proxy.EIP1167
+  alias Explorer.SmartContract.Helper, as: SmartContractHelper
+  alias Phoenix.HTML.Safe
 
   def render("scripts.html", %{conn: conn}) do
     render_scripts(conn, "address_contract/code_highlighting.js")
@@ -40,8 +43,14 @@ defmodule BlockScoutWeb.AddressContractView do
       |> Enum.zip(constructor_abi["inputs"])
       |> Enum.reduce({0, "#{contract.constructor_arguments}\n\n"}, fn {val, %{"type" => type}}, {count, acc} ->
         formatted_val = val_to_string(val, type, conn)
+        assigns = %{acc: acc, count: count, type: type, formatted_val: formatted_val}
 
-        {count + 1, "#{acc}Arg [#{count}] (<b>#{type}</b>) : #{formatted_val}\n"}
+        {count + 1,
+         ~H"""
+         <%= @acc %> Arg [<%= @count %>] (<b><%= @type %></b>) : <%= @formatted_val %>
+         """
+         |> Safe.to_iodata()
+         |> List.to_string()}
       end)
 
     result
@@ -52,17 +61,12 @@ defmodule BlockScoutWeb.AddressContractView do
   defp val_to_string(val, type, conn) do
     cond do
       type =~ "[]" ->
-        if is_list(val) or is_tuple(val) do
-          "[" <>
-            Enum.map_join(val, ", ", fn el -> val_to_string(el, String.replace_suffix(type, "[]", ""), conn) end) <> "]"
-        else
-          to_string(val)
-        end
+        val_to_string_if_array(val, type, conn)
 
       type =~ "address" ->
         address_hash = "0x" <> Base.encode16(val, case: :lower)
 
-        address = get_address(address_hash)
+        address = Chain.string_to_address_hash_or_nil(address_hash)
 
         get_formatted_address_data(address, address_hash, conn)
 
@@ -74,59 +78,62 @@ defmodule BlockScoutWeb.AddressContractView do
     end
   end
 
-  defp get_address(address_hash) do
-    case Chain.string_to_address_hash(address_hash) do
-      {:ok, address} -> address
-      _ -> nil
+  defp val_to_string_if_array(val, type, conn) do
+    if is_list(val) or is_tuple(val) do
+      "[" <>
+        Enum.map_join(val, ", ", fn el -> val_to_string(el, String.replace_suffix(type, "[]", ""), conn) end) <> "]"
+    else
+      to_string(val)
     end
   end
 
   defp get_formatted_address_data(address, address_hash, conn) do
     if address != nil do
-      "<a href=" <> address_path(conn, :show, address) <> ">" <> address_hash <> "</a>"
+      assigns = %{address: address, address_hash: address_hash, conn: conn}
+
+      ~H"""
+      <a href="{#{address_path(@conn, :show, @address)}}"><%= @address_hash %></a>
+      """
     else
       address_hash
     end
   end
 
-  def decode_data("0x" <> encoded_data, types) do
-    decode_data(encoded_data, types)
-  end
-
-  def decode_data(encoded_data, types) do
-    encoded_data
-    |> Base.decode16!(case: :mixed)
-    |> TypeDecoder.decode_raw(types)
-  end
-
   def format_external_libraries(libraries, conn) do
     Enum.reduce(libraries, "", fn %{name: name, address_hash: address_hash}, acc ->
-      address = get_address(address_hash)
-      "#{acc}<span class=\"hljs-title\">#{name}</span> : #{get_formatted_address_data(address, address_hash, conn)}  \n"
-    end)
-  end
+      address = Chain.string_to_address_hash_or_nil(address_hash)
+      assigns = %{acc: acc, name: name, address: address, address_hash: address_hash, conn: conn}
 
-  def contract_lines_with_index(source_code) do
-    contract_lines =
-      source_code
-      |> String.split("\n")
-
-    max_digits =
-      contract_lines
-      |> Enum.count()
-      |> Integer.digits()
-      |> Enum.count()
-
-    contract_lines
-    |> Enum.with_index(1)
-    |> Enum.map(fn {value, line} ->
-      {value, String.pad_leading(to_string(line), max_digits, " ")}
+      ~H"""
+      <%= @acc %><span class="hljs-title"><%= @name %></span> : <%= get_formatted_address_data(@address, @address_hash, @conn) %>
+      """
+      |> Safe.to_iodata()
+      |> List.to_string()
     end)
   end
 
   def contract_creation_code(%Address{
+        contract_creation_transaction: %Transaction{
+          status: :error,
+          input: creation_code
+        }
+      }) do
+    {:failed, creation_code}
+  end
+
+  def contract_creation_code(%Address{
+        contract_creation_internal_transaction: %InternalTransaction{
+          error: error,
+          init: init
+        }
+      })
+      when not is_nil(error) do
+    {:failed, init}
+  end
+
+  def contract_creation_code(%Address{
         contract_code: %Data{bytes: <<>>},
-        contracts_creation_internal_transaction: %InternalTransaction{init: init}
+        contract_creation_internal_transaction: %InternalTransaction{init: init}
       }) do
     {:selfdestructed, init}
   end
@@ -135,15 +142,15 @@ defmodule BlockScoutWeb.AddressContractView do
     {:ok, contract_code}
   end
 
-  def creation_code(%Address{contracts_creation_internal_transaction: %InternalTransaction{}} = address) do
-    address.contracts_creation_internal_transaction.init
+  def creation_code(%Address{contract_creation_transaction: %Transaction{}} = address) do
+    address.contract_creation_transaction.input
   end
 
-  def creation_code(%Address{contracts_creation_transaction: %Transaction{}} = address) do
-    address.contracts_creation_transaction.input
+  def creation_code(%Address{contract_creation_internal_transaction: %InternalTransaction{}} = address) do
+    address.contract_creation_internal_transaction.init
   end
 
-  def creation_code(%Address{contracts_creation_transaction: nil}) do
+  def creation_code(%Address{contract_creation_transaction: nil}) do
     nil
   end
 
@@ -152,53 +159,12 @@ defmodule BlockScoutWeb.AddressContractView do
     chain_id = Application.get_env(:explorer, Explorer.ThirdPartyIntegrations.Sourcify)[:chain_id]
     repo_url = Application.get_env(:explorer, Explorer.ThirdPartyIntegrations.Sourcify)[:repo_url]
     match = if partial_match, do: "/partial_match/", else: "/full_match/"
-    repo_url <> match <> chain_id <> "/" <> checksummed_hash <> "/"
-  end
 
-  def smart_contract_with_read_only_functions?(%Address{smart_contract: %SmartContract{}} = address) do
-    Enum.any?(address.smart_contract.abi || [], &is_read_function?(&1))
-  end
-
-  def smart_contract_with_read_only_functions?(%Address{smart_contract: nil}), do: false
-
-  def is_read_function?(function), do: Helper.queriable_method?(function) || Helper.read_with_wallet_method?(function)
-
-  def smart_contract_is_proxy?(%Address{smart_contract: %SmartContract{} = smart_contract}) do
-    SmartContract.proxy_contract?(smart_contract)
-  end
-
-  def smart_contract_is_proxy?(%Address{smart_contract: nil}), do: false
-
-  def smart_contract_with_write_functions?(%Address{smart_contract: %SmartContract{}} = address) do
-    Enum.any?(
-      address.smart_contract.abi || [],
-      &Writer.write_function?(&1)
-    )
-  end
-
-  def smart_contract_with_write_functions?(%Address{smart_contract: nil}), do: false
-
-  def fetch_custom_abi(conn, address_hash) do
-    if current_user = current_user(conn) do
-      CustomABI.get_custom_abi_by_identity_id_and_address_hash(address_hash, current_user.id)
+    if chain_id do
+      repo_url <> match <> chain_id <> "/" <> checksummed_hash <> "/"
+    else
+      Logger.warning("chain_id is nil. Please set CHAIN_ID env variable.")
+      nil
     end
   end
-
-  def has_address_custom_abi_with_read_functions?(conn, address_hash) do
-    custom_abi = fetch_custom_abi(conn, address_hash)
-
-    check_custom_abi_for_having_read_functions(custom_abi)
-  end
-
-  def check_custom_abi_for_having_read_functions(custom_abi),
-    do: !is_nil(custom_abi) && Enum.any?(custom_abi.abi, &is_read_function?(&1))
-
-  def has_address_custom_abi_with_write_functions?(conn, address_hash) do
-    custom_abi = fetch_custom_abi(conn, address_hash)
-
-    check_custom_abi_for_having_write_functions(custom_abi)
-  end
-
-  def check_custom_abi_for_having_write_functions(custom_abi),
-    do: !is_nil(custom_abi) && Enum.any?(custom_abi.abi, &Writer.write_function?(&1))
 end
