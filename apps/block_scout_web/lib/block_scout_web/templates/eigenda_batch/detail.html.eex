@@ -1,4 +1,0 @@
-<section class="container">
-  hello
-  <%= @batch_index %>
-</section>

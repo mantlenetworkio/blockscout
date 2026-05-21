@@ -2,10 +2,8 @@ defmodule BlockScoutWeb.Tokens.HolderView do
   use BlockScoutWeb, :view
 
   alias BlockScoutWeb.Tokens.OverviewView
-  alias Explorer.Chain.Token
-  alias Explorer.Chain.{Address, Wei}
+  alias Explorer.Chain.{Address, Token}
 
-require Logger
   @doc """
   Checks if the total supply percentage must be shown.
 
@@ -50,24 +48,6 @@ require Logger
     result <> "%"
   end
 
-  def balance(%Address{fetched_coin_balance: nil}), do: ""
-
-  def balance(%Address{fetched_coin_balance: balance}) do
-    format_wei_value(balance, :ether)
-  end
-
-  def ether_balance(%Address{fetched_coin_balance: nil}), do: ""
-
-  def ether_balance(%Address{fetched_coin_balance: balance}) do
-    format_wei_value(balance, :wei, include_unit_label: false)
-  end
-
-  def balance_with_no_unit(%Address{fetched_coin_balance: nil}), do: ""
-
-  def balance_with_no_unit(%Address{fetched_coin_balance: balance}) do
-    format_wei_value(balance, :ether, include_unit_label: false)
-  end
-
   @doc """
   Formats the token balance value according to the Token's type.
 
@@ -86,8 +66,26 @@ require Logger
     format_according_to_decimals(value, decimals)
   end
 
+  def format_token_balance_value(value, _id, %Token{type: "ZRC-2", decimals: decimals}) do
+    format_according_to_decimals(value, decimals)
+  end
+
   def format_token_balance_value(value, id, %Token{type: "ERC-1155", decimals: decimals}) do
     to_string(format_according_to_decimals(value, decimals)) <> " TokenID " <> to_string(id)
+  end
+
+  def format_token_balance_value(value, id, %Token{type: "ERC-404", decimals: decimals}) do
+    base = to_string(format_according_to_decimals(value, decimals))
+
+    if id do
+      base <> " TokenID " <> to_string(id)
+    else
+      base
+    end
+  end
+
+  def format_token_balance_value(_value, _id, %Token{type: "ERC-7984"}) do
+    "*confidential*"
   end
 
   def format_token_balance_value(value, _id, _token) do

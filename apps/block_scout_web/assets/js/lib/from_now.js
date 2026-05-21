@@ -1,17 +1,5 @@
 import $ from 'jquery'
 import moment from 'moment'
-import 'moment/min/locales'
-import Cookies from 'js-cookie'
-
-let lang = Cookies.get('locale')
-if (!lang) {
-  lang = 'en'
-}
-const availableLang = ['ja', 'zh', 'ko', 'ru']
-
-if (availableLang.includes(lang.toLowerCase())) {
-  moment.locale(lang === 'zh' ? 'zh-cn' : lang)
-}
 
 moment.relativeTimeThreshold('M', 12)
 moment.relativeTimeThreshold('d', 30)

@@ -113,6 +113,19 @@ defmodule Explorer.Chain.OrderedCache do
   @callback take_enough(integer()) :: [element] | nil
 
   @doc """
+  Behaves like `take_enough/1`, but addresses [#10445](https://github.com/blockscout/blockscout/issues/10445).
+  """
+  @callback atomic_take_enough(integer()) :: [element] | nil
+
+  @doc """
+  Processes the elements before updating the cache.
+  This function is called before the `update/1` function and can be used to
+  modify the elements to be inserted. Can be used to optimize memory usage along
+  with fetching time.
+  """
+  @callback sanitize_before_update(element) :: element
+
+  @doc """
   Adds an element, or a list of elements, to the cache.
   When the cache is full, only the most prevailing elements will be stored, based
   on `c:prevails?/2`.
@@ -138,6 +151,7 @@ defmodule Explorer.Chain.OrderedCache do
 
     # credo:disable-for-next-line Credo.Check.Refactor.LongQuoteBlocks
     quote do
+      require Logger
       alias Explorer.Chain.OrderedCache
 
       @behaviour OrderedCache
@@ -163,6 +177,9 @@ defmodule Explorer.Chain.OrderedCache do
 
       @impl OrderedCache
       def element_to_id(element), do: element
+
+      @impl OrderedCache
+      def sanitize_before_update(element), do: element
 
       ### Straightforward fetching functions
 
@@ -204,6 +221,22 @@ defmodule Explorer.Chain.OrderedCache do
         end
       end
 
+      @impl OrderedCache
+      def atomic_take_enough(amount) do
+        items =
+          cache_name()
+          |> ConCache.ets()
+          |> :ets.tab2list()
+
+        if amount <= Enum.count(items) - 1 do
+          items
+          |> Enum.reject(fn {key, _value} -> key == ids_list_key() end)
+          |> Enum.sort(&prevails?/2)
+          |> Enum.take(amount)
+          |> Enum.map(fn {_key, value} -> value end)
+        end
+      end
+
       ### Updating function
 
       def remove_deleted_from_index({:delete, _cache_pid, id}) do
@@ -223,19 +256,71 @@ defmodule Explorer.Chain.OrderedCache do
       def update(elements) when is_nil(elements), do: :ok
 
       def update(elements) when is_list(elements) do
-        ConCache.update(cache_name(), ids_list_key(), fn ids ->
-          updated_list =
-            elements
-            |> Enum.map(&{element_to_id(&1), &1})
-            |> Enum.sort(&prevails?(&1, &2))
-            |> merge_and_update(ids || [], max_size())
+        case Explorer.mode() do
+          mode when mode in [:all, :api, :indexer] ->
+            elements_for_preload =
+              elements
+              |> Enum.sort_by(&element_to_id(&1), &prevails?(&1, &2))
+              |> Enum.take(max_size())
 
-          # ids_list is set to never expire
-          {:ok, %ConCache.Item{value: updated_list, ttl: :infinity}}
-        end)
+            preloaded_elements =
+              try do
+                do_preloads(elements_for_preload)
+              rescue
+                postgrex_error in Postgrex.Error ->
+                  Logger.error(fn ->
+                    [
+                      "Error while preloading elements for ordered cache: ",
+                      Exception.format(:error, postgrex_error, __STACKTRACE__)
+                    ]
+                  end)
+
+                  elements_for_preload
+              end
+
+            preloaded_elements
+            |> Enum.map(&{element_to_id(&1), sanitize_before_update(&1)})
+            |> do_raw_update(true)
+
+          _ ->
+            :ok
+        end
       end
 
       def update(element), do: update([element])
+
+      def do_raw_update(prepared_elements, propagate) do
+        case Explorer.mode() do
+          mode when mode in [:all, :api] ->
+            ConCache.update(cache_name(), ids_list_key(), fn ids ->
+              updated_list =
+                prepared_elements
+                |> merge_and_update(ids || [], max_size())
+
+              # ids_list is set to never expire
+              {:ok, %ConCache.Item{value: updated_list, ttl: :infinity}}
+            end)
+
+          :indexer ->
+            if propagate do
+              Node.list() |> :erpc.multicast(__MODULE__, :do_raw_update, [prepared_elements, false])
+            else
+              Logger.error("Indexer got unexpected propagation call to do_raw_update/2")
+              :ok
+            end
+
+          _ ->
+            :ok
+        end
+      end
+
+      defp do_preloads(elements) do
+        if Enum.empty?(preloads()) do
+          elements
+        else
+          Explorer.Repo.preload(elements, preloads())
+        end
+      end
 
       defp merge_and_update(_candidates, existing, 0) do
         # if there is no more space in the list remove the remaining existing
@@ -246,7 +331,7 @@ defmodule Explorer.Chain.OrderedCache do
 
       defp merge_and_update([], existing, size) do
         # if there are no more candidates to be inserted keep as many of the
-        # exsisting elements and remove the rest
+        # existing elements and remove the rest
         {remaining, to_remove} = Enum.split(existing, size)
         remove(to_remove)
         remaining
@@ -274,7 +359,7 @@ defmodule Explorer.Chain.OrderedCache do
             [head | merge_and_update(to_check, tail, size - 1)]
 
           prevails?(head, candidate_id) ->
-            # keep the prevaling existing value and compare all candidates against the rest
+            # keep the prevailing existing value and compare all candidates against the rest
             [head | merge_and_update(candidates, tail, size - 1)]
 
           true ->
@@ -290,7 +375,7 @@ defmodule Explorer.Chain.OrderedCache do
         # Different updates cannot interfere with the removed element because
         # if this was scheduled for removal it means it is too old, so following
         # updates cannot insert it in the future.
-        Task.start(fn ->
+        Task.start_link(fn ->
           Process.sleep(100)
 
           if is_list(key) do
@@ -302,17 +387,10 @@ defmodule Explorer.Chain.OrderedCache do
       end
 
       defp put_element(element_id, element) do
-        full_element =
-          if Enum.empty?(preloads()) do
-            element
-          else
-            Explorer.Repo.preload(element, preloads())
-          end
-
         # dirty puts are a little faster than puts with locks.
         # this is not a problem because this is the only function modifying rows
         # and it only gets called inside `update`, which works isolated
-        ConCache.dirty_put(cache_name(), element_id, full_element)
+        ConCache.dirty_put(cache_name(), element_id, element)
       end
 
       ### Supervisor's child specification
@@ -348,7 +426,8 @@ defmodule Explorer.Chain.OrderedCache do
                      max_size: 0,
                      preloads: 0,
                      prevails?: 2,
-                     element_to_id: 1
+                     element_to_id: 1,
+                     sanitize_before_update: 1
     end
   end
 end

@@ -12,10 +12,12 @@ defmodule Indexer.Fetcher.UncleBlock do
   alias Ecto.Changeset
   alias EthereumJSONRPC.Blocks
   alias Explorer.Chain
+  alias Explorer.Chain.Block, as: ExplorerChainBlock
   alias Explorer.Chain.Cache.{Accounts, Uncles}
   alias Explorer.Chain.Hash
   alias Indexer.{Block, BufferedTask, Tracer}
   alias Indexer.Fetcher.UncleBlock
+  alias Indexer.Fetcher.UncleBlock.Supervisor, as: UncleBlockSupervisor
   alias Indexer.Transform.Addresses
 
   @behaviour Block.Fetcher
@@ -33,38 +35,49 @@ defmodule Indexer.Fetcher.UncleBlock do
   Asynchronously fetches `t:Explorer.Chain.Block.t/0` for the given `nephew_hash` and `index`
   and updates `t:Explorer.Chain.Block.SecondDegreeRelation.t/0` `block_fetched_at`.
   """
-  @spec async_fetch_blocks([%{required(:nephew_hash) => Hash.Full.t(), required(:index) => non_neg_integer()}]) :: :ok
-  def async_fetch_blocks(relations) when is_list(relations) do
-    entries = Enum.map(relations, &entry/1)
-    BufferedTask.buffer(__MODULE__, entries)
+  @spec async_fetch_blocks(
+          [%{required(:nephew_hash) => Hash.Full.t(), required(:index) => non_neg_integer()}],
+          boolean()
+        ) :: :ok
+  def async_fetch_blocks(relations, realtime? \\ false) when is_list(relations) do
+    if UncleBlockSupervisor.disabled?() do
+      :ok
+    else
+      entries = Enum.map(relations, &entry/1)
+      BufferedTask.buffer(__MODULE__, entries, realtime?)
+    end
   end
 
   @doc false
   def child_spec([init_options, gen_server_options]) when is_list(init_options) do
-    {state, mergeable_init_options} = Keyword.pop(init_options, :block_fetcher)
+    case Keyword.pop(init_options, :block_fetcher) do
+      {%Block.Fetcher{} = state, mergeable_init_options} ->
+        merged_init_options =
+          @defaults
+          |> Keyword.merge(mergeable_init_options)
+          |> Keyword.put(:state, %Block.Fetcher{state | broadcast: :uncle, callback_module: __MODULE__})
 
-    unless state do
-      raise ArgumentError,
-            ":json_rpc_named_arguments must be provided to `#{__MODULE__}.child_spec " <>
-              "to allow for json_rpc calls when running."
+        Supervisor.child_spec({BufferedTask, [{__MODULE__, merged_init_options}, gen_server_options]}, id: __MODULE__)
+
+      _ ->
+        raise ArgumentError,
+              ":json_rpc_named_arguments must be provided to `#{__MODULE__}.child_spec " <>
+                "to allow for json_rpc calls when running."
     end
-
-    merged_init_options =
-      @defaults
-      |> Keyword.merge(mergeable_init_options)
-      |> Keyword.put(:state, %Block.Fetcher{state | broadcast: :uncle, callback_module: __MODULE__})
-
-    Supervisor.child_spec({BufferedTask, [{__MODULE__, merged_init_options}, gen_server_options]}, id: __MODULE__)
   end
 
   @impl BufferedTask
   def init(initial, reducer, _) do
     {:ok, final} =
-      Chain.stream_unfetched_uncles(initial, fn uncle, acc ->
-        uncle
-        |> entry()
-        |> reducer.(acc)
-      end)
+      ExplorerChainBlock.stream_unfetched_uncles(
+        initial,
+        fn uncle, acc ->
+          uncle
+          |> entry()
+          |> reducer.(acc)
+        end,
+        true
+      )
 
     final
   end
@@ -214,7 +227,7 @@ defmodule Indexer.Fetcher.UncleBlock do
     loggable_errors = loggable_errors(errors)
     loggable_error_count = Enum.count(loggable_errors)
 
-    unless loggable_error_count == 0 do
+    if loggable_error_count != 0 do
       Logger.error(
         fn ->
           [

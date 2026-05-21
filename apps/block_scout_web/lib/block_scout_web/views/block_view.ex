@@ -7,6 +7,7 @@ defmodule BlockScoutWeb.BlockView do
   alias Explorer.Chain
   alias Explorer.Chain.{Block, Wei}
   alias Explorer.Chain.Block.Reward
+  alias Explorer.Chain.Cache.Counters.{BlockBurntFeeCount, BlockPriorityFeeCount}
 
   @dialyzer :no_match
 
@@ -55,8 +56,8 @@ defmodule BlockScoutWeb.BlockView do
   def show_reward?(_), do: true
 
   def block_reward_text(%Reward{address_hash: beneficiary_address, address_type: :validator}, block_miner_address) do
-    if Application.get_env(:explorer, Explorer.Chain.Block.Reward, %{})[:keys_manager_contract_address] do
-      %{payout_key: block_miner_payout_address} = Reward.get_validator_payout_key_by_mining(block_miner_address)
+    if Application.get_env(:explorer, Reward, %{})[:keys_manager_contract_address] do
+      %{payout_key: block_miner_payout_address} = Reward.get_validator_payout_key_by_mining_from_db(block_miner_address)
 
       if beneficiary_address == block_miner_payout_address do
         gettext("Miner Reward")
@@ -78,7 +79,7 @@ defmodule BlockScoutWeb.BlockView do
 
   def combined_rewards_value(block) do
     block
-    |> Chain.block_combined_rewards()
+    |> Block.block_combined_rewards()
     |> format_wei_value(:ether)
   end
 end

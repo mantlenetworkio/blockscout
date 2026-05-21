@@ -11,14 +11,14 @@ http://creativecommons.org/publicdomain/zero/1.0/legalcode
 
 */
 
-/* eslint-disable */
+ 
 
 /* Creates a new queue. A queue is a first-in-first-out (FIFO) data structure -
  * items are added to the end of the queue and removed from the front.
  */
 export default function Queue(){
 
-  // initialise the queue and offset
+  // initialize the queue and offset
   var queue  = [];
   var offset = 0;
 

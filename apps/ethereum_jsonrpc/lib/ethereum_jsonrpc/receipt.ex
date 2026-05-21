@@ -1,13 +1,55 @@
 defmodule EthereumJSONRPC.Receipt do
   @moduledoc """
   Receipts format as returned by
-  [`eth_getTransactionReceipt`](https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_gettransactionreceipt).
+  [`eth_getTransactionReceipt`](https://github.com/ethereum/wiki/wiki/JSON-RPC/e8e0771b9f3677693649d945956bc60e886ceb2b#eth_gettransactionreceipt).
   """
+  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
+  use Utils.RuntimeEnvHelper, op_isthmus_timestamp: [:indexer, [Indexer.Fetcher.Optimism, :isthmus_timestamp_l2]]
 
   import EthereumJSONRPC, only: [quantity_to_integer: 1]
 
   alias EthereumJSONRPC.Logs
-require Logger
+
+  case @chain_type do
+    :ethereum ->
+      @chain_type_fields quote(
+                           do: [
+                             blob_gas_price: non_neg_integer(),
+                             blob_gas_used: non_neg_integer()
+                           ]
+                         )
+
+    :optimism ->
+      @chain_type_fields quote(
+                           do: [
+                             l1_fee: non_neg_integer(),
+                             l1_fee_scalar: non_neg_integer(),
+                             l1_gas_price: non_neg_integer(),
+                             l1_gas_used: non_neg_integer(),
+                             operator_fee_scalar: non_neg_integer() | nil,
+                             operator_fee_constant: non_neg_integer() | nil,
+                             da_footprint_gas_scalar: non_neg_integer() | nil
+                           ]
+                         )
+
+    :scroll ->
+      @chain_type_fields quote(
+                           do: [
+                             l1_fee: non_neg_integer()
+                           ]
+                         )
+
+    :arbitrum ->
+      @chain_type_fields quote(
+                           do: [
+                             gas_used_for_l1: non_neg_integer()
+                           ]
+                         )
+
+    _ ->
+      @chain_type_fields quote(do: [])
+  end
+
   @type elixir :: %{String.t() => String.t() | non_neg_integer}
 
   @typedoc """
@@ -38,11 +80,16 @@ require Logger
             | nil
         }
 
-  @typedoc """
-   * `:ok` - transaction succeeded
-   * `:error` - transaction failed
-  """
-  @type status :: :ok | :error
+  @type params :: %{
+          unquote_splicing(@chain_type_fields),
+          optional(:gas_price) => non_neg_integer(),
+          cumulative_gas_used: non_neg_integer(),
+          gas_used: non_neg_integer(),
+          created_contract_address_hash: EthereumJSONRPC.hash(),
+          status: :ok | :error,
+          transaction_hash: EthereumJSONRPC.hash(),
+          transaction_index: non_neg_integer()
+        }
 
   @doc """
   Get `t:EthereumJSONRPC.Logs.elixir/0` from `t:elixir/0`
@@ -74,7 +121,29 @@ require Logger
         gas_used: 269607,
         status: :ok,
         transaction_hash: "0x3a3eb134e6792ce9403ea4188e5e79693de9e4c94e499db132be086400da79e6",
-        transaction_index: 0
+        transaction_index: 0,\
+  #{case @chain_type do
+    :ethereum -> """
+            blob_gas_price: 0,\
+            blob_gas_used: 0\
+      """
+    :optimism -> """
+          l1_fee: 0,\
+          l1_fee_scalar: 0,\
+          l1_gas_price: 0,\
+          l1_gas_used: 0,\
+          operator_fee_scalar: nil,\
+          operator_fee_constant: nil,\
+          da_footprint_gas_scalar: nil\
+      """
+    :scroll -> """
+          l1_fee: 0\
+      """
+    :arbitrum -> """
+          gas_used_for_l1: nil\
+      """
+    _ -> ""
+  end}
       }
 
   Geth, when showing pre-[Byzantium](https://github.com/ethereum/EIPs/blob/master/EIPS/eip-609.md) does not include
@@ -107,39 +176,46 @@ require Logger
         gas_used: 21001,
         status: nil,
         transaction_hash: "0x5c504ed432cb51138bcf09aa5e8a410dd4a1e204ef84bfed1be16dfba1b22060",
-        transaction_index: 0
+        transaction_index: 0,\
+  #{case @chain_type do
+    :ethereum -> """
+            blob_gas_price: 0,\
+            blob_gas_used: 0\
+      """
+    :optimism -> """
+          l1_fee: 0,\
+          l1_fee_scalar: 0,\
+          l1_gas_price: 0,\
+          l1_gas_used: 0,\
+          operator_fee_scalar: nil,\
+          operator_fee_constant: nil,\
+          da_footprint_gas_scalar: nil\
+      """
+    :scroll -> """
+          l1_fee: 0\
+      """
+    :arbitrum -> """
+          gas_used_for_l1: nil\
+      """
+    _ -> ""
+  end}
       }
 
   """
-  @spec elixir_to_params(elixir) :: %{
-          cumulative_gas_used: non_neg_integer,
-          gas_used: non_neg_integer,
-          created_contract_address_hash: String.t() | nil,
-          status: status(),
-          transaction_hash: String.t(),
-          transaction_index: non_neg_integer(),
-          l1_fee: non_neg_integer,
-          l1_fee_scalar: non_neg_integer,
-          l1_gas_price: non_neg_integer,
-          l1_gas_used: non_neg_integer,
-          da_fee: non_neg_integer,
-          da_gas_price: non_neg_integer,
-          da_gas_used: non_neg_integer,
-        }
-  def elixir_to_params(
+  @spec elixir_to_params(elixir) :: params
+  def elixir_to_params(elixir) do
+    elixir
+    |> do_elixir_to_params()
+    |> chain_type_fields(elixir)
+  end
+
+  def do_elixir_to_params(
         %{
           "cumulativeGasUsed" => cumulative_gas_used,
           "gasUsed" => gas_used,
           "contractAddress" => created_contract_address_hash,
           "transactionHash" => transaction_hash,
-          "transactionIndex" => transaction_index,
-          "l1Fee" => l1_fee,
-          "l1FeeScalar" => l1_fee_scalar,
-          "l1GasPrice" => l1_gas_price,
-          "l1GasUsed" => l1_gas_used,
-          "daFee" => da_fee,
-          "daGasPrice" => da_gas_price,
-          "daGasUsed" => da_gas_used,
+          "transactionIndex" => transaction_index
         } = elixir
       ) do
     status = elixir_to_status(elixir)
@@ -150,15 +226,70 @@ require Logger
       created_contract_address_hash: created_contract_address_hash,
       status: status,
       transaction_hash: transaction_hash,
-      transaction_index: transaction_index,
-      l1_fee: l1_fee,
-      l1_fee_scalar: l1_fee_scalar,
-      l1_gas_price: l1_gas_price,
-      l1_gas_used: l1_gas_used,
-      da_fee: da_fee,
-      da_gas_price: da_gas_price,
-      da_gas_used: da_gas_used,
+      transaction_index: transaction_index
     }
+    |> maybe_append_gas_price(elixir)
+  end
+
+  defp maybe_append_gas_price(params, %{"effectiveGasPrice" => effective_gas_price}) do
+    if is_nil(effective_gas_price) do
+      params
+    else
+      Map.put(params, :gas_price, effective_gas_price)
+    end
+  end
+
+  defp maybe_append_gas_price(params, _), do: params
+
+  case @chain_type do
+    :ethereum ->
+      defp chain_type_fields(params, elixir) do
+        params
+        |> Map.merge(%{
+          blob_gas_price: Map.get(elixir, "blobGasPrice", 0),
+          blob_gas_used: Map.get(elixir, "blobGasUsed", 0)
+        })
+      end
+
+    :optimism ->
+      defp chain_type_fields(params, elixir) do
+        {operator_fee_scalar_default, operator_fee_constant_default} =
+          if is_nil(op_isthmus_timestamp()) do
+            {nil, nil}
+          else
+            {0, 0}
+          end
+
+        params
+        |> Map.merge(%{
+          l1_fee: Map.get(elixir, "l1Fee", 0),
+          l1_fee_scalar: Map.get(elixir, "l1FeeScalar", 0),
+          l1_gas_price: Map.get(elixir, "l1GasPrice", 0),
+          l1_gas_used: Map.get(elixir, "l1GasUsed", 0),
+          operator_fee_scalar: Map.get(elixir, "operatorFeeScalar", operator_fee_scalar_default),
+          operator_fee_constant: Map.get(elixir, "operatorFeeConstant", operator_fee_constant_default),
+          da_footprint_gas_scalar: Map.get(elixir, "daFootprintGasScalar")
+        })
+      end
+
+    :scroll ->
+      defp chain_type_fields(params, elixir) do
+        params
+        |> Map.merge(%{
+          l1_fee: Map.get(elixir, "l1Fee", 0)
+        })
+      end
+
+    :arbitrum ->
+      defp chain_type_fields(params, elixir) do
+        params
+        |> Map.merge(%{
+          gas_used_for_l1: Map.get(elixir, "gasUsedForL1")
+        })
+      end
+
+    _ ->
+      defp chain_type_fields(params, _), do: params
   end
 
   @doc """
@@ -274,12 +405,15 @@ require Logger
   # hash format
   # gas is passed in from the `t:EthereumJSONRPC.Transaction.params/0` to allow pre-Byzantium status to be derived
   defp entry_to_elixir({key, _} = entry)
-       when key in ~w(blockHash contractAddress from gas logsBloom root to transactionHash revertReason type effectiveGasPrice),
+       when key in ~w(blockHash contractAddress from gas logsBloom root to transactionHash
+                      revertReason type l1FeeScalar),
        do: {:ok, entry}
 
-# l1GasUsed l1GasPrice l1Fee are from Optimstic Rollups l2Geth
   defp entry_to_elixir({key, quantity})
-       when key in ~w(blockNumber cumulativeGasUsed gasUsed transactionIndex l1GasUsed l1GasPrice l1Fee daFee daGasPrice daGasUsed) do
+       when key in ~w(blockNumber cumulativeGasUsed gasUsed transactionIndex blobGasUsed
+                      blobGasPrice l1Fee l1GasPrice l1GasUsed effectiveGasPrice gasUsedForL1
+                      l1BlobBaseFeeScalar l1BlobBaseFee l1BaseFeeScalar operatorFeeScalar
+                      operatorFeeConstant daFootprintGasScalar) do
     result =
       if is_nil(quantity) do
         nil
@@ -289,20 +423,6 @@ require Logger
 
     {:ok, {key, result}}
   end
-
-  defp entry_to_elixir({key, quantity})
-    when key in ~w(l1FeeScalar) do
-  result =
-    if is_nil(quantity) do
-      nil
-    else
-      {data, _} = Float.parse(quantity)
-      data
-    end
-
-    {:ok, {key, result}}
-  end
-
 
   defp entry_to_elixir({"logs" = key, logs}) do
     {:ok, {key, Logs.to_elixir(logs)}}
@@ -325,32 +445,7 @@ require Logger
     end
   end
 
-  # fixes for latest ganache JSON RPC
-  defp entry_to_elixir({key, _}) when key in ~w(r s v) do
+  defp entry_to_elixir({_, _}) do
     :ignore
-  end
-
-  # Nethermind field
-  defp entry_to_elixir({"error", _}) do
-    :ignore
-  end
-
-  # Arbitrum fields
-  defp entry_to_elixir({key, _}) when key in ~w(returnData returnCode feeStats l1BlockNumber) do
-    :ignore
-  end
-
-  # Metis fields
-  defp entry_to_elixir({key, _}) when key in ~w(l1GasUsed l1GasPrice l1FeeScalar l1Fee daFee daGasPrice daGasUsed) do
-    :ignore
-  end
-
-  # GoQuorum specific transaction receipt fields
-  defp entry_to_elixir({key, _}) when key in ~w(isPrivacyMarkerTransaction) do
-    :ignore
-  end
-
-  defp entry_to_elixir({key, value}) do
-    {:error, {:unknown_key, %{key: key, value: value}}}
   end
 end

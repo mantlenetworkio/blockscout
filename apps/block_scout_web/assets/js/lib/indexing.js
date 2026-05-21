@@ -18,8 +18,10 @@ function tryUpdateIndexedStatus (el, indexedRatioBlocks = el.dataset.indexedRati
   let indexedText
   if (blocksPercentComplete === '100%') {
     const intTxsPercentComplete = numeral(el.dataset.indexedRatio).format('0%')
+    // @ts-ignore
     indexedText = `${intTxsPercentComplete} ${window.localized['Blocks With Internal Transactions Indexed']}`
   } else {
+    // @ts-ignore
     indexedText = `${blocksPercentComplete} ${window.localized['Blocks Indexed']}`
   }
 
@@ -41,10 +43,10 @@ export function updateIndexStatus (msg = {}, type) {
 }
 updateIndexStatus()
 
-const IndexingChannelBlocks = socket.channel('blocks:indexing')
+const IndexingChannelBlocks = socket.channel('blocks_old:indexing')
 IndexingChannelBlocks.join()
 IndexingChannelBlocks.on('index_status', (msg) => updateIndexStatus(humps.camelizeKeys(msg), 'blocks'))
 
-const indexingChannelInternalTransactions = socket.channel('blocks:indexing_internal_transactions')
+const indexingChannelInternalTransactions = socket.channel('blocks_old:indexing_internal_transactions')
 indexingChannelInternalTransactions.join()
 indexingChannelInternalTransactions.on('index_status', (msg) => updateIndexStatus(humps.camelizeKeys(msg), 'internal_transactions'))

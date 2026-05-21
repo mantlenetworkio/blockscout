@@ -89,6 +89,7 @@ export function reducer (state, action) {
 const elements = {
   '[data-selector="channel-disconnected-message"]': {
     render ($el, state) {
+      // @ts-ignore
       if (state.channelDisconnected && !window.loading) $el.show()
     }
   },
@@ -119,11 +120,13 @@ const elements = {
 
 if ($('[data-page="address-transactions"]').length) {
   window.onbeforeunload = () => {
+    // @ts-ignore
     window.loading = true
   }
 
   const store = createAsyncLoadStore(reducer, initialState, 'dataset.identifierHash')
   const addressHash = $('[data-page="address-details"]')[0].dataset.pageAddressHash
+  // @ts-ignore
   const { filter, blockNumber } = humps.camelizeKeys(URI(window.location).query(true))
 
   connectElements({ store, elements })
@@ -135,7 +138,7 @@ if ($('[data-page="address-transactions"]').length) {
     beyondPageOne: !!blockNumber
   })
 
-  const addressChannel = subscribeChannel(`addresses:${addressHash}`)
+  const addressChannel = subscribeChannel(`addresses_old:${addressHash}`)
   addressChannel.onError(() => store.dispatch({ type: 'CHANNEL_DISCONNECTED' }))
   addressChannel.on('transaction', batchChannel((msgs) =>
     store.dispatch({
@@ -150,7 +153,7 @@ if ($('[data-page="address-transactions"]').length) {
     })
   ))
 
-  const rewardsChannel = subscribeChannel(`rewards:${addressHash}`)
+  const rewardsChannel = subscribeChannel(`rewards_old:${addressHash}`)
   rewardsChannel.onError(() => store.dispatch({ type: 'CHANNEL_DISCONNECTED' }))
   rewardsChannel.on('new_reward', (msg) => {
     store.dispatch({
@@ -174,6 +177,7 @@ if ($('[data-page="address-transactions"]').length) {
 function loadTransactions (store) {
   const path = $('[class="card-body"]')[0].dataset.asyncListing
   store.dispatch({ type: 'START_TRANSACTIONS_FETCH' })
+  // @ts-ignore
   $.getJSON(path, { type: 'JSON' })
     .done(response => store.dispatch({ type: 'TRANSACTIONS_FETCHED', msg: humps.camelizeKeys(response) }))
     .fail(() => store.dispatch({ type: 'TRANSACTIONS_FETCH_ERROR' }))

@@ -1,7 +1,7 @@
 defmodule BlockScoutWeb.AddressViewTest do
   use BlockScoutWeb.ConnCase, async: true
 
-  alias Explorer.Chain.{Address, Data, Hash, Transaction}
+  alias Explorer.Chain.{Address, Hash, Transaction}
   alias BlockScoutWeb.{AddressView, Endpoint}
 
   describe "address_partial_selector/4" do
@@ -17,10 +17,10 @@ defmodule BlockScoutWeb.AddressViewTest do
         insert(:internal_transaction,
           index: 1,
           transaction: transaction,
+          transaction_index: transaction.index,
           to_address: nil,
-          created_contract_address_hash: nil,
-          block_hash: transaction.block_hash,
-          block_index: 1
+          created_contract_address: nil,
+          block_number: transaction.block_number
         )
 
       assert "Contract Address Pending" == AddressView.address_partial_selector(internal_transaction, :to, nil)
@@ -176,23 +176,6 @@ defmodule BlockScoutWeb.AddressViewTest do
     assert "" = AddressView.balance_percentage(address, nil)
   end
 
-  describe "contract?/1" do
-    test "with a smart contract" do
-      {:ok, code} = Data.cast("0x000000000000000000000000862d67cb0773ee3f8ce7ea89b328ffea861ab3ef")
-      address = insert(:address, contract_code: code)
-      assert AddressView.contract?(address)
-    end
-
-    test "with an account" do
-      address = insert(:address, contract_code: nil)
-      refute AddressView.contract?(address)
-    end
-
-    test "with nil address" do
-      assert AddressView.contract?(nil)
-    end
-  end
-
   describe "hash/1" do
     test "gives a string version of an address's hash" do
       address = %Address{
@@ -230,21 +213,6 @@ defmodule BlockScoutWeb.AddressViewTest do
     test "it returns an encoded value" do
       address = build(:address)
       assert {:ok, _} = Base.decode64(AddressView.qr_code(address.hash))
-    end
-  end
-
-  describe "smart_contract_verified?/1" do
-    test "returns true when smart contract is verified" do
-      smart_contract = insert(:smart_contract, contract_code_md5: "123")
-      address = insert(:address, smart_contract: smart_contract)
-
-      assert AddressView.smart_contract_verified?(address)
-    end
-
-    test "returns false when smart contract is not verified" do
-      address = insert(:address, smart_contract: nil)
-
-      refute AddressView.smart_contract_verified?(address)
     end
   end
 
@@ -373,7 +341,7 @@ defmodule BlockScoutWeb.AddressViewTest do
   describe "address_page_title/1" do
     test "uses the Smart Contract name when the contract is verified" do
       smart_contract = build(:smart_contract, name: "POA")
-      address = build(:address, smart_contract: smart_contract)
+      address = build(:address, smart_contract: smart_contract, verified: true)
 
       assert AddressView.address_page_title(address) == "POA (#{address})"
     end

@@ -1,7 +1,7 @@
 defmodule BlockScoutWeb.AddressTokenTransferControllerTest do
   use BlockScoutWeb.ConnCase
 
-  import BlockScoutWeb.WebRouter.Helpers,
+  import BlockScoutWeb.Routers.WebRouter.Helpers,
     only: [address_token_transfers_path: 4, address_token_transfers_path: 5]
 
   alias Explorer.Chain.{Address, Token}
@@ -151,11 +151,12 @@ defmodule BlockScoutWeb.AddressTokenTransferControllerTest do
     test "returns next_page_path when there are more items", %{conn: conn} do
       address = insert(:address)
       token = insert(:token)
+      start_block_number = 2_000_000 + System.unique_integer([:positive])
 
       page_last_transfer =
         1..50
         |> Enum.map(fn index ->
-          block = insert(:block, number: 1000 - index)
+          block = insert(:block, number: start_block_number - index)
 
           transaction =
             :transaction
@@ -174,7 +175,7 @@ defmodule BlockScoutWeb.AddressTokenTransferControllerTest do
         |> List.last()
 
       Enum.each(51..60, fn index ->
-        block = insert(:block, number: 1000 - index)
+        block = insert(:block, number: start_block_number - index)
 
         transaction =
           :transaction
@@ -207,11 +208,9 @@ defmodule BlockScoutWeb.AddressTokenTransferControllerTest do
           :index,
           Address.checksum(address.hash),
           Address.checksum(token.contract_address_hash),
-          %{
-            block_number: page_last_transfer.block_number,
-            index: page_last_transfer.index,
-            items_count: "50"
-          }
+          index: page_last_transfer.index,
+          block_number: page_last_transfer.block_number,
+          items_count: "50"
         )
 
       assert Map.get(json_response(conn, 200), "next_page_path") == expected_path

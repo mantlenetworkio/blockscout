@@ -95,21 +95,42 @@ defmodule EthereumJSONRPC.Variant do
               EthereumJSONRPC.json_rpc_named_arguments()
             ) :: {:ok, [raw_trace_params]} | {:error, reason :: term} | :ignore
 
+  @doc """
+  Fetches the raw traces from the variant of the Ethereum JSONRPC API.
+
+  ## Returns
+
+   * `{:ok, [raw_traces]}` - raw traces were successfully fetched for all transactions
+   * `{:error, reason}` - there was one or more errors with `reason` in fetching at least one of the transaction's
+       raw traces
+   * `:ignore` - the variant does not support fetching internal transactions.
+  """
+  @callback fetch_transaction_raw_traces(
+              %{hash: EthereumJSONRPC.hash(), block_number: EthereumJSONRPC.block_number()},
+              EthereumJSONRPC.json_rpc_named_arguments()
+            ) :: {:ok, [raw_trace_params]} | {:error, reason :: term} | :ignore
+
   def get do
-    variant = System.get_env("ETHEREUM_JSONRPC_VARIANT", "nethermind")
+    default_variant = get_default_variant()
 
-    cond do
-      is_nil(variant) ->
-        "nethermind"
+    variant = System.get_env("ETHEREUM_JSONRPC_VARIANT", default_variant)
 
-      variant == "parity" ->
-        "nethermind"
+    if variant == "parity" do
+      "nethermind"
+    else
+      variant
+      |> String.split(".")
+      |> List.last()
+      |> String.downcase()
+    end
+  end
 
-      true ->
-        variant
-        |> String.split(".")
-        |> List.last()
-        |> String.downcase()
+  # credo:disable-for-next-line
+  defp get_default_variant do
+    case Application.get_env(:explorer, :chain_type) do
+      :rsk -> "rsk"
+      :filecoin -> "filecoin"
+      _ -> "geth"
     end
   end
 end

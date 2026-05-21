@@ -8,7 +8,7 @@ defmodule EthereumJSONRPC.WebSocket do
   @behaviour Transport
 
   @enforce_keys ~w(url web_socket)a
-  defstruct ~w(url web_socket web_socket_options)a
+  defstruct ~w(url fallback_url web_socket web_socket_options)a
 
   @typedoc """
   WebSocket name
@@ -43,7 +43,7 @@ defmodule EthereumJSONRPC.WebSocket do
   Starts web socket attached to `url` with `options`.
   """
   # Return is same as `t:GenServer.on_start/0`
-  @callback start_link([(url :: String.t()) | (options :: term())]) ::
+  @callback start_link(url :: String.t(), options :: term()) ::
               {:ok, pid()} | :ignore | {:error, {:already_started, pid()} | (reason :: term())}
 
   @doc """
@@ -53,7 +53,7 @@ defmodule EthereumJSONRPC.WebSocket do
 
    * `{:ok, result}` - `result` is the `/result` from JSONRPC response object of format
      `%{"id" => ..., "result" => result}`.
-   * `{:error, reason}` - `reason` is the the `/error` from JSONRPC response object of format
+   * `{:error, reason}` - `reason` is the `/error` from JSONRPC response object of format
      `%{"id" => ..., "error" => reason}`.  The transport can also give any `term()` for `reason` if a more specific
      reason is possible.
 

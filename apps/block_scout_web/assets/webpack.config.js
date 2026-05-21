@@ -36,6 +36,7 @@ const appJs =
   {
     entry: {
       'app': './js/app.js',
+      'app_extra': './js/app_extra.js',
       'chart-loader': './js/chart-loader.js',
       'balance-chart-loader': './js/balance-chart-loader.js',
       'chain': './js/pages/chain.js',
@@ -49,8 +50,6 @@ const appJs =
       'address-validations': './js/pages/address/validations.js',
       'validated-transactions': './js/pages/transactions.js',
       'verified-contracts': './js/pages/verified_contracts.js',
-      'l2-to-l1-txn': './js/pages/l2_to_l1_txn.js',
-      'l1-to-l2-txn': './js/pages/l1_to_l2_txn.js',
       'pending-transactions': './js/pages/pending_transactions.js',
       'transaction': './js/pages/transaction.js',
       'verification-form': './js/pages/verification_form.js',
@@ -70,6 +69,8 @@ const appJs =
       'text-ad': './js/lib/text_ad.js',
       'banner': './js/lib/banner.js',
       'autocomplete': './js/lib/autocomplete.js',
+      'custom-scrollbar': './js/lib/custom_scrollbar.js',
+      'custom-scrollbar-styles': './css/custom-scrollbar.scss',
       'search-results': './js/pages/search-results/search.js',
       'token-overview': './js/pages/token/overview.js',
       'export-csv': './css/export-csv.scss',
@@ -107,7 +108,10 @@ const appJs =
                 esModule: false,
               },
             }, {
-              loader: 'css-loader'
+              loader: 'css-loader',
+              options: {
+                esModule: false,
+              },
             }, {
               loader: 'postcss-loader'
             }, {
@@ -165,13 +169,10 @@ const appJs =
       ),
       new ContextReplacementPlugin(/moment[\/\\]locale$/, /en/),
       new webpack.DefinePlugin({
-        'process.env.SOCKET_ROOT': JSON.stringify(process.env.SOCKET_ROOT),
-        'process.env.NETWORK_PATH': JSON.stringify(process.env.NETWORK_PATH),
         'process.env.MIXPANEL_TOKEN': JSON.stringify(process.env.MIXPANEL_TOKEN),
         'process.env.MIXPANEL_URL': JSON.stringify(process.env.MIXPANEL_URL),
         'process.env.AMPLITUDE_API_KEY': JSON.stringify(process.env.AMPLITUDE_API_KEY),
-        'process.env.AMPLITUDE_URL': JSON.stringify(process.env.AMPLITUDE_URL),
-        'process.env.CHAIN_ID': JSON.stringify(process.env.CHAIN_ID)
+        'process.env.AMPLITUDE_URL': JSON.stringify(process.env.AMPLITUDE_URL)
       }),
       new webpack.ProvidePlugin({
         process: 'process/browser',

@@ -3,6 +3,9 @@ defmodule Explorer.Chain.Import.Runner.TokenTransfers do
   Bulk imports `t:Explorer.Chain.TokenTransfer.t/0`.
   """
 
+  use Utils.RuntimeEnvHelper,
+    chain_identity: [:explorer, :chain_identity]
+
   require Ecto.Query
 
   import Ecto.Query, only: [from: 2]
@@ -61,13 +64,27 @@ defmodule Explorer.Chain.Import.Runner.TokenTransfers do
     on_conflict = Map.get_lazy(options, :on_conflict, &default_on_conflict/0)
 
     # Enforce TokenTransfer ShareLocks order (see docs: sharelocks.md)
-    ordered_changes_list = Enum.sort_by(changes_list, &{&1.transaction_hash, &1.block_hash, &1.log_index})
+
+    {ordered_changes_list, conflict_target} =
+      case chain_identity() do
+        {:optimism, :celo} ->
+          {
+            Enum.sort_by(changes_list, &{&1.block_hash, &1.log_index}),
+            [:log_index, :block_hash]
+          }
+
+        _ ->
+          {
+            Enum.sort_by(changes_list, &{&1.transaction_hash, &1.block_hash, &1.log_index}),
+            [:transaction_hash, :log_index, :block_hash]
+          }
+      end
 
     {:ok, inserted} =
       Import.insert_changes_list(
         repo,
         ordered_changes_list,
-        conflict_target: [:transaction_hash, :log_index, :block_hash],
+        conflict_target: conflict_target,
         on_conflict: on_conflict,
         for: TokenTransfer,
         returning: true,
@@ -79,30 +96,70 @@ defmodule Explorer.Chain.Import.Runner.TokenTransfers do
   end
 
   defp default_on_conflict do
-    from(
-      token_transfer in TokenTransfer,
-      update: [
-        set: [
-          # Don't update `transaction_hash` as it is part of the composite primary key and used for the conflict target
-          # Don't update `log_index` as it is part of the composite primary key and used for the conflict target
-          amount: fragment("EXCLUDED.amount"),
-          from_address_hash: fragment("EXCLUDED.from_address_hash"),
-          to_address_hash: fragment("EXCLUDED.to_address_hash"),
-          token_contract_address_hash: fragment("EXCLUDED.token_contract_address_hash"),
-          token_ids: fragment("EXCLUDED.token_ids"),
-          inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token_transfer.inserted_at),
-          updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token_transfer.updated_at)
-        ]
-      ],
-      where:
-        fragment(
-          "(EXCLUDED.amount, EXCLUDED.from_address_hash, EXCLUDED.to_address_hash, EXCLUDED.token_contract_address_hash, EXCLUDED.token_ids) IS DISTINCT FROM (?, ? ,? , ?, ?)",
-          token_transfer.amount,
-          token_transfer.from_address_hash,
-          token_transfer.to_address_hash,
-          token_transfer.token_contract_address_hash,
-          token_transfer.token_ids
+    case chain_identity() do
+      {:optimism, :celo} ->
+        from(
+          token_transfer in TokenTransfer,
+          update: [
+            set: [
+              # Don't update `log_index` as it is part of the composite primary
+              # key and used for the conflict target
+              transaction_hash: fragment("EXCLUDED.transaction_hash"),
+              amount: fragment("EXCLUDED.amount"),
+              from_address_hash: fragment("EXCLUDED.from_address_hash"),
+              to_address_hash: fragment("EXCLUDED.to_address_hash"),
+              token_contract_address_hash: fragment("EXCLUDED.token_contract_address_hash"),
+              token_ids: fragment("EXCLUDED.token_ids"),
+              token_type: fragment("EXCLUDED.token_type"),
+              block_consensus: fragment("EXCLUDED.block_consensus"),
+              inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token_transfer.inserted_at),
+              updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token_transfer.updated_at)
+            ]
+          ],
+          where:
+            fragment(
+              "(EXCLUDED.amount, EXCLUDED.from_address_hash, EXCLUDED.to_address_hash, EXCLUDED.token_contract_address_hash, EXCLUDED.token_ids, EXCLUDED.token_type, EXCLUDED.block_consensus, EXCLUDED.transaction_hash) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?)",
+              token_transfer.amount,
+              token_transfer.from_address_hash,
+              token_transfer.to_address_hash,
+              token_transfer.token_contract_address_hash,
+              token_transfer.token_ids,
+              token_transfer.token_type,
+              token_transfer.block_consensus,
+              token_transfer.transaction_hash
+            )
         )
-    )
+
+      _ ->
+        from(
+          token_transfer in TokenTransfer,
+          update: [
+            set: [
+              # Don't update `transaction_hash` as it is part of the composite primary key and used for the conflict target
+              # Don't update `log_index` as it is part of the composite primary key and used for the conflict target
+              amount: fragment("EXCLUDED.amount"),
+              from_address_hash: fragment("EXCLUDED.from_address_hash"),
+              to_address_hash: fragment("EXCLUDED.to_address_hash"),
+              token_contract_address_hash: fragment("EXCLUDED.token_contract_address_hash"),
+              token_ids: fragment("EXCLUDED.token_ids"),
+              token_type: fragment("EXCLUDED.token_type"),
+              block_consensus: fragment("EXCLUDED.block_consensus"),
+              inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token_transfer.inserted_at),
+              updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token_transfer.updated_at)
+            ]
+          ],
+          where:
+            fragment(
+              "(EXCLUDED.amount, EXCLUDED.from_address_hash, EXCLUDED.to_address_hash, EXCLUDED.token_contract_address_hash, EXCLUDED.token_ids, EXCLUDED.token_type, EXCLUDED.block_consensus) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?)",
+              token_transfer.amount,
+              token_transfer.from_address_hash,
+              token_transfer.to_address_hash,
+              token_transfer.token_contract_address_hash,
+              token_transfer.token_ids,
+              token_transfer.token_type,
+              token_transfer.block_consensus
+            )
+        )
+    end
   end
 end

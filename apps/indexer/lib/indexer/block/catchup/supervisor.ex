@@ -5,7 +5,7 @@ defmodule Indexer.Block.Catchup.Supervisor do
 
   use Supervisor
 
-  alias Indexer.Block.Catchup.{BoundIntervalSupervisor, MissingRangesCollector}
+  alias Indexer.Block.Catchup.{BoundIntervalSupervisor, MassiveBlocksFetcher, MissingRangesCollector}
 
   def child_spec([init_arguments]) do
     child_spec([init_arguments, []])
@@ -31,7 +31,15 @@ defmodule Indexer.Block.Catchup.Supervisor do
       [
         {MissingRangesCollector, []},
         {Task.Supervisor, name: Indexer.Block.Catchup.TaskSupervisor},
-        {BoundIntervalSupervisor, [bound_interval_supervisor_arguments, [name: BoundIntervalSupervisor]]}
+        {MassiveBlocksFetcher,
+         [%{task_supervisor: Indexer.Block.Catchup.TaskSupervisor}, [name: MassiveBlocksFetcher]]},
+        {BoundIntervalSupervisor,
+         [
+           update_in(bound_interval_supervisor_arguments, [:block_fetcher], fn fetcher ->
+             %{fetcher | task_supervisor: Indexer.Block.Catchup.TaskSupervisor}
+           end),
+           [name: BoundIntervalSupervisor]
+         ]}
       ],
       strategy: :one_for_one
     )

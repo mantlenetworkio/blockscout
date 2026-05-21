@@ -1,402 +1,254 @@
 defmodule BlockScoutWeb.Models.TransactionStateHelper do
   @moduledoc """
-    Module includes functions needed for BlockScoutWeb.TransactionStateController
+    Transaction state changes related functions
   """
 
-  alias Explorer.{Chain, Chain.Wei, PagingOptions}
-  alias Explorer.Chain
+  import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
+  import Explorer.PagingOptions, only: [default_paging_options: 0]
+  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
+  import Explorer.Chain.SmartContract.Proxy.Models.Implementation, only: [proxy_implementations_association: 0]
+
+  alias Explorer.{Chain, PagingOptions, Repo}
+
+  alias Explorer.Chain.{
+    Address.CoinBalance,
+    BlockNumberHelper,
+    DenormalizationHelper,
+    InternalTransaction,
+    Transaction,
+    Wei
+  }
+
+  alias Explorer.Chain.Cache.StateChanges
   alias Explorer.Chain.Transaction.StateChange
-  alias Indexer.Fetcher.{CoinBalance, TokenBalance}
+  alias Indexer.Fetcher.OnDemand.CoinBalance, as: CoinBalanceOnDemand
+  alias Indexer.Fetcher.OnDemand.TokenBalance, as: TokenBalanceOnDemand
 
-  {:ok, burn_address_hash} = Chain.string_to_address_hash("0x0000000000000000000000000000000000000000")
-
+  {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
   @burn_address_hash burn_address_hash
 
-  # credo:disable-for-next-line /Complexity/
-  def state_changes(transaction) do
-    transaction_hash = transaction.hash
+  @doc """
+  This function takes transaction, fetches all the transactions before this one from the same block
+  together with internal transactions and token transfers and calculates native coin and token
+  balances before and after this transaction.
+  """
+  @spec state_changes(Transaction.t(), [Chain.paging_options() | Chain.api?()]) :: [StateChange.t()]
+  def state_changes(transaction, options \\ [])
 
-    full_options = [
-      necessity_by_association: %{
-        [from_address: :smart_contract] => :optional,
-        [to_address: :smart_contract] => :optional,
-        [from_address: :names] => :optional,
-        [to_address: :names] => :optional,
-        from_address: :required,
-        to_address: :required
+  def state_changes(%Transaction{} = transaction, options) do
+    paging_options = Keyword.get(options, :paging_options, default_paging_options())
+    {offset} = paging_options.key || {0}
+
+    offset
+    |> Kernel.==(0)
+    |> if do
+      get_and_cache_state_changes(transaction, options)
+    else
+      case StateChanges.get(transaction.hash) do
+        %StateChanges{state_changes: state_changes} -> state_changes
+        _ -> get_and_cache_state_changes(transaction, options)
+      end
+    end
+    |> Enum.drop(offset)
+  end
+
+  def state_changes(_transaction, _options), do: []
+
+  defp get_and_cache_state_changes(transaction, options) do
+    state_changes = do_state_changes(transaction, options)
+
+    StateChanges.update(%StateChanges{
+      transaction_hash: transaction.hash,
+      state_changes: state_changes
+    })
+
+    state_changes
+  end
+
+  defp do_state_changes(%Transaction{} = transaction, options) do
+    block_transactions =
+      transaction.block_hash
+      |> Chain.block_to_transactions(
+        paging_options: %PagingOptions{key: nil, page_size: nil},
+        api?: Keyword.get(options, :api?, false)
+      )
+      |> Enum.filter(&(&1.index <= transaction.index))
+      |> Repo.preload([:token_transfers])
+      |> Transaction.preload_internal_transactions()
+
+    transaction =
+      block_transactions
+      |> Enum.find(&(&1.hash == transaction.hash))
+      |> Repo.preload(
+        token_transfers: [
+          token: reputation_association(),
+          from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
+          to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
+        ],
+        block: [miner: [:names, :smart_contract, proxy_implementations_association()]],
+        from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
+        to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
+      )
+      |> Transaction.preload_internal_transactions(
+        from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
+        to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
+      )
+
+    previous_block_number = BlockNumberHelper.previous_block_number(transaction.block_number)
+
+    coin_balances_before_block = transaction_to_coin_balances(transaction, previous_block_number, options)
+
+    coin_balances_before_transaction =
+      StateChange.coin_balances_before(transaction, block_transactions, coin_balances_before_block)
+
+    native_coin_entries = StateChange.native_coin_entries(transaction, coin_balances_before_transaction)
+
+    token_balances_before =
+      transaction.token_transfers
+      |> Enum.reduce(%{}, &token_transfers_to_balances_reducer(&1, &2, previous_block_number, options))
+      |> StateChange.token_balances_before(transaction, block_transactions)
+
+    tokens_entries = StateChange.token_entries(transaction.token_transfers, token_balances_before)
+
+    native_coin_entries ++ tokens_entries
+  end
+
+  defp transaction_to_coin_balances(transaction, previous_block_number, options) do
+    Enum.reduce(
+      transaction.internal_transactions,
+      %{
+        transaction.from_address_hash =>
+          {transaction.from_address, coin_balance(transaction.from_address_hash, previous_block_number, options)},
+        transaction.to_address_hash =>
+          {transaction.to_address, coin_balance(transaction.to_address_hash, previous_block_number, options)},
+        transaction.block.miner_hash =>
+          {transaction.block.miner, coin_balance(transaction.block.miner_hash, previous_block_number, options)}
       },
-      # we need to consider all token transfers in block to show whole state change of transaction
-      paging_options: %PagingOptions{key: nil, page_size: nil}
-    ]
-
-    token_transfers = Chain.transaction_to_token_transfers(transaction_hash, full_options)
-
-    block = transaction.block
-
-    block_txs =
-      Chain.block_to_transactions(block.hash,
-        necessity_by_association: %{},
-        paging_options: %PagingOptions{key: nil, page_size: nil}
-      )
-
-    {from_before, to_before, miner_before} = coin_balances_before(transaction, block_txs)
-
-    from_hash = transaction.from_address_hash
-    to_hash = transaction.to_address_hash
-    miner_hash = block.miner_hash
-
-    from_coin_entry =
-      if from_hash not in [to_hash, miner_hash] do
-        from = transaction.from_address
-        from_after = do_update_coin_balance_from_tx(from_hash, transaction, from_before, block)
-        balance_diff = Wei.sub(from_after, from_before)
-
-        if has_diff?(balance_diff) do
-          %StateChange{
-            coin_or_token_transfers: :coin,
-            address: from,
-            balance_before: from_before,
-            balance_after: from_after,
-            balance_diff: balance_diff,
-            miner?: false
-          }
-        end
-      end
-
-    to_coin_entry =
-      if not is_nil(to_hash) and to_hash != miner_hash do
-        to = transaction.to_address
-        to_after = do_update_coin_balance_from_tx(to_hash, transaction, to_before, block)
-        balance_diff = Wei.sub(to_after, to_before)
-
-        if has_diff?(balance_diff) do
-          %StateChange{
-            coin_or_token_transfers: :coin,
-            address: to,
-            balance_before: to_before,
-            balance_after: to_after,
-            balance_diff: balance_diff,
-            miner?: false
-          }
-        end
-      end
-
-    miner = block.miner
-    miner_after = do_update_coin_balance_from_tx(miner_hash, transaction, miner_before, block)
-    miner_diff = Wei.sub(miner_after, miner_before)
-
-    miner_entry =
-      if has_diff?(miner_diff) do
-        %StateChange{
-          coin_or_token_transfers: :coin,
-          address: miner,
-          balance_before: miner_before,
-          balance_after: miner_after,
-          balance_diff: miner_diff,
-          miner?: true
-        }
-      end
-
-    token_balances_before = token_balances_before(token_transfers, transaction, block_txs)
-
-    token_balances_after =
-      do_update_token_balances_from_token_transfers(
-        token_transfers,
-        token_balances_before,
-        :include_transfers
-      )
-
-    items =
-      for {address, balances} <- token_balances_after,
-          {token_hash, {balance, transfers}} <- balances do
-        balance_before = token_balances_before[address][token_hash]
-        balance_diff = Decimal.sub(balance, balance_before)
-        transfer = elem(List.first(transfers), 1)
-
-        if transfer.token.type != "ERC-20" or has_diff?(balance_diff) do
-          %StateChange{
-            coin_or_token_transfers: transfers,
-            address: address,
-            balance_before: balance_before,
-            balance_after: balance,
-            balance_diff: balance_diff,
-            miner?: false
-          }
-        end
-      end
-
-    [from_coin_entry, to_coin_entry, miner_entry | items]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.sort_by(fn state_change -> to_string(state_change.address && state_change.address.hash) end)
+      &internal_transaction_to_coin_balances(&1, previous_block_number, options, &2)
+    )
   end
 
-  defp coin_balance(address_hash, block_number, retry? \\ false)
+  defp internal_transaction_to_coin_balances(
+         %InternalTransaction{call_type: call_type, call_type_enum: call_type_enum},
+         _,
+         _,
+         acc
+       )
+       when :delegatecall in [call_type, call_type_enum],
+       do: acc
 
-  defp coin_balance(address_hash, _block_number, _retry?) when is_nil(address_hash) do
-    %Wei{value: Decimal.new(0)}
+  defp internal_transaction_to_coin_balances(internal_transaction, previous_block_number, options, acc) do
+    if not is_nil(internal_transaction.value) and Decimal.positive?(Wei.to(internal_transaction.value, :wei)) do
+      acc
+      |> Map.put_new_lazy(internal_transaction.from_address_hash, fn ->
+        {internal_transaction.from_address,
+         coin_balance(internal_transaction.from_address_hash, previous_block_number, options)}
+      end)
+      |> Map.put_new_lazy(internal_transaction.to_address_hash, fn ->
+        {internal_transaction.to_address,
+         coin_balance(internal_transaction.to_address_hash, previous_block_number, options)}
+      end)
+    else
+      acc
+    end
   end
 
-  defp coin_balance(address_hash, block_number, retry?) do
-    case Chain.get_coin_balance(address_hash, block_number) do
+  defp coin_balance(address_hash, _block_number, _options) when is_nil(address_hash) do
+    Wei.zero()
+  end
+
+  defp coin_balance(address_hash, block_number, options) do
+    case CoinBalance.get_coin_balance(address_hash, block_number, options) do
       %{value: val} when not is_nil(val) ->
         val
 
       _ ->
-        if retry? do
-          %Wei{value: Decimal.new(0)}
-        else
-          json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
-          CoinBalance.run([{address_hash.bytes, block_number}], json_rpc_named_arguments)
-          # after CoinBalance.run balance is fetched and imported, so we can call coin_balance again
-          coin_balance(address_hash, block_number, true)
-        end
+        CoinBalanceOnDemand.trigger_historic_fetch(options[:ip], address_hash, block_number)
+        Wei.zero()
     end
   end
 
-  defp coin_balances_before(tx, block_txs) do
-    block = tx.block
+  defp token_balances(_address_hash, %{token: nil}, _block_number, _options), do: %{transfers: []}
 
-    from_before = coin_balance(tx.from_address_hash, block.number - 1)
-    to_before = coin_balance(tx.to_address_hash, block.number - 1)
-    miner_before = coin_balance(block.miner_hash, block.number - 1)
+  defp token_balances(address_hash, token_transfer, block_number, options) do
+    token = token_transfer.token
 
-    block_txs
-    |> Enum.reduce_while(
-      {from_before, to_before, miner_before},
-      fn block_tx, {block_from, block_to, block_miner} = state ->
-        if block_tx.index < tx.index do
-          {:cont,
-           {do_update_coin_balance_from_tx(tx.from_address_hash, block_tx, block_from, block),
-            do_update_coin_balance_from_tx(tx.to_address_hash, block_tx, block_to, block),
-            do_update_coin_balance_from_tx(tx.block.miner_hash, block_tx, block_miner, block)}}
-        else
-          # txs ordered by index ascending, so we can halt after facing index greater or equal than index of our tx
-          {:halt, state}
-        end
+    token_ids =
+      if token.type == "ERC-1155" do
+        token_transfer.token_ids
+      else
+        [nil]
       end
-    )
+
+    Enum.into(token_ids, %{transfers: []}, &{&1, token_balance(address_hash, block_number, token, &1, options)})
   end
 
-  defp do_update_coin_balance_from_tx(address_hash, tx, balance, block) do
-    from = tx.from_address_hash
-    to = tx.to_address_hash
-    miner = block.miner_hash
-
-    balance
-    |> (&if(address_hash == from, do: Wei.sub(&1, from_loss(tx)), else: &1)).()
-    |> (&if(address_hash == to, do: Wei.sum(&1, to_profit(tx)), else: &1)).()
-    |> (&if(address_hash == miner, do: Wei.sum(&1, miner_profit(tx, block)), else: &1)).()
-  end
-
-  defp token_balance(address_hash, token_transfer, block_number, retry? \\ false)
-
-  defp token_balance(@burn_address_hash, _token_transfer, _block_number, _retry?) do
+  defp token_balance(@burn_address_hash, _block_number, _token, _token_id, _options) do
     Decimal.new(0)
   end
 
-  defp token_balance(address_hash, token_transfer, block_number, retry?) do
-    token = token_transfer.token
-    token_contract_address_hash = token.contract_address_hash
-
-    case Chain.get_token_balance(address_hash, token_contract_address_hash, block_number) do
+  defp token_balance(address_hash, block_number, token, token_id, options) do
+    case Chain.get_token_balance(address_hash, token.contract_address_hash, block_number, token_id, options) do
       %{value: val} when not is_nil(val) ->
         val
 
-      # we haven't fetched this balance yet
       _ ->
-        if retry? do
-          Decimal.new(0)
-        else
-          json_rpc_named_arguments = Application.get_env(:explorer, :json_rpc_named_arguments)
-
-          token_id_int =
-            case token_transfer.token_id do
-              %Decimal{} -> Decimal.to_integer(token_transfer.token_id)
-              id_int when is_integer(id_int) -> id_int
-              _ -> token_transfer.token_id
-            end
-
-          TokenBalance.run(
-            [
-              {address_hash.bytes, token_contract_address_hash.bytes, block_number, token.type, token_id_int, 0}
-            ],
-            json_rpc_named_arguments
-          )
-
-          # after TokenBalance.run balance is fetched and imported, so we can call token_balance again
-          token_balance(address_hash, token_transfer, block_number, true)
-        end
-    end
-  end
-
-  defp token_balances_before(token_transfers, tx, block_txs) do
-    balances_before =
-      token_transfers
-      |> Enum.reduce(%{}, fn transfer, balances_map ->
-        from = transfer.from_address
-        to = transfer.to_address
-        token_hash = transfer.token_contract_address_hash
-        prev_block = transfer.block_number - 1
-
-        balances_with_from =
-          case balances_map do
-            # from address already in the map
-            %{^from => %{^token_hash => _}} ->
-              balances_map
-
-            # we need to add from address into the map
-            _ ->
-              put_in(
-                balances_map,
-                Enum.map([from, token_hash], &Access.key(&1, %{})),
-                token_balance(from.hash, transfer, prev_block)
-              )
-          end
-
-        case balances_with_from do
-          # to address already in the map
-          %{^to => %{^token_hash => _}} ->
-            balances_with_from
-
-          # we need to add to address into the map
-          _ ->
-            put_in(
-              balances_with_from,
-              Enum.map([to, token_hash], &Access.key(&1, %{})),
-              token_balance(to.hash, transfer, prev_block)
-            )
-        end
-      end)
-
-    block_txs
-    |> Enum.reduce_while(
-      balances_before,
-      fn block_tx, state ->
-        if block_tx.index < tx.index do
-          {:cont, do_update_token_balances_from_token_transfers(block_tx.token_transfers, state)}
-        else
-          # txs ordered by index ascending, so we can halt after facing index greater or equal than index of our tx
-          {:halt, state}
-        end
-      end
-    )
-  end
-
-  defp do_update_token_balances_from_token_transfers(
-         token_transfers,
-         balances_map,
-         include_transfers \\ :no
-       ) do
-    Enum.reduce(
-      token_transfers,
-      balances_map,
-      &token_transfers_balances_reducer(&1, &2, include_transfers)
-    )
-  end
-
-  defp token_transfers_balances_reducer(transfer, state_balances_map, include_transfers) do
-    from = transfer.from_address
-    to = transfer.to_address
-    token = transfer.token_contract_address_hash
-
-    balances_map_from_included =
-      case state_balances_map do
-        # from address is needed to be updated in our map
-        %{^from => %{^token => val}} ->
-          put_in(
-            state_balances_map,
-            Enum.map([from, token], &Access.key(&1, %{})),
-            do_update_balance(val, :from, transfer, include_transfers)
-          )
-
-        # we are not interested in this address
-        _ ->
-          state_balances_map
-      end
-
-    case balances_map_from_included do
-      # to address is needed to be updated in our map
-      %{^to => %{^token => val}} ->
-        put_in(
-          balances_map_from_included,
-          Enum.map([to, token], &Access.key(&1, %{})),
-          do_update_balance(val, :to, transfer, include_transfers)
+        TokenBalanceOnDemand.trigger_historic_fetch(
+          options[:ip],
+          address_hash,
+          token.contract_address_hash,
+          token.type,
+          token_id,
+          block_number
         )
 
-      # we are not interested in this address
-      _ ->
-        balances_map_from_included
+        Decimal.new(0)
     end
   end
 
-  # point of this function is to include all transfers for frontend if option :include_transfer is passed
-  defp do_update_balance(old_val, type, transfer, include_transfers) do
-    transfer_amount = if is_nil(transfer.amount), do: 1, else: transfer.amount
+  defp token_transfers_to_balances_reducer(transfer, balances, prev_block, options) do
+    token_type =
+      if DenormalizationHelper.tt_denormalization_finished?() do
+        transfer.token_type
+      else
+        transfer.token && transfer.token.type
+      end
 
-    case {include_transfers, old_val, type} do
-      {:include_transfers, {val, transfers}, :from} ->
-        {Decimal.sub(val, transfer_amount), [{type, transfer} | transfers]}
-
-      {:include_transfers, {val, transfers}, :to} ->
-        {Decimal.add(val, transfer_amount), [{type, transfer} | transfers]}
-
-      {:include_transfers, val, :from} ->
-        {Decimal.sub(val, transfer_amount), [{type, transfer}]}
-
-      {:include_transfers, val, :to} ->
-        {Decimal.add(val, transfer_amount), [{type, transfer}]}
-
-      {_, val, :from} ->
-        Decimal.sub(val, transfer_amount)
-
-      {_, val, :to} ->
-        Decimal.add(val, transfer_amount)
-    end
-  end
-
-  def from_loss(tx) do
-    {_, fee} = Chain.fee(tx, :wei)
-
-    if error?(tx) do
-      %Wei{value: fee}
+    # Skip ERC-7984 (confidential) transfers - we can't track encrypted balances
+    if token_type == "ERC-7984" do
+      balances
     else
-      Wei.sum(tx.value, %Wei{value: fee})
+      from = transfer.from_address
+      to = transfer.to_address
+      token_hash = transfer.token_contract_address_hash
+
+      balances
+      |> case do
+        # from address already in the map
+        %{^from => %{^token_hash => _}} = balances ->
+          balances
+
+        # we need to add from address into the map
+        balances ->
+          put_in(
+            balances,
+            Enum.map([from, token_hash], &Access.key(&1, %{})),
+            token_balances(from.hash, transfer, prev_block, options)
+          )
+      end
+      |> case do
+        # to address already in the map
+        %{^to => %{^token_hash => _}} = balances ->
+          balances
+
+        # we need to add to address into the map
+        balances ->
+          put_in(
+            balances,
+            Enum.map([to, token_hash], &Access.key(&1, %{})),
+            token_balances(to.hash, transfer, prev_block, options)
+          )
+      end
     end
-  end
-
-  def to_profit(tx) do
-    if error?(tx) do
-      %Wei{value: 0}
-    else
-      tx.value
-    end
-  end
-
-  defp miner_profit(tx, block) do
-    base_fee_per_gas = block.base_fee_per_gas || %Wei{value: Decimal.new(0)}
-    max_priority_fee_per_gas = tx.max_priority_fee_per_gas || tx.gas_price
-    max_fee_per_gas = tx.max_fee_per_gas || tx.gas_price
-
-    priority_fee_per_gas =
-      Enum.min_by([max_priority_fee_per_gas, Wei.sub(max_fee_per_gas, base_fee_per_gas)], fn x ->
-        Wei.to(x, :wei)
-      end)
-
-    Wei.mult(priority_fee_per_gas, tx.gas_used)
-  end
-
-  defp error?(tx) do
-    case Chain.transaction_to_status(tx) do
-      {:error, _} -> true
-      _ -> false
-    end
-  end
-
-  def has_diff?(%Wei{value: val}) do
-    not Decimal.eq?(val, Decimal.new(0))
-  end
-
-  def has_diff?(val) do
-    not Decimal.eq?(val, Decimal.new(0))
   end
 end

@@ -15,11 +15,11 @@ $tile-status-error-reason: #ff7986 !default;
 $tile-status-awaiting-internal-transactions: $warning !default;
 $tile-padding: 1rem;
 $tile-title-color: #333 !default;
-$tile-body-a-color: #007bff;
+$tile-body-a-color: #5959d8 !default;
 
 @mixin generate-tile-block($prefix, $color, $label-color: false) {
   &#{ $prefix } {
-    border-left: 1px solid $color;
+    border-left: 4px solid $color;
 
     .tile-transaction-type-block {
       a {
@@ -49,21 +49,12 @@ $tile-body-a-color: #007bff;
       border-right: 1px solid $color;
       border-top: 1px solid $color;
       color: $color;
-      border-radius: 12px;
-      box-sizing: border-box;
-      overflow: hidden;
     }
   }
 }
 
 /*********************************************************************/
-.container {
-  .home-block-container{
-    .tile.tile-type-block{
-      border-left-width: 4px;
-    }
-  }
-}
+
 .tile-label {
   font-size: 12px;
   font-weight: 700;
@@ -153,7 +144,6 @@ $tile-body-a-color: #007bff;
   background-color: $gray-100;
   border-left: 1px solid $border-color;
   box-shadow: none;
-  border-radius: 8px;
 }
 
 .tile-code {
@@ -186,11 +176,6 @@ $tile-body-a-color: #007bff;
 }
 
 .tile {
-  [data-test="chain_transaction"]{
-    a[data-test="address_hash_link"]{
-      display: inline-block;
-    }
-  }
   span[data-address-hash] {
     color: $tile-body-a-color;
   }
@@ -301,20 +286,11 @@ $tile-body-a-color: #007bff;
 
   &.tile-type-block {
     max-width: 100%;
-    background-color: #F8F8F9;
-    border-radius: 12px;
     .tile-title {
       font-weight: 700;
       line-height: 1.2;
       margin-bottom: 12px;
       padding: 1rem 1rem 0 1rem;
-    }
-    hr {
-      border-bottom: none;
-      border-left: none;
-      border-right: none;
-      border-top: 1px solid #CFD2D4;
-      margin: 0 1rem;
     }
   }
 
@@ -609,7 +585,7 @@ $cube-quantity: 5;
 }
 
 .dark-theme-applied .dark-block-loader {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: #313355;
 }
 
 .title-with-label {

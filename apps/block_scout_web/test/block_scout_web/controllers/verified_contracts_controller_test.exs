@@ -1,27 +1,27 @@
 defmodule BlockScoutWeb.VerifiedContractsControllerTest do
   use BlockScoutWeb.ConnCase
 
-  import BlockScoutWeb.WebRouter.Helpers, only: [verified_contracts_path: 2, verified_contracts_path: 3]
+  import BlockScoutWeb.Routers.WebRouter.Helpers, only: [verified_contracts_path: 2, verified_contracts_path: 3]
 
   alias Explorer.Chain.SmartContract
 
-  alias Explorer.Chain.Cache.{
-    ContractsCounter,
-    NewContractsCounter,
-    NewVerifiedContractsCounter,
-    VerifiedContractsCounter
+  alias Explorer.Chain.Cache.Counters.{
+    ContractsCount,
+    NewContractsCount,
+    NewVerifiedContractsCount,
+    VerifiedContractsCount
   }
 
   describe "GET index/2" do
     test "returns 200", %{conn: conn} do
-      start_supervised!(ContractsCounter)
-      ContractsCounter.consolidate()
-      start_supervised!(NewContractsCounter)
-      NewContractsCounter.consolidate()
-      start_supervised!(NewVerifiedContractsCounter)
-      NewVerifiedContractsCounter.consolidate()
-      start_supervised!(VerifiedContractsCounter)
-      VerifiedContractsCounter.consolidate()
+      start_supervised!(ContractsCount)
+      ContractsCount.consolidate()
+      start_supervised!(NewContractsCount)
+      NewContractsCount.consolidate()
+      start_supervised!(NewVerifiedContractsCount)
+      NewVerifiedContractsCount.consolidate()
+      start_supervised!(VerifiedContractsCount)
+      VerifiedContractsCount.consolidate()
 
       conn = get(conn, verified_contracts_path(conn, :index))
 
@@ -58,15 +58,16 @@ defmodule BlockScoutWeb.VerifiedContractsControllerTest do
       %SmartContract{id: id} =
         60
         |> insert_list(:smart_contract)
+        |> Enum.sort_by(& &1.id, :asc)
         |> Enum.fetch!(10)
 
       conn = get(conn, verified_contracts_path(conn, :index), %{"type" => "JSON"})
 
       expected_path =
-        verified_contracts_path(conn, :index, %{
-          smart_contract_id: id,
+        verified_contracts_path(conn, :index,
+          id: id,
           items_count: "50"
-        })
+        )
 
       assert Map.get(json_response(conn, 200), "next_page_path") == expected_path
     end
@@ -80,8 +81,10 @@ defmodule BlockScoutWeb.VerifiedContractsControllerTest do
     end
 
     test "returns solidity contracts", %{conn: conn} do
-      insert(:smart_contract, is_vyper_contract: true)
-      %SmartContract{address_hash: solidity_hash} = insert(:smart_contract, is_vyper_contract: false)
+      insert(:smart_contract, language: :vyper)
+
+      %SmartContract{address_hash: solidity_hash} =
+        insert(:smart_contract, language: :solidity)
 
       path =
         verified_contracts_path(conn, :index, %{
@@ -97,8 +100,10 @@ defmodule BlockScoutWeb.VerifiedContractsControllerTest do
     end
 
     test "returns vyper contract", %{conn: conn} do
-      %SmartContract{address_hash: vyper_hash} = insert(:smart_contract, is_vyper_contract: true)
-      insert(:smart_contract, is_vyper_contract: false)
+      %SmartContract{address_hash: vyper_hash} =
+        insert(:smart_contract, language: :vyper)
+
+      insert(:smart_contract, language: :solidity)
 
       path =
         verified_contracts_path(conn, :index, %{
@@ -111,6 +116,25 @@ defmodule BlockScoutWeb.VerifiedContractsControllerTest do
       [smart_contracts_tile] = json_response(conn, 200)["items"]
 
       assert String.contains?(smart_contracts_tile, "data-identifier-hash=\"#{to_string(vyper_hash)}\"")
+    end
+
+    test "returns yul contract", %{conn: conn} do
+      %SmartContract{address_hash: yul_hash} =
+        insert(:smart_contract, abi: nil, language: :yul)
+
+      insert(:smart_contract)
+
+      path =
+        verified_contracts_path(conn, :index, %{
+          "filter" => "yul",
+          "type" => "JSON"
+        })
+
+      conn = get(conn, path)
+
+      [smart_contracts_tile] = json_response(conn, 200)["items"]
+
+      assert String.contains?(smart_contracts_tile, "data-identifier-hash=\"#{to_string(yul_hash)}\"")
     end
 
     test "returns search results by name", %{conn: conn} do

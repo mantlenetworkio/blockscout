@@ -1,26 +1,26 @@
 import Config
 
-hackney_opts_base = [pool: :ethereum_jsonrpc]
-
-hackney_opts =
-  if System.get_env("ETHEREUM_JSONRPC_HTTP_INSECURE", "") == "true" do
-    [:insecure] ++ hackney_opts_base
-  else
-    hackney_opts_base
-  end
+~w(config config_helper.exs)
+|> Path.join()
+|> Code.eval_file()
 
 config :explorer,
   json_rpc_named_arguments: [
     transport: EthereumJSONRPC.HTTP,
     transport_options: [
-      http: EthereumJSONRPC.HTTP.HTTPoison,
-      url: System.get_env("ETHEREUM_JSONRPC_HTTP_URL"),
+      http: EthereumJSONRPC.HTTP.Tesla,
+      urls: ConfigHelper.parse_urls_list(:http),
+      trace_urls: ConfigHelper.parse_urls_list(:trace),
+      eth_call_urls: ConfigHelper.parse_urls_list(:eth_call),
+      fallback_urls: ConfigHelper.parse_urls_list(:fallback_http),
+      fallback_trace_urls: ConfigHelper.parse_urls_list(:fallback_trace),
+      fallback_eth_call_urls: ConfigHelper.parse_urls_list(:fallback_eth_call),
       method_to_url: [
-        eth_call: System.get_env("ETHEREUM_JSONRPC_TRACE_URL"),
-        eth_getBalance: System.get_env("ETHEREUM_JSONRPC_TRACE_URL"),
-        trace_replayTransaction: System.get_env("ETHEREUM_JSONRPC_TRACE_URL")
+        eth_call: :eth_call,
+        eth_getBalance: :trace,
+        trace_replayTransaction: :trace
       ],
-      http_options: [recv_timeout: :timer.minutes(1), timeout: :timer.minutes(1), hackney: hackney_opts]
+      http_options: ConfigHelper.http_options(1)
     ],
     variant: EthereumJSONRPC.Besu
   ],
@@ -28,7 +28,8 @@ config :explorer,
     transport: EthereumJSONRPC.WebSocket,
     transport_options: [
       web_socket: EthereumJSONRPC.WebSocket.WebSocketClient,
-      url: System.get_env("ETHEREUM_JSONRPC_WS_URL")
+      url: ConfigHelper.parse_url_env_var("ETHEREUM_JSONRPC_WS_URL"),
+      fallback_url: ConfigHelper.parse_url_env_var("ETHEREUM_JSONRPC_FALLBACK_WS_URL")
     ],
     variant: EthereumJSONRPC.Besu
   ]

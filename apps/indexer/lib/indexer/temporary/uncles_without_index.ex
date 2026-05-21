@@ -33,7 +33,7 @@ defmodule Indexer.Temporary.UnclesWithoutIndex do
   def child_spec([init_options, gen_server_options]) when is_list(init_options) do
     {state, mergeable_init_options} = Keyword.pop(init_options, :json_rpc_named_arguments)
 
-    unless state do
+    if !state do
       raise ArgumentError,
             ":json_rpc_named_arguments must be provided to `#{__MODULE__}.child_spec " <>
               "to allow for json_rpc calls when running."
@@ -51,14 +51,16 @@ defmodule Indexer.Temporary.UnclesWithoutIndex do
   def init(initial, reducer, _) do
     query =
       from(bsdr in SecondDegreeRelation,
-        join: b in assoc(bsdr, :nephew),
-        where: is_nil(bsdr.index) and is_nil(bsdr.uncle_fetched_at) and b.consensus,
+        join: block in assoc(bsdr, :nephew),
+        where: is_nil(bsdr.index) and is_nil(bsdr.uncle_fetched_at) and block.consensus == true,
         select: bsdr.nephew_hash,
         group_by: bsdr.nephew_hash
       )
 
     {:ok, final} =
-      Repo.stream_reduce(query, initial, fn nephew_hash, acc ->
+      query
+      |> Chain.add_fetcher_limit(true)
+      |> Repo.stream_reduce(initial, fn nephew_hash, acc ->
         nephew_hash
         |> to_string()
         |> reducer.(acc)
@@ -121,7 +123,7 @@ defmodule Indexer.Temporary.UnclesWithoutIndex do
     loggable_errors = loggable_errors(errors)
     loggable_error_count = Enum.count(loggable_errors)
 
-    unless loggable_error_count == 0 do
+    if loggable_error_count != 0 do
       Logger.error(
         fn ->
           [

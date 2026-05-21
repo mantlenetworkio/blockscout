@@ -3,18 +3,9 @@ $dashboard-banner-gradient-end: lighten(
   $dashboard-banner-gradient-start,
   5%
 ) !default;
-$dashboard-banner-network-plain-container-background-color: lighten(
-  $dashboard-banner-gradient-end,
-  5%
-) !default;
-$dashboard-line-color-price: lighten(
-  $dashboard-banner-gradient-end,
-  5%
-) !default;
-$dashboard-line-color-price-dark-theme: lighten(
-  $dashboard-banner-gradient-end,
-  5%
-) !default;
+$dashboard-banner-network-plain-container-background-color: lighten($dashboard-banner-gradient-end, 5%) !default;
+$dashboard-line-color-price: lighten($dashboard-banner-gradient-end, 5%) !default;
+$dashboard-line-color-price-dark-theme: lighten($dashboard-banner-gradient-end, 5%) !default;
 $dashboard-line-color-market: $secondary !default;
 $dashboard-line-color-market-dark-theme: $secondary !default;
 $dashboard-line-color-transactions: $warning !default;
@@ -30,135 +21,59 @@ $dashboard-banner-chart-axis-font-color-alt: #333;
 
 .dashboard-banner-container {
   @include gradient-container();
-  margin-bottom: 60px;
+  margin-bottom: 3rem;
   overflow: hidden;
   padding: 0;
   position: relative;
-  overflow: visible;
-  @media (max-width: 1199px) {
-    height: 450px;
-  }
+  height: 264px;
   @include media-breakpoint-down(sm) {
-    height: auto;
+      height: auto;
   }
   @include media-breakpoint-down(md) {
-    height: auto;
-  }
-  .dashboard-banner-img {
-    position: absolute;
-    right: 0px;
-    top: 80px;
-    height: 280px;
-    @media (max-width: 1250px) {
-      display: none;
-    }
+      height: auto;
   }
 }
 
 .dashboard-banner {
-  z-index: 1;
+  display: flex;
+  justify-content: space-between;
   position: relative;
-  display: flex;
-  //padding-top: 43px;
-  align-items: center;
-  flex-direction: row;
-  height: 316px;
-  /* @include media-breakpoint-between(lg, xl) {
+  z-index: 9;
+
+  @include media-breakpoint-between(lg, xl) {
     height: 249px;
-  } */
+  }
 
-  @media (max-width: 1199px) {
+  @include media-breakpoint-down(sm) {
     flex-direction: column;
-    height: 450px;
-    padding-top: 29px;
-    justify-content: space-between;
-  }
-  @media (max-width: 575px) {
-    height: auto;
-    padding-bottom: 15px;
   }
 }
-.dashboard-banner-network-plain-container {
-  .dashboard-banner-daily-tx-title-empty {
-    @media (max-width: 1199px) {
-      display: none;
-    }
-  }
-}
+
 .dashboard-banner-network-graph {
-  // flex-grow: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
+  flex-grow: 1;
+  padding: 15px 0 0 0;
 
-  width: 100%;
-
-  @media (max-width: 767px) {
-    width: 100%;
+  @include media-breakpoint-up(md) {
+    min-width: 500px;
   }
 
-  .dashboard-banner-daily-tx-title {
-    font-weight: 700;
-    font-size: 26px;
-    line-height: 26px;
-    text-transform: capitalize;
-    color: #12201f;
-    margin-bottom: 16px;
-  }
-
-  .dashbord-banner-chart-container {
+  @include media-breakpoint-down(md) {
     display: flex;
-    // flex: 1;
-    width: 100%;
-    align-items: center;
-    border-radius: 20px;
-    height: 180px;
-    padding: 0 10px 10px 10px;
-    box-sizing: border-box;
-    // background: linear-gradient(
-    //   270deg,
-    //   rgba(255, 255, 255, 0.5) 0%,
-    //   rgba(255, 255, 255, 0) 95.24%
-    // );
-
-    @media (max-width: 767px) {
-      flex-direction: column;
-      // background: linear-gradient(
-      //   0deg,
-      //   rgba(255, 255, 255, 0.5) 0%,
-      //   rgba(255, 255, 255, 0) 95.24%
-      // );
-      height: auto;
-      width: 100%;
-    }
-
-    .dashboard-banner-chart {
-      @include media-breakpoint-up(md) {
-        min-width: 500px;
-        display: flex;
-        flex-direction: row;
-      }
-
-      @include media-breakpoint-down(md) {
-        display: flex;
-        flex-direction: column;
-        // width: 100%;
-        flex: 1;
-      }
-    }
+    flex-direction: column;
+    padding-top: 20px;
   }
 }
 
 .dashboard-banner-chart {
   flex-grow: 1;
+  margin: 15px 0 20px 0;
+  position: relative;
   min-height: 100px;
-  height: 100%;
-  //min-width: 500px;
-  // background: rgba(255, 255, 255, 0.5);
-  border-radius: 20px;
+  height: calc(100% - 86px);
+
   @include media-breakpoint-down(md) {
     flex-grow: 0;
+    margin-top: 20px;
     margin-bottom: auto;
     max-width: 100%;
   }
@@ -167,87 +82,53 @@ $dashboard-banner-chart-axis-font-color-alt: #333;
     max-height: 100%;
     max-width: 100%;
     width: 100%;
-    height: 100% !important;
-    min-height: 150px !important;
   }
 
   @include media-breakpoint-down(sm) {
     height: 150px !important;
-    margin-bottom: 10px;
   }
 }
 
 .dashboard-banner-chart-legend {
-  display: flex;
-  flex-direction: column;
-  margin-left: 15px;
-  min-width: 150px;
+  display: grid;
+  grid-template-columns: 0.6fr 0.9fr 0.9fr 0.9fr;
+  padding-bottom: 12px;
+  padding-left:20px;
+
   @include media-breakpoint-down(sm) {
     grid-template-columns: 1fr 1fr;
   }
 
-  @media (max-width: 767px) {
-    flex-direction: row;
-    margin-left: 0;
-    margin-bottom: 10px;
-    width: 100%;
-    padding: 0 15px;
-  }
-
   .dashboard-banner-chart-legend-item {
-    height: 36px;
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    &:first-child {
-      margin-bottom: 15px;
-      @media (max-width: 767px) {
-        margin-bottom: 0;
-      }
-    }
-    &:last-child {
-      margin-top: 15px;
-      @media (max-width: 767px) {
-        margin-top: 0;
-      }
-    }
-    @media (max-width: 767px) {
-      width: 100%;
-    }
+    padding-bottom: 3px;
+    padding-left: 12px;
+    padding-top: 3px;
+    position: relative;
+    padding-right: 12px;
 
     @include media-breakpoint-down(md) {
       display: flex;
       flex-direction: row;
     }
 
-    /* @include media-breakpoint-down(sm) {
+    @include media-breakpoint-down(sm) {
       margin-top: 10px;
-    } */
+    }
 
-    /*  @media (max-width: 599px) {
+    @media (max-width: 599px) {
       padding-top: 0;
       padding-bottom: 0;
       flex-direction: column;
-    } */
-    .dashboard-banner-chart-legend-item-line {
-      display: none;
-      height: 20px;
-      width: 20px;
-      background: #305a57;
-      margin-right: 12px;
-      @include media-breakpoint-down(md) {
-        height: 15px;
-        width: 15px;
-      }
-      @include media-breakpoint-down(sm) {
-        height: 10px;
-        width: 10px;
-      }
     }
-    .dashboard-banner-chart-legend-item-item {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
+
+    &::before {
+      border-radius: 2px;
+      content: "";
+      height: 100%;
+      left: 0;
+      position: absolute;
+      top: 0;
+      width: 4px;
     }
 
     &.price-per-day {
@@ -264,7 +145,7 @@ $dashboard-banner-chart-axis-font-color-alt: #333;
 
     &.market-cap-per-day {
       &::before {
-        background-color: $dashboard-line-color-market;
+        background-color:$dashboard-line-color-market;
       }
     }
 
@@ -276,11 +157,12 @@ $dashboard-banner-chart-axis-font-color-alt: #333;
   }
 
   .dashboard-banner-chart-legend-label {
-    color: #15181c;
-    font-style: normal;
-    font-weight: 700;
-    font-size: 14px;
-    margin-right: 4px;
+    color: $dashboard-banner-chart-legend-label-color;
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    margin: 0 0 5px;
 
     @media (max-width: 374px) {
       position: relative;
@@ -293,12 +175,11 @@ $dashboard-banner-chart-axis-font-color-alt: #333;
   }
 
   .dashboard-banner-chart-legend-value {
-    font-family: "Nunito";
-    font-style: normal;
-    font-weight: 500;
-    font-size: 14px;
-    line-height: 14px;
-    color: #41474d;
+    color: $dashboard-banner-chart-legend-value-color;
+    display: block;
+    font-size: 12px;
+    font-weight: normal;
+    line-height: 1.2;
 
     &.inline {
       display: inline-block;
@@ -319,131 +200,64 @@ $dashboard-banner-chart-axis-font-color-alt: #333;
 }
 
 .dashboard-banner-network-plain-container {
+  align-items: center;
+  align-self: flex-end;
+  background-color: $dashboard-banner-network-plain-container-background-color;
+  border-top-left-radius: 10px;
   display: flex;
-  flex-direction: column;
-  // margin-left: 20px;
-  padding: 0 20px;
-  border-left: 1px solid #4f8f8b;
-  @media (min-width: 1200px) {
-    min-width: 370px;
-  }
-  @media (max-width: 1199px) {
-    //margin-right: 0;
-    border-left: 0;
-    border-top: 1px solid #4f8f8b;
-    padding: 20px;
-    width: calc(100% - 30px);
-  }
-  @media (max-width: 767px) {
-    padding: 15px 10px;
+  height: $dashboard-banner-network-plain-container-height;
+  justify-content: center;
+  margin: 45px 0 -15px 30px;
+  max-width: 100%;
+  padding: 30px 0 30px 60px;
+  width: 750px;
+  position: relative;
+
+  @include media-breakpoint-down(lg) {
+    margin-top: 15px;
+    width: 550px;
   }
 
-  @media (max-width: 1250px) {
-    //margin-right: 0;
+  @include media-breakpoint-down(md) {
+    border-top-right-radius: 10px;
+    height: auto;
+    justify-content: flex-start;
+    margin-left: 0;
+    max-width: 100%;
+    padding: 20px 0 20px 20px;
+    width: 250px;
+    box-shadow: 0 0 35px 0 rgba(0, 0, 0, 0.2);
   }
-  @media (min-width: 1690px) {
-    margin-right: 0;
+
+  @include media-breakpoint-down(sm) {
+    width: 100%;
   }
 
-  .dashboard-banner-network-plain-wrap {
-    display: flex;
-    flex-direction: column;
-    @media (min-width: 1200px) {
-      height: 140px;
-    }
-    justify-content: center;
-    .dashboard-banner-network-plain-cointainer-item {
-      // display: flex;
-      // align-items: flex-start;
-      // justify-content: center;
-      // flex-direction: column;
-      height: 100%;
-      display: grid;
-      grid-template-columns: repeat(1, minmax(0, 1fr));
-      grid-auto-rows:1fr;
+  &::after {
+    background-color: $dashboard-banner-network-plain-container-background-color;
+    bottom: 0;
+    content: "";
+    display: block;
+    height: $dashboard-banner-network-plain-container-height;
+    left: 0;
+    position: absolute;
+    width: 9999px;
+    z-index: -1;
+    box-shadow: 0 0 35px 0 rgba(0, 0, 0, 0.2);
+    border-top-left-radius: 10px;
 
-      @media (max-width: 1199px) {
-        gap: 15px;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-      @media (max-width: 575px) {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-
-      // &:first-child{
-      //   margin-bottom: 28px;
-      // }
-      .dashboard-banner-network-stats-item {
-        display: flex;
-        align-items: center;
-        @media (max-width: 991px) {
-          flex-direction: column;
-          align-items: flex-start;
-        }
-        // width: 150px;
-        // flex-direction: column;
-        // @media (max-width: 500px) {
-        //   width: 165px;
-        // }
-        .dashboard-banner-network-stats-label {
-          font-family: "GT";
-          font-style: normal;
-          font-weight: 500;
-          font-size: 16px;
-          line-height: 16px;
-          text-transform: capitalize;
-          color: #15181c;
-          margin-right: 10px;
-          @media (min-width: 1200px) {
-            min-width: 150px;
-          }
-          @media (max-width: 991px) {
-            margin-right: 0;
-            margin-bottom: 10px;
-          }
-          @media (max-width: 575px) {
-            margin-bottom: 0;
-          }
-        }
-        .dashboard-banner-network-stats-value {
-          font-family: "GT";
-          font-style: normal;
-          font-weight: 500;
-          font-size: 20px;
-          line-height: 36px;
-          color: #152928;
-        }
-      }
-
-      /* @include media-breakpoint-down(lg) {
-        margin-top: 15px;
-        width: 550px;
-      }
-    
-      @include media-breakpoint-down(md) {
-        border-top-right-radius: 10px;
-        height: auto;
-        justify-content: flex-start;
-        margin-left: 0;
-        max-width: 100%;
-        padding: 20px 0 20px 20px;
-        width: 250px;
-        box-shadow: 0 0 35px 0 rgba(0, 0, 0, 0.2);
-      }
-    
-      @include media-breakpoint-down(sm) {
-        width: 100%;
-      } */
+    @include media-breakpoint-down(md) {
+      display: none;
     }
   }
 }
 
-.dashboard-banner-network-plain-cointainer-item {
+.dashboard-banner-network-stats {
   column-gap: 25px;
   display: grid;
   grid-template-columns: 1fr 1fr 1fr 1fr;
 
-  /* @include media-breakpoint-down(lg) {
+  @include media-breakpoint-down(lg) {
     grid-template-columns: 1fr 1fr;
     row-gap: 20px;
   }
@@ -471,5 +285,5 @@ $dashboard-banner-chart-axis-font-color-alt: #333;
     @media (max-width: 374px) {
       font-size: 0.9rem;
     }
-  } */
+  }
 }

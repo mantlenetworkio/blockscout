@@ -31,12 +31,18 @@
           <%= link(
             gettext("Vyper"),
             to: Helpers.verified_contracts_path(@conn, :index, filter: "vyper"),
+            class: "address__link address__link--active dropdown-item border-bottom",
+            "data-test": "filter_option"
+          ) %>
+          <%= link(
+            gettext("Yul"),
+            to: Helpers.verified_contracts_path(@conn, :index, filter: "yul"),
             class: "address__link address__link--active dropdown-item",
             "data-test": "filter_option"
           ) %>
         </div>
       </div>
-      
+
       <div class="search-input-container mb-3">
         <input data-search-field="" class="form-control search-input" type="text" name="search" value="<%= @conn.params["search"] %>" placeholder="<%= gettext "Contract name or address" %>" id="search-text-input">
       </div>

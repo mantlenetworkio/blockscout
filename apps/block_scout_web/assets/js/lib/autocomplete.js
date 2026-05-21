@@ -1,136 +1,53 @@
 import $ from 'jquery'
+// @ts-ignore
 import AutoComplete from '@tarekraafat/autocomplete.js/dist/autoComplete'
 import { getTextAdData, fetchTextAdData } from './ad'
 import { DateTime } from 'luxon'
 import { appendTokenIcon } from './token_icon'
 import { escapeHtml } from './utils'
+import { commonPath } from './path_helper'
 import xss from 'xss'
 
-// const placeHolder = 'Address/Txn Hash/Block/Token/DA Hash'
-
-const pushData = (type, data, storage) => {
-  if (storage[type]) {
-    storage[type].push(data)
-  } else {
-    storage[type] = [data]
-  }
-}
-
-const getLabel = (type)=> {
-  switch (type) {
-    case 'token':
-      return 'TOKENS(ERC 20)'
-    case 'nft':
-      return 'NFTs(ERC 721&1155)'
-    default:
-      return type.toUpperCase()
-  }
-}
-
-const getType = (data) => {
-  if (data.type === 'token') {
-    if (data.token_type === 'ERC-20') {
-      return 'token'
-    } else {
-      return 'nft'
-    }
-  } else {
-    return data.type
-  }
-}
-
-let localResult = {}
-
+const placeHolder = 'Search by address, token symbol, name, transaction hash, or block number'
 const dataSrc = async (query, id) => {
   try {
     // Loading placeholder text
     const searchInput = document
       .getElementById(id)
 
-    const placeholderLoading = $(searchInput).data('placholder-loading')
-    const placeholderDefault = $(searchInput).data('placholder-default')
-
-    searchInput.setAttribute('placeholder', placeholderLoading)
+    searchInput && searchInput.setAttribute('placeholder', 'Loading...')
 
     // Fetch External Data Source
     const source = await fetch(
-      `/token-autocomplete?q=${query}`
+      `${commonPath}/token-autocomplete?q=${query}`
     )
     const data = await source.json()
     // Post Loading placeholder text
-    // console.log('------', data)
 
-    searchInput.setAttribute('placeholder', placeholderDefault)
+    searchInput && searchInput.setAttribute('placeholder', placeHolder)
     // Returns Fetched data
-    localResult = {}
-    for (let i = 0; i < data.length; i++) {
-      if (data[i].type === 'token') {
-        if (data[i].token_type === 'ERC-20') {
-          pushData('token', data[i], localResult)
-        } else {
-          pushData('nft', data[i], localResult)
-        }
-      } else {
-        pushData(data[i].type, data[i], localResult)
-      }
-    }
-    let resultArray = []
-    Object.keys(localResult).map(r => {
-      resultArray = resultArray.concat(localResult[r])
-    })
-    return resultArray
+    return data
   } catch (error) {
     return error
   }
 }
 const resultsListElement = (list, data) => {
-  const $searchInput = $('#main-search-autocomplete')
-  const labelResult = $searchInput.data('label-result')
-  const labelNoResult = $searchInput.data('label-noresult')
-  
+  const info = document.createElement('p')
+  const adv = `
+  <div class="ad mb-3" style="display: none;">
+  <span class='ad-prefix'></span>: <img class="ad-img-url" width=20 height=20 /> <b><span class="ad-name"></span></b> - <span class="ad-short-description"></span> <a class="ad-url"><b><span class="ad-cta-button"></span></a></b>
+  </div>`
+  info.innerHTML = adv
   if (data.results.length > 0) {
-    Object.keys(localResult).map(k => {
-      // console.log('0-0-0--', k)
-      const $firstItem = $(`.item[data-type='${k}']`, list).first().parent()
-      const info = document.createElement('div')
-      info.classList.add('result-counter')
-      const adv = `
-      <div class="ad mb-3" style="display: none;">
-      <span class='ad-prefix'></span>: <img class="ad-img-url" width=20 height=20 /> <b><span class="ad-name"></span></b> - <span class="ad-short-description"></span> <a class="ad-url"><b><span class="ad-cta-button"></span></a></b>
-      </div>`
-      info.innerHTML = adv
-      const label = getLabel(k)
-      info.innerHTML += `<div class="counter-content" data-type="${k}"><p class="label">${label}</p> <p class="count">${labelResult.replace('{number}', `<strong>${localResult[k].length}</strong>`)}</p></div>`
-
-      $(info).insertBefore($firstItem)
-    })
-
-    const listHeader = document.createElement('div')
-    listHeader.classList.add('result-header')
-    const headerContent = `<div class="result-header-content">${Object.keys(localResult).map((k, i) => `<div data-target="${k}" class="list-toggle ${i === 0 ? 'active' : ''}">${getLabel(k)}</div>`).join('')}</div>`
-    listHeader.innerHTML = headerContent
-    list.prepend(listHeader)
-
-    $('.list-toggle', list).on('click', function () {
-      // if ($(this).hasClass('active')) return
-      $('.list-toggle', list).removeClass('active')
-      $(this).addClass('active')
-      const target = $(this).data('target')
-      const targetTopPosition = $(`.counter-content[data-type='${target}']`, list).parent().position().top + $(list).scrollTop() - $(list).offset().top
-      $(list).animate({ scrollTop: targetTopPosition - 45 })
-    })
-  } else {
-    const info = document.createElement('p')
-    info.classList.add('result-counter', 'no-result')
-    const adv = ` <div class="ad mb-3" style="display: none;">
-    <span class='ad-prefix'></span>: <img class="ad-img-url" width=20 height=20 /> <b><span class="ad-name"></span></b> - <span class="ad-short-description"></span> <a class="ad-url"><b><span class="ad-cta-button"></span></a></b>
-    </div>`
-    info.innerHTML = adv
-    if (data.query !== '###') {
-      info.innerHTML += `${labelNoResult.replace('{number}', `<strong>${data.matches.length}</strong> `)} <strong style="word-wrap:break-word;">"${data.query}"</strong>`
-    }
-    list.prepend(info)
+    info.innerHTML += `Displaying <strong>${data.results.length}</strong> results`
+  } else if (data.query !== '###') {
+    info.innerHTML += `Found <strong>${data.matches.length}</strong> matching results for `
+    const strong = document.createElement('strong')
+    strong.appendChild(document.createTextNode(data.query))
+    info.appendChild(strong)
   }
+
+  list.prepend(info)
 
   fetchTextAdData()
 }
@@ -141,9 +58,7 @@ export const searchEngine = (query, record) => {
       (record.symbol && record.symbol.toLowerCase().includes(queryLowerCase)) ||
       (record.address_hash && record.address_hash.toLowerCase().includes(queryLowerCase)) ||
       (record.tx_hash && record.tx_hash.toLowerCase().includes(queryLowerCase)) ||
-      (record.block_hash && record.block_hash.toLowerCase().includes(queryLowerCase)) ||
-      (record.block_number && record.block_number === Number(queryLowerCase)) ||
-      (record.tx_hash && record.type === 'eigenda')
+      (record.block_hash && record.block_hash.toLowerCase().includes(queryLowerCase))
   )
   ) {
     let searchResult = '<div>'
@@ -173,37 +88,23 @@ export const searchEngine = (query, record) => {
     return searchResult
   }
 }
-function getContractVerifiedCls (data){
-  let cls = '';
-  if(!data.is_not_contract_address){
-    cls = 'is_contract_address'
-    if(data.is_verified){
-      cls += ' contract_verified'
-    }
-  }
-  
-  return cls;
-}
-
 const resultItemElement = async (item, data) => {
   item.style = 'display: flex;'
 
   item.innerHTML = `
-  <div data-type='${getType(data.value)}' class='item' id='token-icon-${data.value.address_hash}' style='margin-top: -1px;'></div>
-  <div class="result-match" style="text-overflow: ellipsis; white-space: nowrap; overflow: hidden;">
+  <div id='token-icon-${data.value.address_hash}' style='margin-top: -1px;'></div>
+  <div style="padding-left: 10px; padding-right: 10px; text-overflow: ellipsis; white-space: nowrap; overflow: hidden;">
     ${data.match}
   </div>
   <div class="autocomplete-category">
     ${data.value.type}
-  </div>
-  <span class="hide-contract-address common-contract-address ${getContractVerifiedCls(data.value)}"></span>
-  `
+  </div>`
 
   const $tokenIconContainer = $(item).find(`#token-icon-${data.value.address_hash}`)
   const $searchInput = $('#main-search-autocomplete')
   const chainID = $searchInput.data('chain-id')
-  // const displayTokenIcons = $searchInput.data('display-token-icons')
-  appendTokenIcon($tokenIconContainer, chainID, data.value.address_hash, false, 24)
+  const displayTokenIcons = $searchInput.data('display-token-icons')
+  appendTokenIcon($tokenIconContainer, chainID, data.value.address_hash, displayTokenIcons, 15)
 }
 const config = (id) => {
   return {
@@ -212,7 +113,7 @@ const config = (id) => {
       src: (query) => dataSrc(query, id),
       cache: false
     },
-    placeHolder: $(`#${id}`).data('placholder-default'),
+    placeHolder,
     searchEngine: (query, record) => searchEngine(query, record),
     threshold: 2,
     resultsList: {
@@ -223,39 +124,36 @@ const config = (id) => {
     },
     resultItem: {
       element: (item, data) => resultItemElement(item, data),
-      highlight: 'autoComplete_highlight',
-      class: 'item-wrapper'
+      highlight: 'autoComplete_highlight'
     },
     query: (input) => {
       return xss(input)
     },
-    debounce: 300,
     events: {
       input: {
         focus: () => {
-          if (autoCompleteJS.input.value.length) autoCompleteJS.start()
+          // @ts-ignore
+          if (autoCompleteJS && autoCompleteJS.input.value.length) autoCompleteJS.start()
         }
       }
     }
   }
 }
 const autoCompleteJS = document.querySelector('#main-search-autocomplete') && new AutoComplete(config('main-search-autocomplete'))
-// eslint-disable-next-line
+ 
 const autoCompleteJSMobile = document.querySelector('#main-search-autocomplete-mobile') && new AutoComplete(config('main-search-autocomplete-mobile'))
 
 const selection = (event) => {
   const selectionValue = event.detail.selection.value
 
   if (selectionValue.type === 'contract' || selectionValue.type === 'address' || selectionValue.type === 'label') {
-    window.location = `/address/${selectionValue.address_hash}`
+    window.location.href = `${commonPath}/address/${selectionValue.address_hash}`
   } else if (selectionValue.type === 'token') {
-    window.location = `/tokens/${selectionValue.address_hash}`
+    window.location.href = `${commonPath}/tokens/${selectionValue.address_hash}`
   } else if (selectionValue.type === 'transaction') {
-    window.location = `/tx/${selectionValue.tx_hash}`
+    window.location.href = `${commonPath}/tx/${selectionValue.tx_hash}`
   } else if (selectionValue.type === 'block') {
-    window.location = `/blocks/${selectionValue.block_hash}`
-  } else if (selectionValue.type === 'eigenda') {
-    window.location = `/eigenda-batch/${selectionValue.tx_hash}`
+    window.location.href = `${commonPath}/blocks/${selectionValue.block_hash}`
   }
 }
 
@@ -263,35 +161,40 @@ const openOnFocus = (event, type) => {
   const query = event.target.value
   if (query) {
     if (type === 'desktop') {
-      autoCompleteJS.start(query)
+      // @ts-ignore
+      autoCompleteJS && autoCompleteJS.start(query)
     } else if (type === 'mobile') {
-      autoCompleteJSMobile.start(query)
+      // @ts-ignore
+      autoCompleteJSMobile && autoCompleteJSMobile.start(query)
     }
   } else {
     getTextAdData()
       .then(({ data: adData, inHouse: _inHouse }) => {
         if (adData) {
           if (type === 'desktop') {
-            autoCompleteJS.start('###')
+            // @ts-ignore
+            autoCompleteJS && autoCompleteJS.start('###')
           } else if (type === 'mobile') {
-            autoCompleteJSMobile.start('###')
+            // @ts-ignore
+            autoCompleteJSMobile && autoCompleteJSMobile.start('###')
           }
         }
       })
   }
 }
 
-document.querySelector('#main-search-autocomplete') && document.querySelector('#main-search-autocomplete').addEventListener('selection', function (event) {
-  selection(event)
-})
-document.querySelector('#main-search-autocomplete-mobile') && document.querySelector('#main-search-autocomplete-mobile').addEventListener('selection', function (event) {
-  selection(event)
-})
+const mainSearchAutocompleteObj = document.querySelector('#main-search-autocomplete')
+const mainSearchAutocompleteMobileObj = document.querySelector('#main-search-autocomplete-mobile')
 
-document.querySelector('#main-search-autocomplete') && document.querySelector('#main-search-autocomplete').addEventListener('focus', function (event) {
+mainSearchAutocompleteObj && mainSearchAutocompleteObj.addEventListener('selection', function (event) {
+  selection(event)
+})
+mainSearchAutocompleteMobileObj && mainSearchAutocompleteMobileObj.addEventListener('selection', function (event) {
+  selection(event)
+})
+mainSearchAutocompleteObj && mainSearchAutocompleteObj.addEventListener('focus', function (event) {
   openOnFocus(event, 'desktop')
 })
-
-document.querySelector('#main-search-autocomplete-mobile') && document.querySelector('#main-search-autocomplete-mobile').addEventListener('focus', function (event) {
+mainSearchAutocompleteMobileObj && mainSearchAutocompleteMobileObj.addEventListener('focus', function (event) {
   openOnFocus(event, 'mobile')
 })

@@ -19,7 +19,6 @@ export function reducer (state = initialState, action) {
       return Object.assign({}, state, omit(action, 'type'))
     }
     case 'CHANNEL_DISCONNECTED': {
-      console.error('----------------channel disconnected while verifying a contract')
       return Object.assign({}, state, {
         channelDisconnected: true
       })
@@ -28,7 +27,6 @@ export function reducer (state = initialState, action) {
       if (action.msg.verificationResult === 'ok') {
         return window.location.replace(window.location.href.split('/contract_verifications')[0].split('/verify')[0] + '/contracts')
       } else {
-        console.log('received verification result',  action.msg.verificationResult)
         return Object.assign({}, state, {
           newForm: action.msg.verificationResult
         })
@@ -42,9 +40,7 @@ export function reducer (state = initialState, action) {
 const elements = {
   '[data-selector="channel-disconnected-message"]': {
     render ($el, state) {
-      console.log('verified')
-      console.log(state.channelDisconnected)
-      console.log(window.loading)
+      // @ts-ignore
       if (state.channelDisconnected && !window.loading) $el.show()
     }
   },
@@ -71,24 +67,27 @@ const $contractVerificationChooseTypePage = $('[data-page="contract-verification
 
 function filterNightlyBuilds (filter, selectFirstNonNightly_) {
   const select = document.getElementById('smart_contract_compiler_version')
-  const options = select.getElementsByTagName('option')
+  const options = select && select.getElementsByTagName('option')
   let selectFirstNonNightly = selectFirstNonNightly_
 
-  for (const option of options) {
-    const txtValue = option.textContent || option.innerText
-    if (filter) {
-      if (txtValue.toLowerCase().indexOf('nightly') > -1) {
-        option.style.display = 'none'
-      } else {
-        if (selectFirstNonNightly) {
-          option.selected = 'selected'
-          selectFirstNonNightly = false
+  if (options) {
+    for (const option of options) {
+      const txtValue = option.textContent || option.innerText
+      if (filter) {
+        if (txtValue.toLowerCase().indexOf('nightly') > -1) {
+          option.style.display = 'none'
+        } else {
+          if (selectFirstNonNightly) {
+            // @ts-ignore
+            option.selected = 'selected'
+            selectFirstNonNightly = false
+          }
+          option.style.display = ''
         }
-        option.style.display = ''
-      }
-    } else {
-      if (txtValue.toLowerCase().indexOf('nightly') > -1) {
-        option.style.display = ''
+      } else {
+        if (txtValue.toLowerCase().indexOf('nightly') > -1) {
+          option.style.display = ''
+        }
       }
     }
   }
@@ -98,6 +97,7 @@ let dropzone
 
 if ($contractVerificationPage.length) {
   window.onbeforeunload = () => {
+    // @ts-ignore
     window.loading = true
   }
 
@@ -110,7 +110,7 @@ if ($contractVerificationPage.length) {
   })
   connectElements({ store, elements })
 
-  const addressChannel = subscribeChannel(`addresses:${addressHash}`)
+  const addressChannel = subscribeChannel(`addresses_old:${addressHash}`)
 
   addressChannel.onError(() => store.dispatch({
     type: 'CHANNEL_DISCONNECTED'
@@ -127,9 +127,7 @@ if ($contractVerificationPage.length) {
   $(function () {
     initializeDropzone()
 
-    setTimeout(function () {
-      $('.nightly-builds-false').trigger('click')
-    }, 10)
+    filterNightlyBuilds(true, false)
 
     $('body').on('click', '.js-btn-add-contract-libraries', function () {
       $('.js-smart-contract-libraries-wrapper').show()
@@ -165,8 +163,6 @@ if ($contractVerificationPage.length) {
       $('.js-contract-library-form-group').first().addClass('active')
       $('.js-smart-contract-libraries-wrapper').hide()
       $('.js-btn-add-contract-libraries').show()
-      $('#smart-contract-form-group').show()
-      $('#smart-contract-form-group-constructor-arguments').hide()
       $('.js-add-contract-library-wrapper').show()
     })
 
@@ -195,6 +191,7 @@ if ($contractVerificationPage.length) {
       // submit form without page updating in order to avoid websocket reconnecting
       event.preventDefault()
       const $form = $('form')[0]
+      // @ts-ignore
       $.post($form.action, convertFormToJSON($form))
     })
 
@@ -354,7 +351,7 @@ function initializeDropzone () {
   if ($dropzoneMultiPartFiles.length) {
     const func = multiPartFilesBehavior
     const maxFiles = 100
-    const acceptedFiles = 'text/plain,.sol,.yul'
+    const acceptedFiles = 'text/plain,.sol'
     const tag = '#multi-part-dropzone-form'
     const jsonVerificationType = 'multi-part-files'
 

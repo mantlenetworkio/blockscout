@@ -1,27 +1,34 @@
 defmodule BlockScoutWeb.RecentTransactionsController do
   use BlockScoutWeb, :controller
 
+  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
+
   alias Explorer.{Chain, PagingOptions}
-  alias Explorer.Chain.Hash
+  alias Explorer.Chain.{DenormalizationHelper, Hash, Transaction}
   alias Phoenix.View
 
-  {:ok, burn_address_hash} = Chain.string_to_address_hash("0x0000000000000000000000000000000000000000")
+  {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
   @burn_address_hash burn_address_hash
 
   def index(conn, _params) do
     if ajax?(conn) do
       recent_transactions =
-        Chain.recent_collated_transactions(true,
-          necessity_by_association: %{
-            :block => :required,
-            [created_contract_address: :names] => :optional,
-            [from_address: :names] => :optional,
-            [to_address: :names] => :optional,
-            [created_contract_address: :smart_contract] => :optional,
-            [from_address: :smart_contract] => :optional,
-            [to_address: :smart_contract] => :optional
-          },
-          paging_options: %PagingOptions{page_size: 6}
+        Transaction.recent_collated_transactions(
+          true,
+          DenormalizationHelper.extend_block_necessity(
+            [
+              necessity_by_association: %{
+                [created_contract_address: :names] => :optional,
+                [from_address: :names] => :optional,
+                [to_address: :names] => :optional,
+                [created_contract_address: :smart_contract] => :optional,
+                [from_address: :smart_contract] => :optional,
+                [to_address: :smart_contract] => :optional
+              },
+              paging_options: %PagingOptions{page_size: 5}
+            ],
+            :required
+          )
         )
 
       transactions =
@@ -29,7 +36,7 @@ defmodule BlockScoutWeb.RecentTransactionsController do
           %{
             transaction_hash: Hash.to_string(transaction.hash),
             transaction_html:
-              View.render_to_string(BlockScoutWeb.TransactionView, "_recent_tile.html",
+              View.render_to_string(BlockScoutWeb.TransactionView, "_tile.html",
                 transaction: transaction,
                 burn_address_hash: @burn_address_hash,
                 conn: conn

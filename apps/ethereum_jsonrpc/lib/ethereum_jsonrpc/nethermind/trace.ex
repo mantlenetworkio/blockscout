@@ -4,6 +4,7 @@ defmodule EthereumJSONRPC.Nethermind.Trace do
   [`trace_replayTransaction`](https://openethereum.github.io/JSONRPC-trace-module#trace_replaytransaction).
   """
 
+  import EthereumJSONRPC, only: [put_if_present: 3]
   alias EthereumJSONRPC.Nethermind.Trace.{Action, Result}
 
   @doc """
@@ -43,7 +44,7 @@ defmodule EthereumJSONRPC.Nethermind.Trace do
         trace_address: [],
         transaction_hash: "0x3a3eb134e6792ce9403ea4188e5e79693de9e4c94e499db132be086400da79e6",
         type: "create",
-        value: 0,
+        value: nil,
         transaction_index: 0
       }
 
@@ -77,7 +78,7 @@ defmodule EthereumJSONRPC.Nethermind.Trace do
         trace_address: [],
         transaction_hash: "0x3c624bb4852fb5e35a8f45644cec7a486211f6ba89034768a2b763194f22f97d",
         type: "create",
-        value: 0,
+        value: nil,
         transaction_index: 0
       }
 
@@ -120,7 +121,7 @@ defmodule EthereumJSONRPC.Nethermind.Trace do
         gas_used: 27770,
         input: "0x10855269000000000000000000000000862d67cb0773ee3f8ce7ea89b328ffea861ab3ef",
         output: "0x",
-        value: 0
+        value: nil
       }
 
   Calls can error and be reverted
@@ -195,7 +196,7 @@ defmodule EthereumJSONRPC.Nethermind.Trace do
         trace_address: [0],
         transaction_hash: "0xb012b8c53498c669d87d85ed90f57385848b86d3f44ed14b2784ec685d6fda98",
         type: "selfdestruct",
-        value: 0,
+        value: nil,
         transaction_index: 0
       }
 
@@ -230,9 +231,15 @@ defmodule EthereumJSONRPC.Nethermind.Trace do
       to_address_hash: to_address_hash,
       gas: gas,
       input: input,
-      value: value
+      value: if(value == 0, do: nil, else: value)
     }
-    |> put_call_error_or_result(elixir)
+    |> put_if_present(elixir, [
+      {"error", :error}
+    ])
+    |> put_if_present(elixir |> Map.get("result", %{}), [
+      {"gasUsed", :gas_used},
+      {"output", :output}
+    ])
   end
 
   def elixir_to_params(%{"type" => "create" = type} = elixir) do
@@ -254,10 +261,17 @@ defmodule EthereumJSONRPC.Nethermind.Trace do
       trace_address: trace_address,
       transaction_hash: transaction_hash,
       type: type,
-      value: value,
+      value: if(value == 0, do: nil, else: value),
       transaction_index: transaction_index
     }
-    |> put_create_error_or_result(elixir)
+    |> put_if_present(elixir, [
+      {"error", :error}
+    ])
+    |> put_if_present(elixir |> Map.get("result", %{}), [
+      {"gasUsed", :gas_used},
+      {"code", :created_contract_code},
+      {"address", :created_contract_address_hash}
+    ])
   end
 
   def elixir_to_params(%{"type" => "suicide"} = elixir) do
@@ -282,7 +296,7 @@ defmodule EthereumJSONRPC.Nethermind.Trace do
       trace_address: trace_address,
       transaction_hash: transaction_hash,
       type: "selfdestruct",
-      value: value,
+      value: if(value == 0, do: nil, else: value),
       transaction_index: transaction_index
     }
   end
@@ -470,32 +484,4 @@ defmodule EthereumJSONRPC.Nethermind.Trace do
   end
 
   defp entry_to_elixir({"transactionIndex", index} = entry) when is_integer(index), do: entry
-
-  defp put_call_error_or_result(params, %{
-         "result" => %{"gasUsed" => gas_used, "output" => output}
-       }) do
-    Map.merge(params, %{gas_used: gas_used, output: output})
-  end
-
-  defp put_call_error_or_result(params, %{"error" => error}) do
-    Map.put(params, :error, error)
-  end
-
-  defp put_create_error_or_result(params, %{
-         "result" => %{
-           "address" => created_contract_address_hash,
-           "code" => code,
-           "gasUsed" => gas_used
-         }
-       }) do
-    Map.merge(params, %{
-      created_contract_code: code,
-      created_contract_address_hash: created_contract_address_hash,
-      gas_used: gas_used
-    })
-  end
-
-  defp put_create_error_or_result(params, %{"error" => error}) do
-    Map.put(params, :error, error)
-  end
 end

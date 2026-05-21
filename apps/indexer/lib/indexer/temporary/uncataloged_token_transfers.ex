@@ -1,6 +1,6 @@
 defmodule Indexer.Temporary.UncatalogedTokenTransfers do
   @moduledoc """
-  Catalogs token tranfer logs missing an accompanying token transfer record.
+  Catalogs token transfer logs missing an accompanying token transfer record.
 
   Missed token transfers happen due to formats that aren't supported at the time
   they were parsed during main indexing. Updated the parser and rebooting will allow
@@ -12,8 +12,8 @@ defmodule Indexer.Temporary.UncatalogedTokenTransfers do
 
   require Logger
 
-  alias Explorer.Chain
-  alias Indexer.Block.Catchup.Fetcher
+  alias Explorer.Chain.TokenTransfer
+  alias Explorer.Utility.MissingBlockRange
   alias Indexer.Temporary.UncatalogedTokenTransfers
 
   def child_spec([init_arguments]) do
@@ -52,7 +52,7 @@ defmodule Indexer.Temporary.UncatalogedTokenTransfers do
   end
 
   def handle_info(:scan, state) do
-    {:ok, block_numbers} = Chain.uncataloged_token_transfer_block_numbers()
+    {:ok, block_numbers} = TokenTransfer.uncataloged_token_transfer_block_numbers()
 
     case block_numbers do
       [] ->
@@ -94,6 +94,11 @@ defmodule Indexer.Temporary.UncatalogedTokenTransfers do
   end
 
   defp async_push_front(block_numbers) do
-    Task.Supervisor.async_nolink(UncatalogedTokenTransfers.TaskSupervisor, Fetcher, :push_front, [block_numbers])
+    Task.Supervisor.async_nolink(
+      UncatalogedTokenTransfers.TaskSupervisor,
+      MissingBlockRange,
+      :add_ranges_by_block_numbers,
+      [block_numbers]
+    )
   end
 end

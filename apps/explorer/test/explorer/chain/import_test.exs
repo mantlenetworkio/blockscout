@@ -12,6 +12,7 @@ defmodule Explorer.Chain.ImportTest do
     Log,
     Hash,
     Import,
+    InternalTransaction,
     PendingBlockOperation,
     Token,
     TokenTransfer,
@@ -19,12 +20,20 @@ defmodule Explorer.Chain.ImportTest do
   }
 
   alias Explorer.Chain.Events.Subscriber
+  alias Explorer.Utility.MissingBlockRange
 
   @moduletag :capturelog
+
+  @first_topic_hex_string "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+  @second_topic_hex_string "0x000000000000000000000000e8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca"
+  @third_topic_hex_string "0x000000000000000000000000515c09c5bba1ed566b02a5b0599ec5d5d0aee73d"
 
   doctest Import
 
   describe "all/1" do
+    {:ok, first_topic} = Explorer.Chain.Hash.Full.cast(@first_topic_hex_string)
+    {:ok, second_topic} = Explorer.Chain.Hash.Full.cast(@second_topic_hex_string)
+    {:ok, third_topic} = Explorer.Chain.Hash.Full.cast(@third_topic_hex_string)
     # set :timeout options to cover lines that use the timeout override when available
     @import_data %{
       blocks: %{
@@ -53,7 +62,8 @@ defmodule Explorer.Chain.ImportTest do
             block_number: 37,
             transaction_index: 0,
             transaction_hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5",
-            index: 0,
+            # transaction with index 0 is ignored in Nethermind JSON RPC Variant and not ignored in case of Geth
+            index: 1,
             trace_address: [],
             type: "call",
             call_type: "call",
@@ -67,9 +77,9 @@ defmodule Explorer.Chain.ImportTest do
           },
           %{
             block_number: 37,
-            transaction_index: 1,
+            transaction_index: 0,
             transaction_hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5",
-            index: 1,
+            index: 2,
             trace_address: [0],
             type: "call",
             call_type: "call",
@@ -91,13 +101,12 @@ defmodule Explorer.Chain.ImportTest do
             block_hash: "0xf6b4b8c88df3ebd252ec476328334dc026cf66606a84fb769b3d3cbccc8471bd",
             address_hash: "0x8bf38d4764929064f2d4d3a56520a76ab3df415b",
             data: "0x0000000000000000000000000000000000000000000000000de0b6b3a7640000",
-            first_topic: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-            second_topic: "0x000000000000000000000000e8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca",
-            third_topic: "0x000000000000000000000000515c09c5bba1ed566b02a5b0599ec5d5d0aee73d",
+            first_topic: first_topic,
+            second_topic: second_topic,
+            third_topic: third_topic,
             fourth_topic: nil,
             index: 0,
-            transaction_hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5",
-            type: "mined"
+            transaction_hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5"
           }
         ],
         timeout: 5
@@ -157,6 +166,8 @@ defmodule Explorer.Chain.ImportTest do
             from_address_hash: "0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca",
             to_address_hash: "0x515c09c5bba1ed566b02a5b0599ec5d5d0aee73d",
             token_contract_address_hash: "0x8bf38d4764929064f2d4d3a56520a76ab3df415b",
+            token_type: "ERC-20",
+            token: %{type: "ERC-20"},
             transaction_hash: "0x53bd884872de3e488692881baeec262e7b95234d3965248c39fe992fffd433e5"
           }
         ],
@@ -165,6 +176,9 @@ defmodule Explorer.Chain.ImportTest do
     }
 
     test "with valid data" do
+      {:ok, first_topic} = Explorer.Chain.Hash.Full.cast(@first_topic_hex_string)
+      {:ok, second_topic} = Explorer.Chain.Hash.Full.cast(@second_topic_hex_string)
+      {:ok, third_topic} = Explorer.Chain.Hash.Full.cast(@third_topic_hex_string)
       difficulty = Decimal.new(340_282_366_920_938_463_463_374_607_431_768_211_454)
       total_difficulty = Decimal.new(12_590_447_576_074_723_148_144_860_474_975_121_280_509)
       token_transfer_amount = Decimal.new(1_000_000_000_000_000_000)
@@ -254,12 +268,11 @@ defmodule Explorer.Chain.ImportTest do
                 internal_transactions: [
                   %{
                     index: 1,
-                    transaction_hash: %Hash{
-                      byte_count: 32,
-                      bytes:
-                        <<83, 189, 136, 72, 114, 222, 62, 72, 134, 146, 136, 27, 174, 236, 38, 46, 123, 149, 35, 77, 57,
-                          101, 36, 140, 57, 254, 153, 47, 255, 212, 51, 229>>
-                    }
+                    transaction_index: 0
+                  },
+                  %{
+                    index: 2,
+                    transaction_index: 0
                   }
                 ],
                 logs: [
@@ -276,9 +289,9 @@ defmodule Explorer.Chain.ImportTest do
                           167, 100, 0, 0>>
                     },
                     index: 0,
-                    first_topic: "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef",
-                    second_topic: "0x000000000000000000000000e8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca",
-                    third_topic: "0x000000000000000000000000515c09c5bba1ed566b02a5b0599ec5d5d0aee73d",
+                    first_topic: ^first_topic,
+                    second_topic: ^second_topic,
+                    third_topic: ^third_topic,
                     fourth_topic: nil,
                     transaction_hash: %Hash{
                       byte_count: 32,
@@ -286,7 +299,6 @@ defmodule Explorer.Chain.ImportTest do
                         <<83, 189, 136, 72, 114, 222, 62, 72, 134, 146, 136, 27, 174, 236, 38, 46, 123, 149, 35, 77, 57,
                           101, 36, 140, 57, 254, 153, 47, 255, 212, 51, 229>>
                     },
-                    type: "mined",
                     inserted_at: %{},
                     updated_at: %{}
                   }
@@ -344,10 +356,36 @@ defmodule Explorer.Chain.ImportTest do
                           101, 36, 140, 57, 254, 153, 47, 255, 212, 51, 229>>
                     },
                     inserted_at: %{},
-                    updated_at: %{}
+                    updated_at: %{},
+                    token_type: "ERC-20"
                   }
                 ]
               }} = Import.all(@import_data)
+    end
+
+    test "refetch_needed is set if there was an exception in further steps" do
+      not_existing_block_hash = "0xf6b4b8c88df3ebd252ec476328334dc026cf66606a84fb769b3d3cbccc8471db"
+
+      incorrect_data =
+        update_in(@import_data, [:logs, :params], fn params ->
+          [params |> Enum.at(0) |> Map.put(:block_hash, not_existing_block_hash)]
+        end)
+
+      Ecto.Adapters.SQL.Sandbox.mode(Explorer.Repo, :auto)
+
+      on_exit(fn ->
+        Repo.delete_all(Address)
+        Repo.delete_all(Transaction)
+        Repo.delete_all(InternalTransaction)
+        Repo.delete_all(TokenTransfer)
+        Repo.delete_all(Token)
+        Repo.delete_all(MissingBlockRange)
+        Repo.delete_all(Block)
+      end)
+
+      assert_raise(Postgrex.Error, fn -> Import.all(incorrect_data) end)
+      assert [] = Repo.all(Log)
+      assert %{consensus: true, refetch_needed: true} = Repo.one(Block)
     end
 
     test "inserts a token_balance" do
@@ -462,7 +500,7 @@ defmodule Explorer.Chain.ImportTest do
         update_in(@import_data, [:internal_transactions, :params, Access.at(0)], &Map.delete(&1, :call_type))
 
       assert {:error, [changeset]} = Import.all(invalid_import_data)
-      assert changeset_errors(changeset)[:call_type] == ["can't be blank"]
+      assert changeset_errors(changeset)[:call_type_enum] == ["can't be blank"]
     end
 
     test "publishes addresses with updated fetched_coin_balance data to subscribers on insert" do
@@ -481,7 +519,8 @@ defmodule Explorer.Chain.ImportTest do
       Subscriber.to(:internal_transactions, :realtime)
       Import.all(@import_data)
 
-      assert_receive {:chain_event, :internal_transactions, :realtime, [%{transaction_hash: _, index: _}]}
+      assert_receive {:chain_event, :internal_transactions, :realtime,
+                      [%{transaction_hash: _, index: _}, %{transaction_hash: _, index: _}]}
     end
 
     test "publishes transactions data to subscribers on insert" do
@@ -620,7 +659,7 @@ defmodule Explorer.Chain.ImportTest do
         }
       }
 
-      internal_txs_options = %{
+      internal_transactions_options = %{
         internal_transactions: %{
           params: [
             %{
@@ -645,12 +684,17 @@ defmodule Explorer.Chain.ImportTest do
         }
       }
 
+      config = Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth)
+      Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, Keyword.put(config, :block_traceable?, true))
+
+      on_exit(fn -> Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, config) end)
+
       assert {:ok, _} = Import.all(options)
 
       {:ok, block_hash_casted} = Explorer.Chain.Hash.Full.cast(block_hash)
       assert [^block_hash_casted] = Explorer.Repo.all(PendingBlockOperation.block_hashes())
 
-      assert {:ok, _} = Import.all(internal_txs_options)
+      assert {:ok, _} = Import.all(internal_transactions_options)
 
       assert [] == Explorer.Repo.all(PendingBlockOperation.block_hashes())
     end
@@ -711,7 +755,7 @@ defmodule Explorer.Chain.ImportTest do
         }
       }
 
-      internal_txs_options = %{
+      internal_transactions_options = %{
         internal_transactions: %{
           params: [
             %{
@@ -735,12 +779,17 @@ defmodule Explorer.Chain.ImportTest do
         }
       }
 
+      config = Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth)
+      Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, Keyword.put(config, :block_traceable?, true))
+
+      on_exit(fn -> Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, config) end)
+
       assert {:ok, _} = Import.all(options)
 
       {:ok, block_hash_casted} = Explorer.Chain.Hash.Full.cast(block_hash)
       assert [^block_hash_casted] = Explorer.Repo.all(PendingBlockOperation.block_hashes())
 
-      assert {:ok, _} = Import.all(internal_txs_options)
+      assert {:ok, _} = Import.all(internal_transactions_options)
 
       assert [] == Explorer.Repo.all(PendingBlockOperation.block_hashes())
     end
@@ -933,7 +982,7 @@ defmodule Explorer.Chain.ImportTest do
                        type: "create",
                        value: 0,
                        block_number: 37,
-                       transaction_index: 1
+                       transaction_index: 0
                      }
                    ],
                    timeout: 5,
@@ -1578,7 +1627,12 @@ defmodule Explorer.Chain.ImportTest do
                  },
                  blocks: %{
                    params: [
-                     params_for(:block, hash: block_hash, consensus: true, miner_hash: miner_hash, number: block_number),
+                     params_for(:block,
+                       hash: block_hash,
+                       consensus: true,
+                       miner_hash: miner_hash,
+                       number: block_number
+                     ),
                      params_for(:block,
                        hash: uncle_hash,
                        consensus: false,

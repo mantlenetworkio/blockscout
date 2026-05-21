@@ -6,15 +6,13 @@ defmodule BlockScoutWeb.Counters.BlocksIndexedCounter do
   """
 
   use GenServer
-
-  alias BlockScoutWeb.Notifier
-  alias Explorer.Chain
-
   # It is undesirable to automatically start the counter in all environments.
   # Consider the test environment: if it initiates but does not finish before a
   # test ends, that test will fail.
-  config = Application.compile_env(:block_scout_web, __MODULE__)
-  @enabled Keyword.get(config, :enabled)
+  use Utils.CompileTimeEnvHelper, enabled: [:block_scout_web, [__MODULE__, :enabled]]
+
+  alias BlockScoutWeb.Notifier
+  alias Explorer.Chain
 
   @doc """
   Starts a process to periodically update the % of blocks indexed.
@@ -27,7 +25,7 @@ defmodule BlockScoutWeb.Counters.BlocksIndexedCounter do
   @impl true
   def init(args) do
     if @enabled do
-      Task.start_link(&calculate_blocks_indexed/0)
+      Task.start_link(&calculate_blocks_indexed_and_broadcast/0)
 
       schedule_next_consolidation()
     end
@@ -35,21 +33,21 @@ defmodule BlockScoutWeb.Counters.BlocksIndexedCounter do
     {:ok, args}
   end
 
-  def calculate_blocks_indexed do
-    indexed_ratio_blocks = Chain.indexed_ratio_blocks()
+  def calculate_blocks_indexed_and_broadcast do
+    ratio = Chain.indexed_ratio_blocks()
 
-    finished? = Chain.finished_indexing?(indexed_ratio_blocks)
-
-    Notifier.broadcast_blocks_indexed_ratio(indexed_ratio_blocks, finished?)
+    # TODO: delete duplicated event when old UI becomes deprecated
+    Notifier.broadcast_indexed_ratio("blocks_old:indexing", ratio)
+    Notifier.broadcast_indexed_ratio("blocks:indexing", ratio)
   end
 
   defp schedule_next_consolidation do
-    Process.send_after(self(), :calculate_blocks_indexed, :timer.minutes(5))
+    Process.send_after(self(), :calculate_blocks_indexed_and_broadcast, :timer.minutes(5))
   end
 
   @impl true
-  def handle_info(:calculate_blocks_indexed, state) do
-    calculate_blocks_indexed()
+  def handle_info(:calculate_blocks_indexed_and_broadcast, state) do
+    calculate_blocks_indexed_and_broadcast()
 
     schedule_next_consolidation()
 

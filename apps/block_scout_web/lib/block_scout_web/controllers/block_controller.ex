@@ -1,6 +1,6 @@
 defmodule BlockScoutWeb.BlockController do
   use BlockScoutWeb, :controller
-  require Logger
+
   import BlockScoutWeb.Chain, only: [paging_options: 1, next_page_params: 3, split_list_by_page: 1]
 
   alias BlockScoutWeb.{BlockView, Controller}
@@ -97,7 +97,7 @@ defmodule BlockScoutWeb.BlockController do
           Enum.map(blocks, fn block ->
             View.render_to_string(
               BlockView,
-              "_table_tile.html",
+              "_tile.html",
               block: block,
               block_type: block_type
             )

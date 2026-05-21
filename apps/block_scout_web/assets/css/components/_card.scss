@@ -1,6 +1,6 @@
 $card-background-color: #fff !default;
 $card-tab-active: $primary !default;
-$card-default-border-radius: 20px !default;
+$card-default-border-radius: 10px !default;
 $card-horizontal-padding: 30px;
 $card-vertical-padding: 30px;
 $card-background-1: $primary !default;
@@ -14,7 +14,7 @@ $card-tab-icon-color-active: #fff !default;
   border: none;
   box-shadow: 0 0 30px 0 rgba(202, 199, 226, 0.5);
   margin-bottom: $common-container-margin;
-  border-radius: 20px;
+
   .block-details-row {
     flex-direction: row;
     @include media-breakpoint-down(sm) {
@@ -51,8 +51,8 @@ $card-tab-icon-color-active: #fff !default;
 }
 
 .card-title {
-  font-size: 20px;
-  font-weight: 700;
+  font-size: 18px;
+  font-weight: normal;
   line-height: 1.2rem;
   margin-bottom: 2rem;
 
@@ -155,169 +155,6 @@ $card-tab-icon-color-active: #fff !default;
 
 .card-body {
   padding: $card-horizontal-padding;
-  overflow-x: auto;
-  .recent-tx-list-page,
-  .table-list-page {
-    .recent-preview-item-content {
-      display: none;
-    }
-  }
-  .tx-fee-price-can-click {
-    color: rgba(10, 143, 246, 1);
-    cursor: pointer;
-  }
-  .tx-fee-price-disable-click {
-    color: rgba(110, 118, 125, 1);
-    cursor: auto;
-  }
-  .transaction_detail_status_container {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    .transaction_detail_status_item {
-      height: 36px;
-      padding: 0 16px 0 18px;
-      text-align: center;
-      line-height: 36px;
-      border-radius: 18px;
-      background: #f0f1f2;
-      margin: 0 0 8px 0;
-      font-size: 14px;
-      font-family: Nunito;
-      font-weight: 700;
-      color: #6e767d;
-      .transaction_detail_status_item_right {
-        margin-right: 5px;
-        position: relative;
-        bottom: 1px;
-      }
-      .transaction_detail_status_item_right_dark {
-        display: none;
-        margin-right: 5px;
-        position: relative;
-        bottom: 1px;
-      }
-    }
-    .transaction_detail_status_item_true {
-      margin-bottom: 8px;
-    }
-    .transaction_detail_status_item_true_dark {
-      display: none;
-      margin-bottom: 8px;
-    }
-    .transaction_detail_status_item_active {
-      color: #15181c;
-      background: rgba(6, 221, 118, 0.5);
-    }
-  }
-}
-.dark-theme-applied {
-  .transaction_detail_status_item_true {
-    display: none;
-  }
-  .transaction_detail_status_item_true_dark {
-    display: inline-block !important;
-  }
-  .transaction_detail_status_item_right {
-    display: none;
-  }
-  .transaction_detail_status_item_right_dark {
-    display: inline-block !important;
-  }
-}
-
-.txn-list-container {
-  .txn-list-table-head-container {
-    background: #f8f8f9;
-    display: flex;
-    align-items: center;
-    height: 42px;
-    padding: 0 10px;
-    font-weight: 500;
-    font-size: 16px;
-    width: 100%;
-    border-bottom: 1px solid #f0f1f2;
-    color: #6c757e;
-    min-width: 1130px;
-    .l1-to-l2-tx-type-head {
-      color: #6c757e;
-    }
-    .dropdown-menu {
-      background: #f8f8f9;
-      border: 1px solid #f0f1f2;
-      box-shadow: 0px 4px 5px rgba(0, 0, 0, 0.02);
-      border-radius: 6px !important;
-      padding: 6px;
-      min-width: 100px;
-      width: auto;
-      .dropdown-item {
-        color: #15181c;
-        border-radius: 4px;
-        width: 120px;
-        line-height: 38px;
-        padding: 0 8px;
-        &:hover {
-          font-weight: 700;
-          background: rgba(207, 210, 212, 0.3);
-        }
-      }
-    }
-  }
-  .recent-tx-list-page,
-  .table-list-page {
-    min-width: 1130px;
-  }
-  .txn-list-table-item {
-    width: 100%;
-    height: 42px;
-    display: flex;
-    align-items: center;
-    font-size: 14px;
-    padding: 0 10px;
-    border-bottom: 1px solid #e7eaf3;
-  }
-  .display_tx_status_tooltip {
-    color: #212529;
-    &:hover {
-      color: #212529;
-    }
-  }
-}
-.dark-theme-applied {
-  .card-body {
-    background-color: #141918;
-  }
-  .txn-list-container {
-    .txn-list-table-head-container {
-      background: rgba(255, 255, 255, 0.05);
-      color: #ffffff;
-      border-color: rgba(255, 255, 255, 0.15);
-      .l1-to-l2-tx-type-head {
-        color: #ffffff;
-      }
-      .dropdown-menu {
-        background: #152928;
-        box-shadow: 0px 4px 5px rgba(0, 0, 0, 0.02);
-        border: none;
-        .dropdown-item {
-          color: #ffffff;
-          background: #152928 !important;
-          &:hover {
-            background: #21413f !important;
-          }
-        }
-      }
-    }
-    .txn-list-table-item {
-      border-color: rgba(255, 255, 255, 0.1);
-    }
-    .display_tx_status_tooltip {
-      color: #ffffff;
-      &:hover {
-        color: #ffffff;
-      }
-    }
-  }
 }
 
 .card-body-flex-column-space-between {
@@ -332,7 +169,7 @@ $card-tab-icon-color-active: #fff !default;
 }
 
 .card-chain-blocks {
-  // min-height: 233px;
+  min-height: 233px;
   max-height: auto;
   [class*="col-"]:last-child {
     .tile {
@@ -342,242 +179,11 @@ $card-tab-icon-color-active: #fff !default;
 }
 
 .card-chain-transactions {
-  min-height: 480px;
+  min-height: 664px;
   max-height: auto;
 
   .tile {
     margin-bottom: 0;
-    box-shadow: none;
-  }
-}
-
-.recent-preview-container {
-  background: #fbfafc;
-  display: flex;
-  flex-direction: row;
-  box-shadow: none;
-  margin-bottom: 120px;
-  @media (max-width: 1254px) {
-    flex-direction: column;
-  }
-  a {
-    &:hover {
-      color: #007bff;
-    }
-  }
-  .recent-preview-item {
-    flex: 1;
-    margin-top: 0 !important;
-    border-radius: 4px;
-    box-shadow: 0 0 30px 0 rgb(202 199 226 / 50%);
-    border: 1px solid #e7eaf3;
-    border-radius: 20px;
-    background: #ffffff;
-    .recent-preview-item-content {
-      width: 100%;
-      box-sizing: border-box;
-      height: 90px;
-      display: flex;
-      align-items: center;
-      font-size: 14px;
-      padding: 0;
-      border-bottom: 1px solid #e7eaf3;
-      .recent-preview-item-content-title {
-        width: 44px;
-        flex: 0 0 44px;
-        height: 44px;
-        flex: 0 0 44px;
-        color: #77838f;
-        background: rgba(119, 131, 143, 0.1);
-        font-size: 18px;
-        font-weight: 500;
-        border-radius: 8px;
-        text-align: center;
-        line-height: 44px;
-        margin-right: 10px;
-      }
-      .recent-preview-item-content-batch {
-        margin-bottom: 5px;
-        display: flex;
-        flex-direction: column;
-        flex: 0 0 120px;
-        @media (max-width: 368px) {
-          flex: 0 0 95px;
-        }
-      }
-      .recent-preview-item-content-l1-2-l2-link {
-        width: 150px;
-        overflow: hidden;
-        white-space: nowrap;
-        text-overflow: ellipsis;
-        color: #007bff;
-        @media (max-width: 368px) {
-          width: 85px;
-        }
-        @media (max-width: 500px) {
-          width: 110px;
-        }
-      }
-      .recent-preview-item-content-txn-l1-2-l2-link {
-        width: 90px;
-        color: #007bff;
-        @media (max-width: 368px) {
-          width: 60px;
-        }
-        @media (max-width: 500px) {
-          width: 85px;
-        }
-      }
-      .recent-preview-item-content-latest-txs {
-        flex: 1;
-        .recent-preview-item-content-latest-txs-hash {
-          width: 200px;
-          overflow: hidden;
-          white-space: nowrap;
-          text-overflow: ellipsis;
-          margin-left: 5px;
-          color: #007bff;
-          @media (max-width: 500px) {
-            width: 160px;
-          }
-
-          @media (max-width: 368px) {
-            width: 140px;
-          }
-        }
-        .recent-preview-item-content-latest-txs-from {
-          width: 112px;
-          overflow: hidden;
-          white-space: nowrap;
-          text-overflow: ellipsis;
-          margin-left: 5px;
-          color: #007bff;
-          @media (max-width: 500px) {
-            width: 80px;
-          }
-        }
-        .recent-preview-item-content-latest-txs-tag-wrap-time {
-          min-width: 100px;
-          font-size: 12px;
-        }
-        .recent-preview-item-content-latest-txs-tag-wrap {
-          margin-left: 5px;
-          font-size: 12px;
-          position: relative;
-          padding: 0 5px 0 18px;
-          letter-spacing: 0.8px;
-          border-top-right-radius: 6px;
-          border-bottom-right-radius: 6px;
-          color: #091312;
-          background: rgba(175, 208, 232, 0.35);
-          height: 20px;
-          max-width: 148px;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          .recent-preview-item-content-latest-txs-tag {
-            position: absolute;
-            left: 0;
-            top: 0;
-            border-top: 10px solid transparent;
-            border-bottom: 10px solid transparent;
-            border-left: 10px solid #fff;
-          }
-        }
-      }
-    }
-    @media (max-width: 1254px) {
-      margin-bottom: 10px;
-    }
-    &:last-child {
-      @media (max-width: 1254px) {
-        margin-bottom: 0px;
-      }
-    }
-  }
-  .recent-preview-item-center {
-    margin: 0 24px;
-    @media (max-width: 1254px) {
-      margin: 10px 0;
-    }
-  }
-
-  .recent-preview-item-title-container {
-    font-size: 16px;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    height: 46px;
-    padding: 0 10px;
-    line-height: 46px;
-    color: #4a4f55;
-    font-weight: 600;
-    font-size: 18px;
-    border-bottom: 1px solid #e7eaf3;
-    margin-bottom: 10px;
-  }
-  .view-btn {
-    padding: 10px;
-    border: none;
-    border-radius: 6px;
-    background: #cbe9e7;
-    color: #65b3ae;
-    font-size: 12px;
-    line-height: 12px;
-    margin: 20px 0;
-    font-weight: 700;
-    &:hover {
-      background: #d5edec;
-    }
-    &:active {
-      background: #b7d2d0;
-    }
-  }
-}
-.dark-theme-applied {
-  .recent-preview-container {
-    background: #080d0c;
-    .recent-preview-item {
-      box-shadow: none;
-      background-color: #141918;
-      border-color: #141918 !important;
-      .recent-preview-item-content {
-        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        color: #a3a9b5;
-        .recent-preview-item-content-latest-txs-tag-wrap {
-          .recent-preview-item-content-latest-txs-tag {
-            border-left: 10px solid #141918 !important;
-          }
-        }
-      }
-    }
-    .recent-preview-item-title-container {
-      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    }
-    .view-btn {
-      background: #21413f;
-      hr {
-        border-color: rgba(255, 255, 255, 0.15);
-      }
-    }
-  }
-
-  .tx-fee-price-disable-click {
-    color: rgba(159, 165, 169, 1);
-    cursor: auto;
-  }
-  .transaction_detail_status_container {
-    .transaction_detail_status_item {
-      background: #21413f;
-      color: #4f8f8b;
-      &:first-child {
-        margin-left: 0;
-      }
-    }
-    .transaction_detail_status_item_active {
-      color: #ffffff;
-      background: rgba(6, 221, 118, 0.5);
-    }
   }
 }
 
@@ -609,7 +215,7 @@ $card-tab-icon-color-active: #fff !default;
   transition: $transition-cont;
 
   &:hover {
-    background-color: rgba($card-tab-active, 0.15);
+    background-color: rgba($card-tab-active, .15);
     color: $card-tab-active;
     text-decoration: none;
   }
@@ -660,8 +266,8 @@ $card-tab-icon-color-active: #fff !default;
 
 .mob-transaction {
   @include media-breakpoint-down(sm) {
-    margin-left: 15px !important;
-  }
+    margin-left: 15px!important;
+  } 
 }
 
 .implementation-container {

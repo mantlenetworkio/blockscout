@@ -1,10 +1,11 @@
 $body-dark: #1c1d31; // body background
-$dark-bg: rgba(255, 255, 255, 0.05); // hero shade
+$dark-bg: #22223a; // hero shade
 $dark-light-bg: #282945; // pills bg shade
-$dark-light: rgba(255, 255, 255, 0.05); // tile light top share
+$dark-light: #313355; // tile light top share
 $labels-dark: #8a8dba; // header nav, labels
-$dark-text-content-color: #7FD8D2;
 $dark-stakes-banned-background: #3e314c;
+$dashboard-banner-network-stats-item-before-background-color-dark-mode: $dark-secondary !default;
+$header-links-background-color-dark-mode: $dark-light !default;
 
 // Switcher
 .dark-mode-changer {
@@ -16,7 +17,7 @@ $dark-stakes-banned-background: #3e314c;
 	background: transparent;
 	border: none;
 	cursor: pointer;
-	margin-right: 0;
+	margin-right: 5px;
 	outline: none !important;
 	box-shadow: none !important;
 	transition: .2s ease-in;
@@ -46,26 +47,27 @@ $dark-stakes-banned-background: #3e314c;
 		}
 		.nav-submenu {
 			color: $labels-dark;
+			background-color: $header-links-background-color-dark-mode;
 		}
 	}
 	.navbar-brand .navbar-logo {
 		filter: brightness(0) invert(1);
 	}
 	.navbar.navbar-primary .navbar-nav .nav-link {
-		color: #ffffff;
+		color: $labels-dark;
 		.nav-link-icon {
 			svg path {
-				fill: #ffffff;
+				fill: $labels-dark;
 			}
 		}
 		&.active, &:hover {
 			.nav-link-icon {
 				svg path {
-					fill: #ffffff;
+					fill: $dark-primary;
 				}
 			}
 			&:before {
-				background-color:#ffffff;
+				background-color: $dark-primary;
 			}
 		}
 	}
@@ -112,7 +114,9 @@ $dark-stakes-banned-background: #3e314c;
 	.dashboard-banner-chart-legend .dashboard-banner-chart-legend-label {
 		color: $labels-dark;
 	}
-
+	.dashboard-banner-network-stats-item::before {
+		background-color: $dashboard-banner-network-stats-item-before-background-color-dark-mode !important;
+	}
 	.dashboard-banner-chart-legend .dashboard-banner-chart-legend-item {
 		&.price-per-day {
 			&::before {
@@ -168,7 +172,7 @@ $dark-stakes-banned-background: #3e314c;
 			color: $dark-primary;
 		}
 		&.active {
-			//background-color: $dark-primary-alternate;
+			background-color: $dark-primary-alternate;
 			color: #fff;
 		}
 	}
@@ -183,16 +187,16 @@ $dark-stakes-banned-background: #3e314c;
 	}
 
 	.tile, .tile-code {
-		border-top-color: rgba(255, 255, 255, 0.15);
-		border-bottom-color: rgba(255, 255, 255, 0.15);
-		border-right-color: rgba(255, 255, 255, 0.15);
-		background-color: rgba(255, 255, 255, 0.15);
+		border-top-color: $dark-light;
+		border-bottom-color: $dark-light;
+		border-right-color: $dark-light;
+		background-color: $dark-light;
 		color: $labels-dark;
 		&:not([class^="tile tile-type"]) {
-			border-left-color: rgba(255, 255, 255, 0.15);
+			border-left-color: $dark-light;
 		}
 		&.tile-type-coin-balance {
-			border-left-color: rgba(255, 255, 255, 0.15);
+			border-left-color: $dark-light;
 		}
 		.tile-title {
 			color: #fff;
@@ -222,10 +226,10 @@ $dark-stakes-banned-background: #3e314c;
 	.cube-animation-title {
 		color: $labels-dark;
 	}
-	/* .tile .tile-body a,
+	.tile .tile-body a,
 	.tile a:hover,
 	.tile span[data-address-hash],
-	.tile a[data-test=token_link] { color: $dark-primary; } */
+	.tile a[data-test=token_link] { color: $dark-primary; }
 	.fade-up-blocks-chain .tile-type-block-animation .tile-type-line-up {
 		background-color: $dark-primary;
 	}
@@ -318,7 +322,7 @@ $dark-stakes-banned-background: #3e314c;
 	.btn-dropdown-line {
 		background-color: $dark-light;
 		border-color: $dark-light;
-		color: #ffffff;
+		color: $labels-dark;
 	}
 
 	// table
@@ -387,7 +391,7 @@ $dark-stakes-banned-background: #3e314c;
 
 	// api's
 	.api-anchors-list {
-		background-color: rgba(255, 255, 255, 0.15);
+		background-color: $dark-light;
 	}
 	.api-doc-list-item {
 		border-bottom-color: darken($labels-dark, 30);
@@ -409,7 +413,7 @@ $dark-stakes-banned-background: #3e314c;
 	}
 
 	// download csv button
-	.download-all-transactions .download-all-transactions-link svg path {
+	.download-all-items .download-all-items-link svg path {
 		fill: $dark-primary;
 	}
 
@@ -501,7 +505,7 @@ $dark-stakes-banned-background: #3e314c;
 		color: #fff;
 	}
 
-	// info allert
+	// info alert
 	.alert-info {
 		color: $labels-dark;
 		background-color: $dark-light;
@@ -742,7 +746,7 @@ $dark-stakes-banned-background: #3e314c;
 		border-color: darken($labels-dark, 30);
 	}
 	.dark-theme-applied .table td, .dark-theme-applied .table th, .dark-theme-applied hr {
-		border-top-color: rgba(255, 255, 255, 0.15) !important;
+		border-top-color: darken($labels-dark, 30);
 	}
 	.btn-copy-ico svg path {
 		fill: #fff;

@@ -4,11 +4,12 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
   import Mox
 
   alias BlockScoutWeb.API.RPC.AddressController
-  alias Explorer.Chain
-  alias Explorer.Chain.{Events.Subscriber, Transaction, Wei}
-  alias Explorer.Counters.{AddressesCounter, AverageBlockTime}
-  alias Indexer.Fetcher.CoinBalanceOnDemand
-  alias Explorer.Repo
+  alias Explorer.{Chain, Repo, TestHelper}
+  alias Explorer.Chain.Cache.BackgroundMigrations
+  alias Explorer.Chain.{Events.Subscriber, InternalTransaction, Transaction, Wei}
+  alias Explorer.Chain.Cache.Counters.{AddressesCount, AverageBlockTime}
+  alias Explorer.Utility.AddressIdToAddressHash
+  alias Indexer.Fetcher.OnDemand.CoinBalance, as: CoinBalanceOnDemand
 
   setup :set_mox_global
   setup :verify_on_exit!
@@ -21,13 +22,19 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
 
     start_supervised!({Task.Supervisor, name: Indexer.TaskSupervisor})
     start_supervised!(AverageBlockTime)
-    start_supervised!({CoinBalanceOnDemand, [mocked_json_rpc_named_arguments, [name: CoinBalanceOnDemand]]})
-    start_supervised!(AddressesCounter)
 
-    Application.put_env(:explorer, AverageBlockTime, enabled: true)
+    configuration = Application.get_env(:indexer, CoinBalanceOnDemand.Supervisor)
+    Application.put_env(:indexer, CoinBalanceOnDemand.Supervisor, disabled?: false)
+
+    CoinBalanceOnDemand.Supervisor.Case.start_supervised!(json_rpc_named_arguments: mocked_json_rpc_named_arguments)
+
+    start_supervised!(AddressesCount)
+
+    Application.put_env(:explorer, AverageBlockTime, enabled: true, cache_period: 1_800_000)
 
     on_exit(fn ->
-      Application.put_env(:explorer, AverageBlockTime, enabled: false)
+      Application.put_env(:indexer, CoinBalanceOnDemand.Supervisor, configuration)
+      Application.put_env(:explorer, AverageBlockTime, enabled: false, cache_period: 1_800_000)
     end)
 
     :ok
@@ -37,6 +44,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
     setup do
       Subscriber.to(:addresses, :on_demand)
       Subscriber.to(:address_coin_balances, :on_demand)
+      Supervisor.terminate_child(Explorer.Supervisor, Explorer.Chain.Cache.BlockNumber.child_id())
+      Supervisor.restart_child(Explorer.Supervisor, Explorer.Chain.Cache.BlockNumber.child_id())
 
       %{params: %{"module" => "account", "action" => "listaccounts"}}
     end
@@ -102,8 +111,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       first_address_hash = to_string(first_address.hash)
       second_address_hash = to_string(second_address.hash)
 
-      first_address_inserted_at = to_string(first_address.inserted_at)
-      second_address_inserted_at = to_string(second_address.inserted_at)
+      _first_address_inserted_at = to_string(first_address.inserted_at)
+      _second_address_inserted_at = to_string(second_address.inserted_at)
 
       response =
         conn
@@ -127,83 +136,48 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
 
     test "with a stale balance", %{conn: conn, params: params} do
       now = Timex.now()
+      latest_block_number = 302
 
       mining_address =
         insert(:address,
           fetched_coin_balance: 0,
-          fetched_coin_balance_block_number: 102,
+          fetched_coin_balance_block_number: latest_block_number,
           inserted_at: Timex.shift(now, minutes: -10)
         )
 
       mining_address_hash = to_string(mining_address.hash)
-      # we space these very far apart so that we know it will consider the 0th block stale (it calculates how far
-      # back we'd need to go to get 24 hours in the past)
-      Enum.each(0..100, fn i ->
-        insert(:block, number: i, timestamp: Timex.shift(now, hours: -(102 - i) * 25), miner: mining_address)
+
+      Enum.each(0..301, fn i ->
+        insert(:block,
+          number: i,
+          timestamp: Timex.shift(now, minutes: -25 * 60 - (latest_block_number - i)),
+          miner: mining_address
+        )
       end)
 
-      insert(:block, number: 101, timestamp: Timex.shift(now, hours: -25), miner: mining_address)
+      insert(:block, number: latest_block_number, timestamp: Timex.shift(now, hours: -25), miner: mining_address)
       AverageBlockTime.refresh()
 
       address =
         insert(:address,
           fetched_coin_balance: 100,
-          fetched_coin_balance_block_number: 100,
+          # more than 1 hour ago, so should be stale
+          fetched_coin_balance_block_number: 240,
           inserted_at: Timex.shift(now, minutes: -5)
         )
 
       address_hash = to_string(address.hash)
 
-      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn [
-                                                     %{
-                                                       id: id,
-                                                       method: "eth_getBalance",
-                                                       params: [^mining_address_hash, "0x65"]
-                                                     }
-                                                   ],
-                                                   _options ->
-        {:ok, [%{id: id, jsonrpc: "2.0", result: "0x02"}]}
-      end)
+      latest_block_number_hex = "0x" <> Integer.to_string(latest_block_number, 16)
 
-      res = eth_block_number_fake_response("0x65")
-
-      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn [
-                                                     %{
-                                                       id: 0,
-                                                       method: "eth_getBlockByNumber",
-                                                       params: ["0x65", true]
-                                                     }
-                                                   ],
-                                                   _ ->
-        {:ok, [res]}
-      end)
-
-      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn [
-                                                     %{
-                                                       id: id,
-                                                       method: "eth_getBalance",
-                                                       params: [^address_hash, "0x65"]
-                                                     }
-                                                   ],
-                                                   _options ->
-        {:ok, [%{id: id, jsonrpc: "2.0", result: "0x02"}]}
-      end)
-
-      expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn [
-                                                     %{
-                                                       id: 0,
-                                                       method: "eth_getBlockByNumber",
-                                                       params: ["0x65", true]
-                                                     }
-                                                   ],
-                                                   _ ->
-        {:ok, [res]}
-      end)
+      TestHelper.eth_get_balance_expectation(address_hash, latest_block_number_hex, "0x02")
 
       response =
         conn
         |> get("/api", params)
         |> json_response(200)
+
+      Process.sleep(100)
 
       schema = listaccounts_schema()
       assert :ok = ExJsonSchema.Validator.validate(schema, response)
@@ -229,7 +203,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
 
       assert received_address.hash == address.hash
       assert received_address.fetched_coin_balance == expected_wei
-      assert received_address.fetched_coin_balance_block_number == 101
+      assert received_address.fetched_coin_balance_block_number == latest_block_number
     end
   end
 
@@ -661,7 +635,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "contractAddress" => "#{transaction.created_contract_address_hash}",
           "cumulativeGasUsed" => "#{transaction.cumulative_gas_used}",
           "gasUsed" => "#{transaction.gas_used}",
-          "confirmations" => "0"
+          "confirmations" => "0",
+          "methodId" => "0x"
         }
       ]
 
@@ -1090,7 +1065,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert :ok = ExJsonSchema.Validator.validate(txlist_schema(), response)
     end
 
-    test "with start_block and end_block params", %{conn: conn} do
+    test "with startblock and endblock params", %{conn: conn} do
       blocks = [_, second_block, third_block, _] = insert_list(4, :block)
       address = insert(:address)
 
@@ -1104,8 +1079,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         "module" => "account",
         "action" => "txlist",
         "address" => "#{address.hash}",
-        "start_block" => "#{second_block.number}",
-        "end_block" => "#{third_block.number}"
+        "startblock" => "#{second_block.number}",
+        "endblock" => "#{third_block.number}"
       }
 
       expected_block_numbers = [
@@ -1129,7 +1104,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert :ok = ExJsonSchema.Validator.validate(txlist_schema(), response)
     end
 
-    test "with start_block but without end_block", %{conn: conn} do
+    test "with startblock but without endblock", %{conn: conn} do
       blocks = [_, _, third_block, fourth_block] = insert_list(4, :block)
       address = insert(:address)
 
@@ -1143,7 +1118,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         "module" => "account",
         "action" => "txlist",
         "address" => "#{address.hash}",
-        "start_block" => "#{third_block.number}"
+        "startblock" => "#{third_block.number}"
       }
 
       expected_block_numbers = [
@@ -1167,7 +1142,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert :ok = ExJsonSchema.Validator.validate(txlist_schema(), response)
     end
 
-    test "with end_block but without start_block", %{conn: conn} do
+    test "with endblock but without startblock", %{conn: conn} do
       blocks = [first_block, second_block, _, _] = insert_list(4, :block)
       address = insert(:address)
 
@@ -1181,7 +1156,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         "module" => "account",
         "action" => "txlist",
         "address" => "#{address.hash}",
-        "end_block" => "#{second_block.number}"
+        "endblock" => "#{second_block.number}"
       }
 
       expected_block_numbers = [
@@ -1205,7 +1180,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert :ok = ExJsonSchema.Validator.validate(txlist_schema(), response)
     end
 
-    test "ignores invalid start_block and end_block", %{conn: conn} do
+    test "ignores invalid startblock and endblock", %{conn: conn} do
       blocks = [_, _, _, _] = insert_list(4, :block)
       address = insert(:address)
 
@@ -1219,8 +1194,36 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         "module" => "account",
         "action" => "txlist",
         "address" => "#{address.hash}",
-        "start_block" => "invalidstart",
-        "end_block" => "invalidend"
+        "startblock" => "invalidstart",
+        "endblock" => "invalidend"
+      }
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert length(response["result"]) == 8
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(txlist_schema(), response)
+    end
+
+    test "ignores too big endblock", %{conn: conn} do
+      blocks = [_, _, _, _] = insert_list(4, :block)
+      address = insert(:address)
+
+      for block <- blocks do
+        2
+        |> insert_list(:transaction, from_address: address)
+        |> with_block(block)
+      end
+
+      params = %{
+        "module" => "account",
+        "action" => "txlist",
+        "address" => "#{address.hash}",
+        "endblock" => "99999999999"
       }
 
       assert response =
@@ -1246,7 +1249,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
 
       for block <- Enum.concat([blocks1, blocks2, blocks3]) do
         2
-        |> insert_list(:transaction, from_address: address)
+        |> insert_list(:transaction, from_address: address, block_timestamp: block.timestamp)
         |> with_block(block)
       end
 
@@ -1294,7 +1297,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
 
       for block <- Enum.concat([blocks1, blocks2, blocks3]) do
         2
-        |> insert_list(:transaction, from_address: address)
+        |> insert_list(:transaction, from_address: address, block_timestamp: block.timestamp)
         |> with_block(block)
       end
 
@@ -1342,7 +1345,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
 
       for block <- Enum.concat([blocks1, blocks2, blocks3]) do
         2
-        |> insert_list(:transaction, from_address: address)
+        |> insert_list(:transaction, from_address: address, block_timestamp: block.timestamp)
         |> with_block(block)
       end
 
@@ -1788,22 +1791,330 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
     end
   end
 
-  describe "txlistinternal" do
-    test "with missing txhash and address", %{conn: conn} do
+  describe "txlistinternal with no address or transaction hash" do
+    setup do
       params = %{
         "module" => "account",
         "action" => "txlistinternal"
       }
 
+      {:ok, %{params: params}}
+    end
+
+    test "returns empty result, if no internal transactions", %{conn: conn, params: params} do
       response =
         conn
         |> get("/api", params)
         |> json_response(200)
 
-      assert response["message"] =~ "txhash or address is required"
+      assert response["message"] =~ "No internal transactions found"
       assert response["status"] == "0"
       assert Map.has_key?(response, "result")
-      refute response["result"]
+      assert response["result"] == []
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
+    test "returns internal transaction", %{conn: conn, params: params} do
+      address = insert(:address)
+      address_2 = insert(:address)
+
+      block = insert(:block)
+
+      transaction =
+        :transaction
+        |> insert(from_address: address, to_address: address_2)
+        |> with_block(block)
+
+      :internal_transaction
+      |> insert(
+        transaction: transaction,
+        transaction_index: transaction.index,
+        index: 0,
+        value: 1,
+        from_address: address,
+        to_address: address_2,
+        block_number: block.number
+      )
+
+      internal_transaction =
+        :internal_transaction
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 1,
+          value: 2,
+          from_address: address,
+          to_address: address_2,
+          block_number: block.number
+        )
+
+      expected_result = [
+        %{
+          "blockNumber" => "#{transaction.block_number}",
+          "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.to_address_id)}",
+          "value" => "#{internal_transaction.value.value}",
+          "contractAddress" => "",
+          "input" => "#{internal_transaction.input}",
+          "type" => "#{internal_transaction.type}",
+          "callType" => "#{internal_transaction.call_type}",
+          "gas" => "#{internal_transaction.gas}",
+          "gasUsed" => "#{internal_transaction.gas_used}",
+          "index" => "#{internal_transaction.index}",
+          "transactionHash" => "#{transaction.hash}",
+          "isError" => "0",
+          "errCode" => "#{internal_transaction.error}"
+        }
+      ]
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
+    test "returns status = 2 for internal transactions not yet processed", %{conn: conn, params: params} do
+      address = insert(:address)
+      address_2 = insert(:address)
+
+      block = insert(:block)
+      insert(:pending_block_operation, block_hash: block.hash, block_number: block.number)
+
+      transaction =
+        :transaction
+        |> insert(from_address: address, to_address: address_2)
+        |> with_block(block)
+
+      :internal_transaction
+      |> insert(
+        transaction: transaction,
+        transaction_index: transaction.index,
+        index: 0,
+        value: 1,
+        from_address: address,
+        to_address: address_2,
+        block_number: block.number
+      )
+
+      internal_transaction =
+        :internal_transaction
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 1,
+          value: 2,
+          from_address: address,
+          to_address: address_2,
+          block_number: block.number
+        )
+
+      expected_result = [
+        %{
+          "blockNumber" => "#{transaction.block_number}",
+          "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.to_address_id)}",
+          "value" => "#{internal_transaction.value.value}",
+          "contractAddress" => "",
+          "input" => "#{internal_transaction.input}",
+          "type" => "#{internal_transaction.type}",
+          "callType" => "#{internal_transaction.call_type}",
+          "gas" => "#{internal_transaction.gas}",
+          "gasUsed" => "#{internal_transaction.gas_used}",
+          "index" => "#{internal_transaction.index}",
+          "transactionHash" => "#{transaction.hash}",
+          "isError" => "0",
+          "errCode" => "#{internal_transaction.error}"
+        }
+      ]
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "2"
+      assert response["message"] == "Some internal transactions within this block range have not yet been processed"
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
+    test "returns only non zero value internal transactions by default", %{conn: conn, params: params} do
+      address = insert(:address)
+      address_2 = insert(:address)
+
+      block = insert(:block)
+
+      transaction =
+        :transaction
+        |> insert(from_address: address, to_address: address_2)
+        |> with_block(block)
+
+      :internal_transaction
+      |> insert(
+        transaction: transaction,
+        transaction_index: transaction.index,
+        index: 0,
+        value: 1,
+        from_address: address,
+        to_address: address_2,
+        block_number: block.number
+      )
+
+      :internal_transaction
+      |> insert(
+        transaction: transaction,
+        transaction_index: transaction.index,
+        index: 2,
+        value: 0,
+        from_address: address,
+        to_address: address_2,
+        block_number: block.number
+      )
+
+      internal_transaction =
+        :internal_transaction
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 1,
+          value: 2,
+          from_address: address,
+          to_address: address_2,
+          block_number: block.number
+        )
+
+      expected_result = [
+        %{
+          "blockNumber" => "#{transaction.block_number}",
+          "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.to_address_id)}",
+          "value" => "#{internal_transaction.value.value}",
+          "contractAddress" => "",
+          "input" => "#{internal_transaction.input}",
+          "type" => "#{internal_transaction.type}",
+          "callType" => "#{internal_transaction.call_type}",
+          "gas" => "#{internal_transaction.gas}",
+          "gasUsed" => "#{internal_transaction.gas_used}",
+          "index" => "#{internal_transaction.index}",
+          "transactionHash" => "#{transaction.hash}",
+          "isError" => "0",
+          "errCode" => "#{internal_transaction.error}"
+        }
+      ]
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
+    test "with zero value internal transactions when `include_zero_value=true` param is provided", %{
+      conn: conn,
+      params: params
+    } do
+      address = insert(:address)
+      address_2 = insert(:address)
+
+      block = insert(:block)
+
+      transaction =
+        :transaction
+        |> insert(from_address: address, to_address: address_2)
+        |> with_block(block)
+
+      :internal_transaction
+      |> insert(
+        transaction: transaction,
+        transaction_index: transaction.index,
+        index: 0,
+        value: 1,
+        from_address: address,
+        to_address: address_2,
+        block_number: block.number
+      )
+
+      internal_transaction_a =
+        :internal_transaction
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 1,
+          value: 2,
+          from_address: address,
+          to_address: address_2,
+          block_number: block.number
+        )
+
+      internal_transaction_b =
+        :internal_transaction
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 2,
+          value: 0,
+          from_address: address,
+          to_address: address_2,
+          block_number: block.number
+        )
+
+      expected_result = [
+        %{
+          "blockNumber" => "#{transaction.block_number}",
+          "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_b.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_b.to_address_id)}",
+          "value" => "#{internal_transaction_b.value.value}",
+          "contractAddress" => "",
+          "input" => "#{internal_transaction_b.input}",
+          "type" => "#{internal_transaction_b.type}",
+          "callType" => "#{internal_transaction_b.call_type}",
+          "gas" => "#{internal_transaction_b.gas}",
+          "gasUsed" => "#{internal_transaction_b.gas_used}",
+          "index" => "#{internal_transaction_b.index}",
+          "transactionHash" => "#{transaction.hash}",
+          "isError" => "0",
+          "errCode" => "#{internal_transaction_b.error}"
+        },
+        %{
+          "blockNumber" => "#{internal_transaction_a.block_number}",
+          "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_a.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_a.to_address_id)}",
+          "value" => "#{internal_transaction_a.value.value}",
+          "contractAddress" => "",
+          "input" => "#{internal_transaction_a.input}",
+          "type" => "#{internal_transaction_a.type}",
+          "callType" => "#{internal_transaction_a.call_type}",
+          "gas" => "#{internal_transaction_a.gas}",
+          "gasUsed" => "#{internal_transaction_a.gas_used}",
+          "index" => "#{internal_transaction_a.index}",
+          "transactionHash" => "#{transaction.hash}",
+          "isError" => "0",
+          "errCode" => "#{internal_transaction_a.error}"
+        }
+      ]
+
+      assert response =
+               conn
+               |> get("/api/v1", Map.merge(params, %{"include_zero_value" => "true"}))
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
       assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
     end
   end
@@ -1862,12 +2173,14 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         :internal_transaction_create
         |> insert(
           transaction: transaction,
+          transaction_index: transaction.index,
           index: 0,
+          value: 1,
           from_address: address,
-          block_hash: transaction.block_hash,
-          block_index: 0
+          created_contract_code: contract_address.contract_code,
+          created_contract_address: contract_address,
+          block_number: transaction.block_number
         )
-        |> with_contract_creation(contract_address)
 
       params = %{
         "module" => "account",
@@ -1879,8 +2192,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         %{
           "blockNumber" => "#{transaction.block_number}",
           "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
-          "from" => "#{internal_transaction.from_address_hash}",
-          "to" => "#{internal_transaction.to_address_hash}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.to_address_id)}",
           "value" => "#{internal_transaction.value.value}",
           "contractAddress" => "#{contract_address.hash}",
           "input" => "",
@@ -1906,6 +2219,51 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
     end
 
+    test "status = 2 if the block is pending", %{conn: conn} do
+      address = insert(:address)
+      contract_address = insert(:contract_address)
+
+      block = insert(:block)
+      insert(:pending_block_operation, block_hash: block.hash, block_number: block.number)
+
+      transaction =
+        :transaction
+        |> insert(from_address: address, to_address: nil)
+        |> with_contract_creation(contract_address)
+        |> with_block(block)
+
+      _internal_transaction =
+        :internal_transaction_create
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 0,
+          value: 1,
+          from_address: address,
+          created_contract_code: contract_address.contract_code,
+          created_contract_address: contract_address,
+          block_number: transaction.block_number
+        )
+
+      params = %{
+        "module" => "account",
+        "action" => "txlistinternal",
+        "txhash" => "#{transaction.hash}"
+      }
+
+      expected_result = []
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "2"
+      assert response["message"] == "Internal transactions for this transaction have not been processed yet"
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
     test "isError is true if internal transaction has an error", %{conn: conn} do
       transaction =
         :transaction
@@ -1914,11 +2272,12 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
 
       internal_transaction_details = [
         transaction: transaction,
+        transaction_index: transaction.index,
         index: 0,
+        value: 1,
         type: :reward,
         error: "some error",
-        block_hash: transaction.block_hash,
-        block_index: 0
+        block_number: transaction.block_number
       ]
 
       insert(:internal_transaction_create, internal_transaction_details)
@@ -1950,9 +2309,10 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       for index <- 0..2 do
         insert(:internal_transaction_create,
           transaction: transaction,
+          transaction_index: transaction.index,
           index: index,
-          block_hash: transaction.block_hash,
-          block_index: index
+          block_number: transaction.block_number,
+          value: 1
         )
       end
 
@@ -1972,6 +2332,249 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert response["status"] == "1"
       assert response["message"] == "OK"
       assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
+    test "returns only non zero value internal transactions by default", %{conn: conn} do
+      block = insert(:block)
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block(block)
+
+      :internal_transaction
+      |> insert(
+        transaction: transaction,
+        transaction_index: transaction.index,
+        index: 0,
+        value: 1,
+        block_number: block.number
+      )
+
+      :internal_transaction
+      |> insert(
+        transaction: transaction,
+        transaction_index: transaction.index,
+        index: 2,
+        value: 0,
+        block_number: block.number
+      )
+
+      internal_transaction =
+        :internal_transaction
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 1,
+          value: 2,
+          block_number: block.number
+        )
+
+      expected_result = [
+        %{
+          "blockNumber" => "#{transaction.block_number}",
+          "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.to_address_id)}",
+          "value" => "#{internal_transaction.value.value}",
+          "contractAddress" => "",
+          "input" => "#{internal_transaction.input}",
+          "type" => "#{internal_transaction.type}",
+          "callType" => "#{internal_transaction.call_type}",
+          "gas" => "#{internal_transaction.gas}",
+          "gasUsed" => "#{internal_transaction.gas_used}",
+          "index" => "#{internal_transaction.index}",
+          "transactionHash" => "#{transaction.hash}",
+          "isError" => "0",
+          "errCode" => "#{internal_transaction.error}"
+        }
+      ]
+
+      params = %{
+        "module" => "account",
+        "action" => "txlistinternal",
+        "txhash" => "#{transaction.hash}"
+      }
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
+    test "with zero value internal transactions when `include_zero_value=true` param is provided", %{conn: conn} do
+      block = insert(:block)
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block(block)
+
+      :internal_transaction
+      |> insert(
+        transaction: transaction,
+        transaction_index: transaction.index,
+        index: 0,
+        value: 1,
+        block_number: block.number
+      )
+
+      internal_transaction_a =
+        :internal_transaction
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 1,
+          value: 2,
+          block_number: block.number
+        )
+
+      internal_transaction_b =
+        :internal_transaction
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 2,
+          value: 0,
+          block_number: block.number
+        )
+
+      expected_result = [
+        %{
+          "blockNumber" => "#{internal_transaction_b.block_number}",
+          "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_b.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_b.to_address_id)}",
+          "value" => "#{internal_transaction_b.value.value}",
+          "contractAddress" => "",
+          "input" => "#{internal_transaction_b.input}",
+          "type" => "#{internal_transaction_b.type}",
+          "callType" => "#{internal_transaction_b.call_type}",
+          "gas" => "#{internal_transaction_b.gas}",
+          "gasUsed" => "#{internal_transaction_b.gas_used}",
+          "index" => "#{internal_transaction_b.index}",
+          "transactionHash" => "#{transaction.hash}",
+          "isError" => "0",
+          "errCode" => "#{internal_transaction_b.error}"
+        },
+        %{
+          "blockNumber" => "#{transaction.block_number}",
+          "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_a.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_a.to_address_id)}",
+          "value" => "#{internal_transaction_a.value.value}",
+          "contractAddress" => "",
+          "input" => "#{internal_transaction_a.input}",
+          "type" => "#{internal_transaction_a.type}",
+          "callType" => "#{internal_transaction_a.call_type}",
+          "gas" => "#{internal_transaction_a.gas}",
+          "gasUsed" => "#{internal_transaction_a.gas_used}",
+          "index" => "#{internal_transaction_a.index}",
+          "transactionHash" => "#{transaction.hash}",
+          "isError" => "0",
+          "errCode" => "#{internal_transaction_a.error}"
+        }
+      ]
+
+      params = %{
+        "module" => "account",
+        "action" => "txlistinternal",
+        "txhash" => "#{transaction.hash}",
+        "include_zero_value" => "true"
+      }
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
+    if Application.compile_env(:explorer, :chain_type) not in [:rsk, :filecoin] do
+      test "via on-demand fetcher", %{conn: conn} do
+        original_config = Application.get_env(:explorer, Explorer.Migrator.DeleteZeroValueInternalTransactions)
+
+        Application.put_env(:explorer, Explorer.Migrator.DeleteZeroValueInternalTransactions,
+          enabled: true,
+          storage_period: 0
+        )
+
+        on_exit(fn ->
+          Application.put_env(:explorer, Explorer.Migrator.DeleteZeroValueInternalTransactions, original_config)
+        end)
+
+        transaction = :transaction |> insert() |> with_block()
+
+        expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn
+          [%{id: id, params: _}], _ ->
+            {:ok,
+             [
+               %{
+                 id: id,
+                 result: %{
+                   "type" => "create",
+                   "from" => "0x117b358218da5a4f647072ddb50ded038ed63d17",
+                   "to" => "0x205a6b72ce16736c9d87172568a9c0cb9304de0d",
+                   "value" => "0x0",
+                   "gas" => "0x106f5",
+                   "gasUsed" => "0x106f5",
+                   "input" =>
+                     "0x608060405234801561001057600080fd5b50610150806100206000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033",
+                   "output" =>
+                     "0x608060405234801561001057600080fd5b50600436106100365760003560e01c80632e64cec11461003b5780636057361d14610059575b600080fd5b610043610075565b60405161005091906100d9565b60405180910390f35b610073600480360381019061006e919061009d565b61007e565b005b60008054905090565b8060008190555050565b60008135905061009781610103565b92915050565b6000602082840312156100b3576100b26100fe565b5b60006100c184828501610088565b91505092915050565b6100d3816100f4565b82525050565b60006020820190506100ee60008301846100ca565b92915050565b6000819050919050565b600080fd5b61010c816100f4565b811461011757600080fd5b5056fea26469706673582212209a159a4f3847890f10bfb87871a61eba91c5dbf5ee3cf6398207e292eee22a1664736f6c63430008070033"
+                 }
+               }
+             ]}
+        end)
+
+        Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, tracer: "call_tracer", debug_trace_timeout: "5s")
+
+        expected_result = [
+          %{
+            "blockNumber" => "#{transaction.block_number}",
+            "callType" => "",
+            "contractAddress" => "0x205a6b72ce16736c9d87172568a9c0cb9304de0d",
+            "errCode" => "",
+            "from" => "0x117b358218da5a4f647072ddb50ded038ed63d17",
+            "gas" => "67317",
+            "gasUsed" => "67317",
+            "index" => "0",
+            "input" => "",
+            "isError" => "0",
+            "timeStamp" => "#{DateTime.to_unix(transaction.block.timestamp)}",
+            "to" => "",
+            "transactionHash" => "#{transaction.hash}",
+            "type" => "create",
+            "value" => "0"
+          }
+        ]
+
+        params = %{
+          "module" => "account",
+          "action" => "txlistinternal",
+          "txhash" => "#{transaction.hash}",
+          "include_zero_value" => "true"
+        }
+
+        assert response =
+                 conn
+                 |> get("/api/v1", params)
+                 |> json_response(200)
+
+        assert response["result"] == expected_result
+        assert response["status"] == "1"
+        assert response["message"] == "OK"
+        assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+      end
     end
   end
 
@@ -2013,6 +2616,22 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
     end
 
+    test "doesn't raise when startblock exceeds postgres integer range", %{conn: conn} do
+      address = insert(:address)
+
+      params = %{
+        "module" => "account",
+        "action" => "txlistinternal",
+        "address" => "#{address.hash}",
+        "startblock" => "2147483648",
+        "endblock" => "7483099"
+      }
+
+      conn
+      |> get("/api", params)
+      |> json_response(200)
+    end
+
     test "response includes all the expected fields", %{conn: conn} do
       address = insert(:address)
       contract_address = insert(:contract_address)
@@ -2029,13 +2648,13 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         :internal_transaction_create
         |> insert(
           transaction: transaction,
+          transaction_index: transaction.index,
           index: 0,
           from_address: address,
-          block_number: block.number,
-          block_hash: transaction.block_hash,
-          block_index: 0
+          created_contract_code: contract_address.contract_code,
+          created_contract_address: contract_address,
+          block_number: block.number
         )
-        |> with_contract_creation(contract_address)
 
       params = %{
         "module" => "account",
@@ -2047,8 +2666,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         %{
           "blockNumber" => "#{transaction.block_number}",
           "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
-          "from" => "#{internal_transaction.from_address_hash}",
-          "to" => "#{internal_transaction.to_address_hash}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.to_address_id)}",
           "value" => "#{internal_transaction.value.value}",
           "contractAddress" => "#{contract_address.hash}",
           "input" => "",
@@ -2085,12 +2704,11 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       internal_transaction_details = [
         from_address: address,
         transaction: transaction,
+        transaction_index: transaction.index,
         index: 0,
         type: :reward,
         error: "some error",
-        block_number: transaction.block_number,
-        block_hash: transaction.block_hash,
-        block_index: 0
+        block_number: transaction.block_number
       ]
 
       insert(:internal_transaction_create, internal_transaction_details)
@@ -2125,10 +2743,10 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         internal_transaction_details = %{
           from_address: address,
           transaction: transaction,
+          transaction_index: transaction.index,
           index: index,
           block_number: transaction.block_number,
-          block_hash: transaction.block_hash,
-          block_index: index
+          value: 1
         }
 
         insert(:internal_transaction_create, internal_transaction_details)
@@ -2147,6 +2765,181 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
                |> json_response(200)
 
       assert length(found_internal_transactions) == 3
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
+    test "returns only non zero value internal transactions by default", %{conn: conn} do
+      address = insert(:address)
+
+      block = insert(:block)
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block(block)
+
+      :internal_transaction
+      |> insert(
+        transaction: transaction,
+        transaction_index: transaction.index,
+        index: 0,
+        value: 1,
+        from_address: address,
+        block_number: block.number
+      )
+
+      :internal_transaction
+      |> insert(
+        transaction: transaction,
+        transaction_index: transaction.index,
+        index: 2,
+        value: 0,
+        from_address: address,
+        block_number: block.number
+      )
+
+      internal_transaction =
+        :internal_transaction
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 1,
+          value: 2,
+          from_address: address,
+          block_number: block.number
+        )
+
+      expected_result = [
+        %{
+          "blockNumber" => "#{transaction.block_number}",
+          "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction.to_address_id)}",
+          "value" => "#{internal_transaction.value.value}",
+          "contractAddress" => "",
+          "input" => "#{internal_transaction.input}",
+          "type" => "#{internal_transaction.type}",
+          "callType" => "#{internal_transaction.call_type}",
+          "gas" => "#{internal_transaction.gas}",
+          "gasUsed" => "#{internal_transaction.gas_used}",
+          "index" => "#{internal_transaction.index}",
+          "transactionHash" => "#{transaction.hash}",
+          "isError" => "0",
+          "errCode" => "#{internal_transaction.error}"
+        }
+      ]
+
+      params = %{
+        "module" => "account",
+        "action" => "txlistinternal",
+        "address" => "#{address.hash}"
+      }
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
+    end
+
+    test "with zero value internal transactions when `include_zero_value=true` param is provided", %{conn: conn} do
+      address = insert(:address)
+
+      block = insert(:block)
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block(block)
+
+      :internal_transaction
+      |> insert(
+        transaction: transaction,
+        transaction_index: transaction.index,
+        index: 0,
+        value: 1,
+        from_address: address,
+        block_number: block.number
+      )
+
+      internal_transaction_a =
+        :internal_transaction
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 1,
+          value: 2,
+          from_address: address,
+          block_number: block.number
+        )
+
+      internal_transaction_b =
+        :internal_transaction
+        |> insert(
+          transaction: transaction,
+          transaction_index: transaction.index,
+          index: 2,
+          value: 0,
+          from_address: address,
+          block_number: block.number
+        )
+
+      expected_result = [
+        %{
+          "blockNumber" => "#{transaction.block_number}",
+          "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_b.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_b.to_address_id)}",
+          "value" => "#{internal_transaction_b.value.value}",
+          "contractAddress" => "",
+          "input" => "#{internal_transaction_b.input}",
+          "type" => "#{internal_transaction_b.type}",
+          "callType" => "#{internal_transaction_b.call_type}",
+          "gas" => "#{internal_transaction_b.gas}",
+          "gasUsed" => "#{internal_transaction_b.gas_used}",
+          "index" => "#{internal_transaction_b.index}",
+          "transactionHash" => "#{transaction.hash}",
+          "isError" => "0",
+          "errCode" => "#{internal_transaction_b.error}"
+        },
+        %{
+          "blockNumber" => "#{internal_transaction_a.block_number}",
+          "timeStamp" => "#{DateTime.to_unix(block.timestamp)}",
+          "from" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_a.from_address_id)}",
+          "to" => "#{AddressIdToAddressHash.id_to_hash(internal_transaction_a.to_address_id)}",
+          "value" => "#{internal_transaction_a.value.value}",
+          "contractAddress" => "",
+          "input" => "#{internal_transaction_a.input}",
+          "type" => "#{internal_transaction_a.type}",
+          "callType" => "#{internal_transaction_a.call_type}",
+          "gas" => "#{internal_transaction_a.gas}",
+          "gasUsed" => "#{internal_transaction_a.gas_used}",
+          "index" => "#{internal_transaction_a.index}",
+          "transactionHash" => "#{transaction.hash}",
+          "isError" => "0",
+          "errCode" => "#{internal_transaction_a.error}"
+        }
+      ]
+
+      params = %{
+        "module" => "account",
+        "action" => "txlistinternal",
+        "address" => "#{address.hash}",
+        "include_zero_value" => "true"
+      }
+
+      assert response =
+               conn
+               |> get("/api/v1", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
       assert response["status"] == "1"
       assert response["message"] == "OK"
       assert :ok = ExJsonSchema.Validator.validate(txlistinternal_schema(), response)
@@ -2209,42 +3002,126 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
     end
 
-    test "has correct value for ERC-721", %{conn: conn} do
+    test "returns only ERC-20 transfers", %{conn: conn} do
       transaction =
         :transaction
         |> insert()
         |> with_block()
 
-      token_address = insert(:contract_address)
-      insert(:token, %{contract_address: token_address, type: "ERC-721"})
+      erc721_token = insert(:token, %{type: "ERC-721"})
 
-      token_transfer =
+      erc721_token_transfer =
         insert(:token_transfer, %{
-          token_contract_address: token_address,
+          token_contract_address: erc721_token.contract_address,
           token_ids: [666],
+          token_type: "ERC-721",
           transaction: transaction,
           block: transaction.block,
           block_number: transaction.block_number
         })
 
-      {:ok, _} = Chain.token_from_address_hash(token_transfer.token_contract_address_hash)
+      erc1155_token = insert(:token, %{type: "ERC-1155"})
+
+      erc1155_token_transfer =
+        insert(:token_transfer, %{
+          token_contract_address: erc1155_token.contract_address,
+          token_ids: [666],
+          amounts: [1],
+          token_type: "ERC-1155",
+          transaction: transaction,
+          block: transaction.block,
+          block_number: transaction.block_number
+        })
 
       params = %{
         "module" => "account",
         "action" => "tokentx",
-        "address" => to_string(token_transfer.from_address.hash)
+        "address" => to_string(erc721_token_transfer.from_address.hash)
       }
 
       assert response =
-               %{"result" => [result]} =
+               %{"message" => "No token transfers found", "result" => [], "status" => "0"} =
                conn
                |> get("/api", params)
                |> json_response(200)
 
-      assert result["tokenID"] == to_string(List.first(token_transfer.token_ids))
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+
+      params = %{
+        "module" => "account",
+        "action" => "tokentx",
+        "address" => to_string(erc1155_token_transfer.from_address.hash)
+      }
+
+      assert response =
+               %{"message" => "No token transfers found", "result" => [], "status" => "0"} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "returns ERC-7984 transfers with confidential amounts", %{conn: conn} do
+      transaction =
+        %{block: block} =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      erc7984_token = insert(:token, %{type: "ERC-7984"})
+
+      token_transfer =
+        insert(:token_transfer,
+          block: transaction.block,
+          transaction: transaction,
+          block_number: block.number,
+          token_contract_address: erc7984_token.contract_address,
+          token_type: "ERC-7984",
+          amount: nil
+        )
+
+      params = %{
+        "module" => "account",
+        "action" => "token7984tx",
+        "address" => to_string(token_transfer.from_address.hash)
+      }
+
+      expected_result = [
+        %{
+          "blockNumber" => to_string(transaction.block_number),
+          "timeStamp" => to_string(DateTime.to_unix(block.timestamp)),
+          "hash" => to_string(token_transfer.transaction_hash),
+          "nonce" => to_string(transaction.nonce),
+          "blockHash" => to_string(block.hash),
+          "from" => to_string(token_transfer.from_address_hash),
+          "contractAddress" => to_string(token_transfer.token_contract_address_hash),
+          "to" => to_string(token_transfer.to_address_hash),
+          "value" => nil,
+          "tokenName" => erc7984_token.name,
+          "tokenSymbol" => erc7984_token.symbol,
+          "tokenDecimal" => to_string(erc7984_token.decimals),
+          "transactionIndex" => to_string(transaction.index),
+          "gas" => to_string(transaction.gas),
+          "gasPrice" => to_string(transaction.gas_price.value),
+          "gasUsed" => to_string(transaction.gas_used),
+          "cumulativeGasUsed" => to_string(transaction.cumulative_gas_used),
+          "input" => to_string(transaction.input),
+          "confirmations" => "0",
+          "functionName" => "",
+          "methodId" => ""
+        }
+      ]
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
       assert response["status"] == "1"
       assert response["message"] == "OK"
-      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+      assert :ok = ExJsonSchema.Validator.validate(token7984tx_schema(), response)
     end
 
     test "returns all the required fields", %{conn: conn} do
@@ -2284,9 +3161,10 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
           "gasPrice" => to_string(transaction.gas_price.value),
           "gasUsed" => to_string(transaction.gas_used),
           "cumulativeGasUsed" => to_string(transaction.cumulative_gas_used),
-          "logIndex" => to_string(token_transfer.log_index),
           "input" => to_string(transaction.input),
-          "confirmations" => "0"
+          "confirmations" => "0",
+          "functionName" => "",
+          "methodId" => ""
         }
       ]
 
@@ -2365,6 +3243,1226 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert response["status"] == "1"
       assert response["message"] == "OK"
       assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+  end
+
+  describe "tokennfttx" do
+    setup do
+      %{params: %{"module" => "account", "action" => "tokennfttx"}}
+    end
+
+    test "API endpoint works after `transactions` table denormalization finished", %{conn: conn, params: params} do
+      BackgroundMigrations.set_tt_denormalization_finished(true)
+
+      address = insert(:address)
+
+      transaction =
+        :transaction
+        |> insert(from_address: address)
+        |> with_block()
+
+      token = insert(:token, name: "NFT", type: "ERC-721")
+
+      insert(:token_transfer,
+        transaction: transaction,
+        from_address: address,
+        block_number: transaction.block_number,
+        token_contract_address: token.contract_address,
+        token_type: token.type,
+        token_ids: [100_500]
+      )
+
+      new_params =
+        params
+        |> Map.put("address", Explorer.Chain.Hash.to_string(address.hash))
+
+      response =
+        conn
+        |> get("/api", new_params)
+
+      assert response.status == 200
+      BackgroundMigrations.set_tt_denormalization_finished(false)
+    end
+
+    test "with missing address and contract address hash", %{conn: conn, params: params} do
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["message"] == "Query parameter address or contractaddress is required"
+      assert response["status"] == "0"
+      assert Map.has_key?(response, "result")
+      refute response["result"]
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "with an invalid address hash", %{conn: conn, params: params} do
+      params = Map.merge(params, %{"address" => "badhash"})
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["message"] =~ "Invalid address format"
+      assert response["status"] == "0"
+      assert Map.has_key?(response, "result")
+      refute response["result"]
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "with an address that doesn't exist", %{conn: conn, params: params} do
+      params = Map.merge(params, %{"address" => "0x8bf38d4764929064f2d4d3a56520a76ab3df415b"})
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["result"] == []
+      assert response["status"] == "0"
+      assert response["message"] == "No token transfers found"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "has correct value for ERC-721", %{conn: conn, params: params} do
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      token_address = insert(:contract_address)
+      insert(:token, %{contract_address: token_address, type: "ERC-721"})
+
+      token_transfer =
+        insert(:token_transfer, %{
+          token_contract_address: token_address,
+          token_ids: [666],
+          token_type: "ERC-721",
+          transaction: transaction,
+          block: transaction.block,
+          block_number: transaction.block_number
+        })
+
+      {:ok, _} = Chain.token_from_address_hash(token_transfer.token_contract_address_hash)
+
+      params = Map.merge(params, %{"address" => to_string(token_transfer.from_address.hash)})
+
+      assert response =
+               %{"result" => [result]} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert result["tokenID"] == to_string(List.first(token_transfer.token_ids))
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "returns all the required fields", %{conn: conn, params: params} do
+      transaction =
+        %{block: block} =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      token_address = insert(:contract_address)
+      token = insert(:token, contract_address: token_address, type: "ERC-721")
+
+      token_transfer =
+        insert(:token_transfer,
+          block: transaction.block,
+          transaction: transaction,
+          block_number: block.number,
+          token_ids: [1010],
+          token_type: token.type,
+          token_contract_address: token_address
+        )
+
+      params = Map.merge(params, %{"address" => to_string(token_transfer.from_address.hash)})
+
+      expected_result = [
+        %{
+          "blockNumber" => to_string(transaction.block_number),
+          "timeStamp" => to_string(DateTime.to_unix(block.timestamp)),
+          "hash" => to_string(token_transfer.transaction_hash),
+          "nonce" => to_string(transaction.nonce),
+          "blockHash" => to_string(block.hash),
+          "from" => to_string(token_transfer.from_address_hash),
+          "contractAddress" => to_string(token_transfer.token_contract_address_hash),
+          "to" => to_string(token_transfer.to_address_hash),
+          "tokenName" => token.name,
+          "tokenSymbol" => token.symbol,
+          "tokenDecimal" => to_string(token.decimals),
+          "transactionIndex" => to_string(transaction.index),
+          "gas" => to_string(transaction.gas),
+          "gasPrice" => to_string(transaction.gas_price.value),
+          "gasUsed" => to_string(transaction.gas_used),
+          "cumulativeGasUsed" => to_string(transaction.cumulative_gas_used),
+          "input" => to_string(transaction.input),
+          "confirmations" => "0",
+          "tokenID" => "1010",
+          "functionName" => "",
+          "methodId" => ""
+        }
+      ]
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "with an invalid contract address", %{conn: conn, params: params} do
+      params =
+        Map.merge(params, %{"address" => "0x8bf38d4764929064f2d4d3a56520a76ab3df415b", "contractaddress" => "invalid"})
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["message"] =~ "Invalid contract address format"
+      assert response["status"] == "0"
+      assert Map.has_key?(response, "result")
+      refute response["result"]
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "filters results by contract address", %{conn: conn, params: params} do
+      address = insert(:address)
+
+      contract_address = insert(:contract_address)
+
+      insert(:token, contract_address: contract_address, type: "ERC-721")
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      insert(:token_transfer,
+        from_address: address,
+        transaction: transaction,
+        block: transaction.block,
+        block_number: transaction.block_number
+      )
+
+      insert(:token_transfer,
+        from_address: address,
+        token_contract_address: contract_address,
+        transaction: transaction,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        token_ids: [123]
+      )
+
+      params =
+        Map.merge(params, %{"address" => to_string(address.hash), "contractaddress" => to_string(contract_address.hash)})
+
+      assert response =
+               %{"result" => [result]} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert result["contractAddress"] == to_string(contract_address.hash)
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "Check pagination and ordering (page, offset, sort parameters)", %{conn: conn, params: params} do
+      address = insert(:address)
+
+      erc_721_token = insert(:token, type: "ERC-721")
+
+      erc_721_tt =
+        for x <- 0..50 do
+          transaction = insert(:transaction, input: "0xabcd010203040506") |> with_block()
+
+          insert(:token_transfer,
+            transaction: transaction,
+            block: transaction.block,
+            block_number: transaction.block_number,
+            from_address: address,
+            token_contract_address: erc_721_token.contract_address,
+            token_ids: [x]
+          )
+        end
+
+      # sort: asc
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 25, "page" => 1, "sort" => "asc"})
+
+      assert %{"result" => token_transfers_1} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 25, "page" => 2, "sort" => "asc"})
+
+      assert %{"result" => token_transfers_2} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 25, "page" => 3, "sort" => "asc"})
+
+      assert %{"result" => token_transfers_3} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert Enum.at(token_transfers_1, 0)["hash"] == to_string(Enum.at(erc_721_tt, 0).transaction_hash)
+      assert Enum.at(token_transfers_1, 24)["hash"] == to_string(Enum.at(erc_721_tt, 24).transaction_hash)
+      assert Enum.at(token_transfers_2, 0)["hash"] == to_string(Enum.at(erc_721_tt, 25).transaction_hash)
+      assert Enum.at(token_transfers_2, 24)["hash"] == to_string(Enum.at(erc_721_tt, 49).transaction_hash)
+      assert Enum.at(token_transfers_3, 0)["hash"] == to_string(Enum.at(erc_721_tt, 50).transaction_hash)
+      assert Enum.count(token_transfers_3) == 1
+
+      # sort: desc
+      erc_721_tt_reversed = Enum.reverse(erc_721_tt)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 25, "page" => 1, "sort" => "desc"})
+
+      assert %{"result" => token_transfers_1} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 25, "page" => 2, "sort" => "desc"})
+
+      assert %{"result" => token_transfers_2} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 25, "page" => 3, "sort" => "desc"})
+
+      assert %{"result" => token_transfers_3} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert Enum.at(token_transfers_1, 0)["hash"] == to_string(Enum.at(erc_721_tt_reversed, 0).transaction_hash)
+      assert Enum.at(token_transfers_1, 24)["hash"] == to_string(Enum.at(erc_721_tt_reversed, 24).transaction_hash)
+      assert Enum.at(token_transfers_2, 0)["hash"] == to_string(Enum.at(erc_721_tt_reversed, 25).transaction_hash)
+      assert Enum.at(token_transfers_2, 24)["hash"] == to_string(Enum.at(erc_721_tt_reversed, 49).transaction_hash)
+      assert Enum.at(token_transfers_3, 0)["hash"] == to_string(Enum.at(erc_721_tt_reversed, 50).transaction_hash)
+      assert Enum.count(token_transfers_3) == 1
+    end
+  end
+
+  describe "token1155tx" do
+    setup do
+      %{params: %{"module" => "account", "action" => "token1155tx"}}
+    end
+
+    test "API endpoint works after `transactions` table denormalization finished", %{conn: conn, params: params} do
+      old_tt_denormalization_finished = BackgroundMigrations.get_tt_denormalization_finished()
+      BackgroundMigrations.set_tt_denormalization_finished(true)
+
+      on_exit(fn ->
+        BackgroundMigrations.set_tt_denormalization_finished(old_tt_denormalization_finished)
+      end)
+
+      address = insert(:address)
+
+      transaction =
+        :transaction
+        |> insert(from_address: address)
+        |> with_block()
+
+      token = insert(:token, name: "NFT", type: "ERC-1155")
+
+      insert(:token_transfer,
+        transaction: transaction,
+        from_address: address,
+        block_number: transaction.block_number,
+        token_contract_address: token.contract_address,
+        token_type: token.type,
+        token_ids: [10, 20, 30],
+        amounts: [100, 200, 300]
+      )
+
+      new_params =
+        params
+        |> Map.put("address", Explorer.Chain.Hash.to_string(address.hash))
+
+      response =
+        conn
+        |> get("/api", new_params)
+
+      assert response.status == 200
+    end
+
+    test "with missing address and contract address hash", %{conn: conn, params: params} do
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["message"] == "Query parameter address or contractaddress is required"
+      assert response["status"] == "0"
+      assert Map.has_key?(response, "result")
+      refute response["result"]
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "with an invalid address hash", %{conn: conn, params: params} do
+      params = Map.merge(params, %{"address" => "badhash"})
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["message"] =~ "Invalid address format"
+      assert response["status"] == "0"
+      assert Map.has_key?(response, "result")
+      refute response["result"]
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "with an address that doesn't exist", %{conn: conn, params: params} do
+      params = Map.merge(params, %{"address" => "0x8bf38d4764929064f2d4d3a56520a76ab3df415b"})
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["result"] == []
+      assert response["status"] == "0"
+      assert response["message"] == "No token transfers found"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "has correct value for single ERC-1155", %{conn: conn, params: params} do
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      token_address = insert(:contract_address)
+      insert(:token, %{contract_address: token_address, type: "ERC-1155"})
+
+      token_transfer =
+        insert(:token_transfer, %{
+          token_contract_address: token_address,
+          token_ids: [666],
+          token_type: "ERC-1155",
+          amount: 1,
+          transaction: transaction,
+          block: transaction.block,
+          block_number: transaction.block_number
+        })
+
+      {:ok, _} = Chain.token_from_address_hash(token_transfer.token_contract_address_hash)
+
+      params = Map.merge(params, %{"address" => to_string(token_transfer.from_address.hash)})
+
+      assert response =
+               %{"result" => results} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert length(results) == 1
+
+      [result] = results
+
+      assert result["tokenID"] == to_string(List.first(token_transfer.token_ids))
+      assert result["tokenValue"] == to_string(token_transfer.amount)
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "has correct value for multiple ERC-1155", %{conn: conn, params: params} do
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      token_address = insert(:contract_address)
+      insert(:token, %{contract_address: token_address, type: "ERC-1155"})
+
+      token_transfer =
+        insert(:token_transfer, %{
+          token_contract_address: token_address,
+          token_ids: [669, 999, 1337],
+          amounts: [1, 2, 10],
+          token_type: "ERC-1155",
+          transaction: transaction,
+          block: transaction.block,
+          block_number: transaction.block_number
+        })
+
+      {:ok, _} = Chain.token_from_address_hash(token_transfer.token_contract_address_hash)
+
+      params = Map.merge(params, %{"address" => to_string(token_transfer.from_address.hash)})
+
+      assert response =
+               %{"result" => results} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert length(results) == 3
+
+      [result1, result2, result3] = results
+      assert result1["tokenID"] == to_string(Enum.at(token_transfer.token_ids, 2))
+      assert result1["tokenValue"] == to_string(Enum.at(token_transfer.amounts, 2))
+
+      assert result2["tokenID"] == to_string(Enum.at(token_transfer.token_ids, 1))
+      assert result2["tokenValue"] == to_string(Enum.at(token_transfer.amounts, 1))
+
+      assert result3["tokenID"] == to_string(Enum.at(token_transfer.token_ids, 0))
+      assert result3["tokenValue"] == to_string(Enum.at(token_transfer.amounts, 0))
+
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "returns all the required fields", %{conn: conn, params: params} do
+      transaction =
+        %{block: block} =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      token_address = insert(:contract_address)
+      token = insert(:token, contract_address: token_address, type: "ERC-1155")
+
+      token_transfer =
+        insert(:token_transfer,
+          block: transaction.block,
+          token_type: token.type,
+          transaction: transaction,
+          block_number: block.number,
+          token_ids: [1010],
+          token_contract_address: token_address,
+          amount: 5
+        )
+
+      params = Map.merge(params, %{"address" => to_string(token_transfer.from_address.hash)})
+
+      expected_result = [
+        %{
+          "blockNumber" => to_string(transaction.block_number),
+          "timeStamp" => to_string(DateTime.to_unix(block.timestamp)),
+          "hash" => to_string(token_transfer.transaction_hash),
+          "nonce" => to_string(transaction.nonce),
+          "blockHash" => to_string(block.hash),
+          "from" => to_string(token_transfer.from_address_hash),
+          "contractAddress" => to_string(token_transfer.token_contract_address_hash),
+          "to" => to_string(token_transfer.to_address_hash),
+          "tokenName" => token.name,
+          "tokenSymbol" => token.symbol,
+          "tokenDecimal" => to_string(token.decimals),
+          "transactionIndex" => to_string(transaction.index),
+          "gas" => to_string(transaction.gas),
+          "gasPrice" => to_string(transaction.gas_price.value),
+          "gasUsed" => to_string(transaction.gas_used),
+          "cumulativeGasUsed" => to_string(transaction.cumulative_gas_used),
+          "input" => to_string(transaction.input),
+          "confirmations" => "0",
+          "tokenID" => "1010",
+          "tokenValue" => "5",
+          "functionName" => "",
+          "methodId" => ""
+        }
+      ]
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "with an invalid contract address", %{conn: conn, params: params} do
+      params =
+        Map.merge(params, %{"address" => "0x8bf38d4764929064f2d4d3a56520a76ab3df415b", "contractaddress" => "invalid"})
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["message"] =~ "Invalid contract address format"
+      assert response["status"] == "0"
+      assert Map.has_key?(response, "result")
+      refute response["result"]
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "filters results by contract address", %{conn: conn, params: params} do
+      address = insert(:address)
+
+      contract_address = insert(:contract_address)
+
+      insert(:token, contract_address: contract_address, type: "ERC-1155")
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      insert(:token_transfer,
+        from_address: address,
+        transaction: transaction,
+        block: transaction.block,
+        block_number: transaction.block_number
+      )
+
+      insert(:token_transfer,
+        from_address: address,
+        token_contract_address: contract_address,
+        transaction: transaction,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        token_ids: [123],
+        amount: 1
+      )
+
+      params =
+        Map.merge(params, %{"address" => to_string(address.hash), "contractaddress" => to_string(contract_address.hash)})
+
+      assert response =
+               %{"result" => [result]} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert result["contractAddress"] == to_string(contract_address.hash)
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "Check pagination and ordering (page, offset, sort parameters)", %{conn: conn, params: params} do
+      address = insert(:address)
+
+      erc_1155_token = insert(:token, type: "ERC-1155")
+
+      erc_1155_tt =
+        for x <- 0..50 do
+          transaction = insert(:transaction, input: "0xabcd010203040506") |> with_block()
+
+          insert(:token_transfer,
+            transaction: transaction,
+            block: transaction.block,
+            block_number: transaction.block_number,
+            from_address: address,
+            token_type: erc_1155_token.type,
+            token_contract_address: erc_1155_token.contract_address,
+            token_ids: [x, x + 100],
+            amounts: [1, 2]
+          )
+        end
+
+      # sort: asc
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 1, "sort" => "asc"})
+
+      assert %{"result" => token_transfers_1} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 2, "sort" => "asc"})
+
+      assert %{"result" => token_transfers_2} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 3, "sort" => "asc"})
+
+      assert %{"result" => token_transfers_3} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert Enum.at(token_transfers_1, 0)["hash"] == to_string(Enum.at(erc_1155_tt, 0).transaction_hash)
+      assert Enum.at(token_transfers_1, 0)["tokenID"] == to_string(Enum.at(Enum.at(erc_1155_tt, 0).token_ids, 0))
+      assert Enum.at(token_transfers_1, 0)["tokenValue"] == to_string(Enum.at(Enum.at(erc_1155_tt, 0).amounts, 0))
+      assert Enum.at(token_transfers_1, 1)["hash"] == to_string(Enum.at(erc_1155_tt, 0).transaction_hash)
+      assert Enum.at(token_transfers_1, 1)["tokenID"] == to_string(Enum.at(Enum.at(erc_1155_tt, 0).token_ids, 1))
+      assert Enum.at(token_transfers_1, 1)["tokenValue"] == to_string(Enum.at(Enum.at(erc_1155_tt, 0).amounts, 1))
+
+      assert Enum.at(token_transfers_1, 48)["hash"] == to_string(Enum.at(erc_1155_tt, 24).transaction_hash)
+      assert Enum.at(token_transfers_1, 48)["tokenID"] == to_string(Enum.at(Enum.at(erc_1155_tt, 24).token_ids, 0))
+      assert Enum.at(token_transfers_1, 48)["tokenValue"] == to_string(Enum.at(Enum.at(erc_1155_tt, 24).amounts, 0))
+      assert Enum.at(token_transfers_1, 49)["hash"] == to_string(Enum.at(erc_1155_tt, 24).transaction_hash)
+      assert Enum.at(token_transfers_1, 49)["tokenID"] == to_string(Enum.at(Enum.at(erc_1155_tt, 24).token_ids, 1))
+      assert Enum.at(token_transfers_1, 49)["tokenValue"] == to_string(Enum.at(Enum.at(erc_1155_tt, 24).amounts, 1))
+
+      assert Enum.at(token_transfers_2, 0)["hash"] == to_string(Enum.at(erc_1155_tt, 25).transaction_hash)
+      assert Enum.at(token_transfers_2, 0)["tokenID"] == to_string(Enum.at(Enum.at(erc_1155_tt, 25).token_ids, 0))
+      assert Enum.at(token_transfers_2, 0)["tokenValue"] == to_string(Enum.at(Enum.at(erc_1155_tt, 25).amounts, 0))
+      assert Enum.at(token_transfers_2, 1)["hash"] == to_string(Enum.at(erc_1155_tt, 25).transaction_hash)
+      assert Enum.at(token_transfers_2, 1)["tokenID"] == to_string(Enum.at(Enum.at(erc_1155_tt, 25).token_ids, 1))
+      assert Enum.at(token_transfers_2, 1)["tokenValue"] == to_string(Enum.at(Enum.at(erc_1155_tt, 25).amounts, 1))
+
+      assert Enum.at(token_transfers_2, 48)["hash"] == to_string(Enum.at(erc_1155_tt, 49).transaction_hash)
+      assert Enum.at(token_transfers_2, 48)["tokenID"] == to_string(Enum.at(Enum.at(erc_1155_tt, 49).token_ids, 0))
+      assert Enum.at(token_transfers_2, 48)["tokenValue"] == to_string(Enum.at(Enum.at(erc_1155_tt, 49).amounts, 0))
+      assert Enum.at(token_transfers_2, 49)["hash"] == to_string(Enum.at(erc_1155_tt, 49).transaction_hash)
+      assert Enum.at(token_transfers_2, 49)["tokenID"] == to_string(Enum.at(Enum.at(erc_1155_tt, 49).token_ids, 1))
+      assert Enum.at(token_transfers_2, 49)["tokenValue"] == to_string(Enum.at(Enum.at(erc_1155_tt, 49).amounts, 1))
+
+      assert Enum.at(token_transfers_3, 0)["hash"] == to_string(Enum.at(erc_1155_tt, 50).transaction_hash)
+      assert Enum.at(token_transfers_3, 0)["tokenID"] == to_string(Enum.at(Enum.at(erc_1155_tt, 50).token_ids, 0))
+      assert Enum.at(token_transfers_3, 0)["tokenValue"] == to_string(Enum.at(Enum.at(erc_1155_tt, 50).amounts, 0))
+      assert Enum.at(token_transfers_3, 1)["hash"] == to_string(Enum.at(erc_1155_tt, 50).transaction_hash)
+      assert Enum.at(token_transfers_3, 1)["tokenID"] == to_string(Enum.at(Enum.at(erc_1155_tt, 50).token_ids, 1))
+      assert Enum.at(token_transfers_3, 1)["tokenValue"] == to_string(Enum.at(Enum.at(erc_1155_tt, 50).amounts, 1))
+
+      assert Enum.count(token_transfers_3) == 2
+
+      # sort: desc
+      erc_1155_tt_reversed = Enum.reverse(erc_1155_tt)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 1, "sort" => "desc"})
+
+      assert %{"result" => token_transfers_1} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 2, "sort" => "desc"})
+
+      assert %{"result" => token_transfers_2} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 3, "sort" => "desc"})
+
+      assert %{"result" => token_transfers_3} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert Enum.at(token_transfers_1, 0)["hash"] == to_string(Enum.at(erc_1155_tt_reversed, 0).transaction_hash)
+
+      assert Enum.at(token_transfers_1, 0)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 0).token_ids, 1))
+
+      assert Enum.at(token_transfers_1, 0)["tokenValue"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 0).amounts, 1))
+
+      assert Enum.at(token_transfers_1, 1)["hash"] == to_string(Enum.at(erc_1155_tt_reversed, 0).transaction_hash)
+
+      assert Enum.at(token_transfers_1, 1)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 0).token_ids, 0))
+
+      assert Enum.at(token_transfers_1, 1)["tokenValue"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 0).amounts, 0))
+
+      assert Enum.at(token_transfers_1, 48)["hash"] == to_string(Enum.at(erc_1155_tt_reversed, 24).transaction_hash)
+
+      assert Enum.at(token_transfers_1, 48)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 24).token_ids, 1))
+
+      assert Enum.at(token_transfers_1, 48)["tokenValue"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 24).amounts, 1))
+
+      assert Enum.at(token_transfers_1, 49)["hash"] == to_string(Enum.at(erc_1155_tt_reversed, 24).transaction_hash)
+
+      assert Enum.at(token_transfers_1, 49)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 24).token_ids, 0))
+
+      assert Enum.at(token_transfers_1, 49)["tokenValue"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 24).amounts, 0))
+
+      assert Enum.at(token_transfers_2, 0)["hash"] == to_string(Enum.at(erc_1155_tt_reversed, 25).transaction_hash)
+
+      assert Enum.at(token_transfers_2, 0)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 25).token_ids, 1))
+
+      assert Enum.at(token_transfers_2, 0)["tokenValue"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 25).amounts, 1))
+
+      assert Enum.at(token_transfers_2, 1)["hash"] == to_string(Enum.at(erc_1155_tt_reversed, 25).transaction_hash)
+
+      assert Enum.at(token_transfers_2, 1)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 25).token_ids, 0))
+
+      assert Enum.at(token_transfers_2, 1)["tokenValue"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 25).amounts, 0))
+
+      assert Enum.at(token_transfers_2, 48)["hash"] == to_string(Enum.at(erc_1155_tt_reversed, 49).transaction_hash)
+
+      assert Enum.at(token_transfers_2, 48)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 49).token_ids, 1))
+
+      assert Enum.at(token_transfers_2, 48)["tokenValue"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 49).amounts, 1))
+
+      assert Enum.at(token_transfers_2, 49)["hash"] == to_string(Enum.at(erc_1155_tt_reversed, 49).transaction_hash)
+
+      assert Enum.at(token_transfers_2, 49)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 49).token_ids, 0))
+
+      assert Enum.at(token_transfers_2, 49)["tokenValue"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 49).amounts, 0))
+
+      assert Enum.at(token_transfers_3, 0)["hash"] == to_string(Enum.at(erc_1155_tt_reversed, 50).transaction_hash)
+
+      assert Enum.at(token_transfers_3, 0)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 50).token_ids, 1))
+
+      assert Enum.at(token_transfers_3, 0)["tokenValue"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 50).amounts, 1))
+
+      assert Enum.at(token_transfers_3, 1)["hash"] == to_string(Enum.at(erc_1155_tt_reversed, 50).transaction_hash)
+
+      assert Enum.at(token_transfers_3, 1)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 50).token_ids, 0))
+
+      assert Enum.at(token_transfers_3, 1)["tokenValue"] ==
+               to_string(Enum.at(Enum.at(erc_1155_tt_reversed, 50).amounts, 0))
+
+      assert Enum.count(token_transfers_3) == 2
+    end
+  end
+
+  describe "token404tx" do
+    setup do
+      %{params: %{"module" => "account", "action" => "token404tx"}}
+    end
+
+    test "works before denormalization finished and after", %{conn: conn, params: params} do
+      old_tt_denormalization_finished = BackgroundMigrations.get_tt_denormalization_finished()
+
+      on_exit(fn ->
+        BackgroundMigrations.set_tt_denormalization_finished(old_tt_denormalization_finished)
+      end)
+
+      address = insert(:address)
+
+      transaction =
+        :transaction
+        |> insert(from_address: address)
+        |> with_block()
+
+      token = insert(:token, name: "NFT", type: "ERC-404")
+
+      insert(:token_transfer,
+        transaction: transaction,
+        token_type: token.type,
+        from_address: address,
+        block_number: transaction.block_number,
+        token_contract_address: token.contract_address,
+        token_type: token.type,
+        token_ids: [10],
+        amounts: []
+      )
+
+      insert(:token_transfer,
+        transaction: transaction,
+        token_type: token.type,
+        from_address: address,
+        block_number: transaction.block_number,
+        token_contract_address: token.contract_address,
+        token_type: token.type,
+        token_ids: [],
+        amounts: [20]
+      )
+
+      new_params =
+        params
+        |> Map.put("address", Explorer.Chain.Hash.to_string(address.hash))
+
+      BackgroundMigrations.set_tt_denormalization_finished(false)
+
+      response =
+        conn
+        |> get("/api", new_params)
+
+      assert response.status == 200
+
+      BackgroundMigrations.set_tt_denormalization_finished(true)
+
+      response =
+        conn
+        |> get("/api", new_params)
+
+      assert response.status == 200
+    end
+
+    test "with missing address and contract address hash", %{conn: conn, params: params} do
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["message"] == "Query parameter address or contractaddress is required"
+      assert response["status"] == "0"
+      assert Map.has_key?(response, "result")
+      refute response["result"]
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "with an invalid address hash", %{conn: conn, params: params} do
+      params = Map.merge(params, %{"address" => "badhash"})
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["message"] =~ "Invalid address format"
+      assert response["status"] == "0"
+      assert Map.has_key?(response, "result")
+      refute response["result"]
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "with an address that doesn't exist", %{conn: conn, params: params} do
+      params = Map.merge(params, %{"address" => "0x8bf38d4764929064f2d4d3a56520a76ab3df415b"})
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["result"] == []
+      assert response["status"] == "0"
+      assert response["message"] == "No token transfers found"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "with an invalid contract address", %{conn: conn, params: params} do
+      params =
+        Map.merge(params, %{"address" => "0x8bf38d4764929064f2d4d3a56520a76ab3df415b", "contractaddress" => "invalid"})
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["message"] =~ "Invalid contract address format"
+      assert response["status"] == "0"
+      assert Map.has_key?(response, "result")
+      refute response["result"]
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "filters results by contract address", %{conn: conn, params: params} do
+      address = insert(:address)
+
+      contract_address = insert(:contract_address)
+
+      insert(:token, contract_address: contract_address, type: "ERC-404")
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      insert(:token_transfer,
+        from_address: address,
+        transaction: transaction,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        token_type: "ERC-404",
+        token_ids: [1],
+        amounts: []
+      )
+
+      insert(:token_transfer,
+        from_address: address,
+        token_contract_address: contract_address,
+        transaction: transaction,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        token_ids: [],
+        amounts: [1],
+        token_type: "ERC-404"
+      )
+
+      params =
+        Map.merge(params, %{"address" => to_string(address.hash), "contractaddress" => to_string(contract_address.hash)})
+
+      assert response =
+               %{"result" => [result]} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert result["contractAddress"] == to_string(contract_address.hash)
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "returns all the required fields", %{conn: conn, params: params} do
+      address = insert(:address)
+
+      contract_address = insert(:contract_address)
+
+      token = insert(:token, contract_address: contract_address, type: "ERC-404")
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block()
+
+      token_transfer =
+        insert(:token_transfer,
+          from_address: address,
+          token_contract_address: contract_address,
+          transaction: transaction,
+          block: transaction.block,
+          block_number: transaction.block_number,
+          token_ids: [],
+          amounts: [1],
+          token_type: token.type
+        )
+
+      params =
+        Map.merge(params, %{"address" => to_string(address.hash), "contractaddress" => to_string(contract_address.hash)})
+
+      expected_result = [
+        %{
+          "blockNumber" => to_string(transaction.block_number),
+          "timeStamp" => to_string(DateTime.to_unix(transaction.block.timestamp)),
+          "hash" => to_string(token_transfer.transaction_hash),
+          "nonce" => to_string(transaction.nonce),
+          "blockHash" => to_string(transaction.block.hash),
+          "from" => to_string(token_transfer.from_address_hash),
+          "contractAddress" => to_string(token_transfer.token_contract_address_hash),
+          "to" => to_string(token_transfer.to_address_hash),
+          "tokenName" => token.name,
+          "tokenSymbol" => token.symbol,
+          "tokenDecimal" => to_string(token.decimals),
+          "transactionIndex" => to_string(transaction.index),
+          "gas" => to_string(transaction.gas),
+          "gasPrice" => to_string(transaction.gas_price.value),
+          "gasUsed" => to_string(transaction.gas_used),
+          "cumulativeGasUsed" => to_string(transaction.cumulative_gas_used),
+          "input" => to_string(transaction.input),
+          "confirmations" => "0",
+          "tokenID" => "",
+          "value" => "1",
+          "functionName" => "",
+          "methodId" => ""
+        }
+      ]
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert response["result"] == expected_result
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+    end
+
+    test "check pagination and ordering (page, offset, sort parameters)", %{conn: conn, params: params} do
+      address = insert(:address)
+
+      erc_404_token = insert(:token, type: "ERC-404")
+
+      erc_404_tt =
+        for x <- 0..50 do
+          transaction = insert(:transaction, input: "0xabcd010203040506") |> with_block()
+
+          [
+            insert(:token_transfer,
+              transaction: transaction,
+              block: transaction.block,
+              block_number: transaction.block_number,
+              from_address: address,
+              token_type: erc_404_token.type,
+              token_contract_address: erc_404_token.contract_address,
+              token_ids: [x],
+              amounts: []
+            ),
+            insert(:token_transfer,
+              transaction: transaction,
+              block: transaction.block,
+              block_number: transaction.block_number,
+              from_address: address,
+              token_type: erc_404_token.type,
+              token_contract_address: erc_404_token.contract_address,
+              token_ids: [],
+              amounts: [x + 100]
+            )
+          ]
+        end
+        |> List.flatten()
+
+      # sort: asc
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 1, "sort" => "asc"})
+
+      assert %{"result" => token_transfers_1} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 2, "sort" => "asc"})
+
+      assert %{"result" => token_transfers_2} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 3, "sort" => "asc"})
+
+      assert %{"result" => token_transfers_3} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert Enum.at(token_transfers_1, 0)["hash"] == to_string(Enum.at(erc_404_tt, 0).transaction_hash)
+      assert Enum.at(token_transfers_1, 0)["tokenID"] == to_string(Enum.at(Enum.at(erc_404_tt, 0).token_ids, 0))
+      assert Enum.at(token_transfers_1, 0)["value"] == ""
+      assert Enum.at(token_transfers_1, 1)["hash"] == to_string(Enum.at(erc_404_tt, 1).transaction_hash)
+      assert Enum.at(token_transfers_1, 1)["tokenID"] == ""
+      assert Enum.at(token_transfers_1, 1)["value"] == to_string(Enum.at(Enum.at(erc_404_tt, 1).amounts, 0))
+
+      assert Enum.at(token_transfers_1, 48)["hash"] == to_string(Enum.at(erc_404_tt, 48).transaction_hash)
+      assert Enum.at(token_transfers_1, 48)["tokenID"] == to_string(Enum.at(Enum.at(erc_404_tt, 48).token_ids, 0))
+      assert Enum.at(token_transfers_1, 48)["value"] == ""
+      assert Enum.at(token_transfers_1, 49)["hash"] == to_string(Enum.at(erc_404_tt, 49).transaction_hash)
+      assert Enum.at(token_transfers_1, 49)["tokenID"] == ""
+      assert Enum.at(token_transfers_1, 49)["value"] == to_string(Enum.at(Enum.at(erc_404_tt, 49).amounts, 0))
+
+      assert Enum.at(token_transfers_2, 0)["hash"] == to_string(Enum.at(erc_404_tt, 50).transaction_hash)
+      assert Enum.at(token_transfers_2, 0)["tokenID"] == to_string(Enum.at(Enum.at(erc_404_tt, 50).token_ids, 0))
+      assert Enum.at(token_transfers_2, 0)["value"] == ""
+      assert Enum.at(token_transfers_2, 1)["hash"] == to_string(Enum.at(erc_404_tt, 51).transaction_hash)
+      assert Enum.at(token_transfers_2, 1)["tokenID"] == ""
+      assert Enum.at(token_transfers_2, 1)["value"] == to_string(Enum.at(Enum.at(erc_404_tt, 51).amounts, 0))
+
+      assert Enum.at(token_transfers_2, 48)["hash"] == to_string(Enum.at(erc_404_tt, 98).transaction_hash)
+      assert Enum.at(token_transfers_2, 48)["tokenID"] == to_string(Enum.at(Enum.at(erc_404_tt, 98).token_ids, 0))
+      assert Enum.at(token_transfers_2, 48)["value"] == ""
+      assert Enum.at(token_transfers_2, 49)["hash"] == to_string(Enum.at(erc_404_tt, 99).transaction_hash)
+      assert Enum.at(token_transfers_2, 49)["tokenID"] == ""
+      assert Enum.at(token_transfers_2, 49)["value"] == to_string(Enum.at(Enum.at(erc_404_tt, 99).amounts, 0))
+
+      assert Enum.at(token_transfers_3, 0)["hash"] == to_string(Enum.at(erc_404_tt, 100).transaction_hash)
+      assert Enum.at(token_transfers_3, 0)["tokenID"] == to_string(Enum.at(Enum.at(erc_404_tt, 100).token_ids, 0))
+      assert Enum.at(token_transfers_3, 0)["value"] == ""
+      assert Enum.at(token_transfers_3, 1)["hash"] == to_string(Enum.at(erc_404_tt, 101).transaction_hash)
+      assert Enum.at(token_transfers_3, 1)["tokenID"] == ""
+      assert Enum.at(token_transfers_3, 1)["value"] == to_string(Enum.at(Enum.at(erc_404_tt, 101).amounts, 0))
+
+      assert Enum.count(token_transfers_3) == 2
+
+      # sort: desc
+      erc_404_tt_reversed = Enum.reverse(erc_404_tt)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 1, "sort" => "desc"})
+
+      assert %{"result" => token_transfers_1} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 2, "sort" => "desc"})
+
+      assert %{"result" => token_transfers_2} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      params = Map.merge(params, %{"address" => to_string(address.hash), "offset" => 50, "page" => 3, "sort" => "desc"})
+
+      assert %{"result" => token_transfers_3} =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      assert Enum.at(token_transfers_1, 0)["hash"] == to_string(Enum.at(erc_404_tt_reversed, 0).transaction_hash)
+
+      assert Enum.at(token_transfers_1, 0)["tokenID"] == ""
+
+      assert Enum.at(token_transfers_1, 0)["value"] ==
+               to_string(Enum.at(Enum.at(erc_404_tt_reversed, 0).amounts, 0))
+
+      assert Enum.at(token_transfers_1, 1)["hash"] == to_string(Enum.at(erc_404_tt_reversed, 1).transaction_hash)
+
+      assert Enum.at(token_transfers_1, 1)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_404_tt_reversed, 1).token_ids, 0))
+
+      assert Enum.at(token_transfers_1, 1)["value"] == ""
+
+      assert Enum.at(token_transfers_1, 48)["hash"] == to_string(Enum.at(erc_404_tt_reversed, 48).transaction_hash)
+
+      assert Enum.at(token_transfers_1, 48)["tokenID"] == ""
+
+      assert Enum.at(token_transfers_1, 48)["value"] == to_string(Enum.at(Enum.at(erc_404_tt_reversed, 48).amounts, 0))
+
+      assert Enum.at(token_transfers_1, 49)["hash"] == to_string(Enum.at(erc_404_tt_reversed, 49).transaction_hash)
+
+      assert Enum.at(token_transfers_1, 49)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_404_tt_reversed, 49).token_ids, 0))
+
+      assert Enum.at(token_transfers_1, 49)["value"] == ""
+
+      assert Enum.at(token_transfers_2, 0)["hash"] == to_string(Enum.at(erc_404_tt_reversed, 50).transaction_hash)
+
+      assert Enum.at(token_transfers_2, 0)["tokenID"] == ""
+
+      assert Enum.at(token_transfers_2, 0)["value"] ==
+               to_string(Enum.at(Enum.at(erc_404_tt_reversed, 50).amounts, 0))
+
+      assert Enum.at(token_transfers_2, 1)["hash"] == to_string(Enum.at(erc_404_tt_reversed, 51).transaction_hash)
+
+      assert Enum.at(token_transfers_2, 1)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_404_tt_reversed, 51).token_ids, 0))
+
+      assert Enum.at(token_transfers_2, 1)["value"] == ""
+
+      assert Enum.at(token_transfers_2, 48)["hash"] == to_string(Enum.at(erc_404_tt_reversed, 98).transaction_hash)
+
+      assert Enum.at(token_transfers_2, 48)["tokenID"] == ""
+
+      assert Enum.at(token_transfers_2, 48)["value"] ==
+               to_string(Enum.at(Enum.at(erc_404_tt_reversed, 98).amounts, 0))
+
+      assert Enum.at(token_transfers_2, 49)["hash"] == to_string(Enum.at(erc_404_tt_reversed, 99).transaction_hash)
+
+      assert Enum.at(token_transfers_2, 49)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_404_tt_reversed, 99).token_ids, 0))
+
+      assert Enum.at(token_transfers_2, 49)["value"] == ""
+
+      assert Enum.at(token_transfers_3, 0)["hash"] == to_string(Enum.at(erc_404_tt_reversed, 100).transaction_hash)
+
+      assert Enum.at(token_transfers_3, 0)["tokenID"] == ""
+
+      assert Enum.at(token_transfers_3, 0)["value"] ==
+               to_string(Enum.at(Enum.at(erc_404_tt_reversed, 100).amounts, 0))
+
+      assert Enum.at(token_transfers_3, 1)["hash"] == to_string(Enum.at(erc_404_tt_reversed, 101).transaction_hash)
+
+      assert Enum.at(token_transfers_3, 1)["tokenID"] ==
+               to_string(Enum.at(Enum.at(erc_404_tt_reversed, 101).token_ids, 0))
+
+      assert Enum.at(token_transfers_3, 1)["value"] == ""
+      assert(Enum.count(token_transfers_3) == 2)
     end
   end
 
@@ -2830,8 +4928,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
   describe "optional_params/1" do
     test "includes valid optional params in the required format" do
       params = %{
-        "start_block" => "100",
-        "end_block" => "120",
+        "startblock" => "100",
+        "endblock" => "120",
         "sort" => "asc",
         # page number
         "page" => "1",
@@ -2842,7 +4940,7 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         "end_timestamp" => "1539186474"
       }
 
-      optional_params = AddressController.optional_params(params)
+      {:ok, optional_params} = AddressController.optional_params(params)
 
       # 1539186474 equals "2018-10-10 15:47:54Z"
       {:ok, expected_timestamp, _} = DateTime.from_iso8601("2018-10-10 15:47:54Z")
@@ -2850,8 +4948,8 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert optional_params.page_number == 1
       assert optional_params.page_size == 2
       assert optional_params.order_by_direction == :asc
-      assert optional_params.start_block == 100
-      assert optional_params.end_block == 120
+      assert optional_params.startblock == 100
+      assert optional_params.endblock == 120
       assert optional_params.filter_by == "to"
       assert optional_params.start_timestamp == expected_timestamp
       assert optional_params.end_timestamp == expected_timestamp
@@ -2860,47 +4958,47 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
     test "'sort' values can be 'asc' or 'desc'" do
       params1 = %{"sort" => "asc"}
 
-      optional_params = AddressController.optional_params(params1)
+      {:ok, optional_params} = AddressController.optional_params(params1)
 
       assert optional_params.order_by_direction == :asc
 
       params2 = %{"sort" => "desc"}
 
-      optional_params = AddressController.optional_params(params2)
+      {:ok, optional_params} = AddressController.optional_params(params2)
 
       assert optional_params.order_by_direction == :desc
 
       params3 = %{"sort" => "invalid"}
 
-      assert AddressController.optional_params(params3) == %{}
+      assert AddressController.optional_params(params3) == {:ok, %{}}
     end
 
     test "'filter_by' value can be 'to' or 'from'" do
       params1 = %{"filter_by" => "to"}
 
-      optional_params1 = AddressController.optional_params(params1)
+      {:ok, optional_params1} = AddressController.optional_params(params1)
 
       assert optional_params1.filter_by == "to"
 
       params2 = %{"filter_by" => "from"}
 
-      optional_params2 = AddressController.optional_params(params2)
+      {:ok, optional_params2} = AddressController.optional_params(params2)
 
       assert optional_params2.filter_by == "from"
 
       params3 = %{"filter_by" => "invalid"}
 
-      assert AddressController.optional_params(params3) == %{}
+      assert AddressController.optional_params(params3) == {:ok, %{}}
     end
 
     test "only includes optional params when they're given" do
-      assert AddressController.optional_params(%{}) == %{}
+      assert AddressController.optional_params(%{}) == {:ok, %{}}
     end
 
     test "ignores invalid optional params, keeps valid ones" do
       params1 = %{
-        "start_block" => "invalid",
-        "end_block" => "invalid",
+        "startblock" => "invalid",
+        "endblock" => "invalid",
         "sort" => "invalid",
         "page" => "invalid",
         "offset" => "invalid",
@@ -2908,11 +5006,11 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         "end_timestamp" => "invalid"
       }
 
-      assert AddressController.optional_params(params1) == %{}
+      assert AddressController.optional_params(params1) == {:ok, %{}}
 
       params2 = %{
-        "start_block" => "4",
-        "end_block" => "10",
+        "startblock" => "4",
+        "endblock" => "10",
         "sort" => "invalid",
         "page" => "invalid",
         "offset" => "invalid",
@@ -2920,28 +5018,28 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
         "end_timestamp" => "invalid"
       }
 
-      optional_params = AddressController.optional_params(params2)
+      {:ok, optional_params} = AddressController.optional_params(params2)
 
-      assert optional_params.start_block == 4
-      assert optional_params.end_block == 10
+      assert optional_params.startblock == 4
+      assert optional_params.endblock == 10
     end
 
     test "ignores 'page' if less than 1" do
       params = %{"page" => "0"}
 
-      assert AddressController.optional_params(params) == %{}
+      assert AddressController.optional_params(params) == {:ok, %{}}
     end
 
     test "ignores 'offset' if less than 1" do
       params = %{"offset" => "0"}
 
-      assert AddressController.optional_params(params) == %{}
+      assert AddressController.optional_params(params) == {:ok, %{}}
     end
 
     test "ignores 'offset' if more than 10,000" do
       params = %{"offset" => "10001"}
 
-      assert AddressController.optional_params(params) == %{}
+      assert AddressController.optional_params(params) == {:ok, %{}}
     end
   end
 
@@ -3081,6 +5179,38 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
     })
   end
 
+  defp token7984tx_schema do
+    resolve_schema(%{
+      "type" => ["array", "null"],
+      "items" => %{
+        "type" => "object",
+        "properties" => %{
+          "blockNumber" => %{"type" => "string"},
+          "timeStamp" => %{"type" => "string"},
+          "hash" => %{"type" => "string"},
+          "nonce" => %{"type" => "string"},
+          "blockHash" => %{"type" => "string"},
+          "from" => %{"type" => "string"},
+          "contractAddress" => %{"type" => "string"},
+          "to" => %{"type" => "string"},
+          "logIndex" => %{"type" => "string"},
+          "value" => %{"type" => "null"},
+          "tokenName" => %{"type" => "string"},
+          "tokenID" => %{"type" => "string"},
+          "tokenSymbol" => %{"type" => "string"},
+          "tokenDecimal" => %{"type" => "string"},
+          "transactionIndex" => %{"type" => "string"},
+          "gas" => %{"type" => "string"},
+          "gasPrice" => %{"type" => "string"},
+          "gasUsed" => %{"type" => "string"},
+          "cumulativeGasUsed" => %{"type" => "string"},
+          "input" => %{"type" => "string"},
+          "confirmations" => %{"type" => "string"}
+        }
+      }
+    })
+  end
+
   defp tokenbalance_schema, do: resolve_schema(%{"type" => ["string", "null"]})
 
   defp tokenlist_schema do
@@ -3124,41 +5254,5 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
     }
     |> put_in(["properties", "result"], result)
     |> ExJsonSchema.Schema.resolve()
-  end
-
-  defp eth_block_number_fake_response(block_quantity) do
-    %{
-      id: 0,
-      jsonrpc: "2.0",
-      result: %{
-        "author" => "0x0000000000000000000000000000000000000000",
-        "difficulty" => "0x20000",
-        "extraData" => "0x",
-        "gasLimit" => "0x663be0",
-        "gasUsed" => "0x0",
-        "hash" => "0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f",
-        "logsBloom" =>
-          "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-        "miner" => "0x0000000000000000000000000000000000000000",
-        "number" => block_quantity,
-        "parentHash" => "0x0000000000000000000000000000000000000000000000000000000000000000",
-        "receiptsRoot" => "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-        "sealFields" => [
-          "0x80",
-          "0xb8410000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
-        ],
-        "sha3Uncles" => "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
-        "signature" =>
-          "0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
-        "size" => "0x215",
-        "stateRoot" => "0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3",
-        "step" => "0",
-        "timestamp" => "0x0",
-        "totalDifficulty" => "0x20000",
-        "transactions" => [],
-        "transactionsRoot" => "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-        "uncles" => []
-      }
-    }
   end
 end

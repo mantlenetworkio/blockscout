@@ -8,8 +8,7 @@ defmodule Indexer.Fetcher.ReplacedTransaction do
 
   require Logger
 
-  alias Explorer.Chain
-  alias Explorer.Chain.Hash
+  alias Explorer.Chain.{Hash, Transaction}
   alias Indexer.{BufferedTask, Tracer}
   alias Indexer.Fetcher.ReplacedTransaction.Supervisor, as: ReplacedTransactionSupervisor
 
@@ -25,19 +24,22 @@ defmodule Indexer.Fetcher.ReplacedTransaction do
     metadata: [fetcher: :replaced_transaction]
   ]
 
-  @spec async_fetch([
-          %{
-            required(:nonce) => non_neg_integer,
-            required(:from_address_hash) => Hash.Address.t(),
-            required(:block_hash) => Hash.Full.t()
-          }
-        ]) :: :ok
-  def async_fetch(transactions_fields, timeout \\ 5000) when is_list(transactions_fields) do
+  @spec async_fetch(
+          [
+            %{
+              required(:nonce) => non_neg_integer,
+              required(:from_address_hash) => Hash.Address.t(),
+              required(:block_hash) => Hash.Full.t()
+            }
+          ],
+          boolean()
+        ) :: :ok
+  def async_fetch(transactions_fields, realtime?, timeout \\ 5000) when is_list(transactions_fields) do
     if ReplacedTransactionSupervisor.disabled?() do
       :ok
     else
       entries = Enum.map(transactions_fields, &entry/1)
-      BufferedTask.buffer(__MODULE__, entries, timeout)
+      BufferedTask.buffer(__MODULE__, entries, realtime?, timeout)
     end
   end
 
@@ -55,13 +57,14 @@ defmodule Indexer.Fetcher.ReplacedTransaction do
   def init(initial, reducer, _) do
     {:ok, final} =
       [:block_hash, :nonce, :from_address_hash, :hash]
-      |> Chain.stream_pending_transactions(
+      |> Transaction.stream_pending_transactions(
         initial,
         fn transaction_fields, acc ->
           transaction_fields
           |> pending_entry()
           |> reducer.(acc)
-        end
+        end,
+        true
       )
 
     final
@@ -76,7 +79,11 @@ defmodule Indexer.Fetcher.ReplacedTransaction do
     {block_hash_bytes, nonce, from_address_hash_bytes}
   end
 
-  defp pending_entry(%{hash: %Hash{bytes: hash}, nonce: nonce, from_address_hash: %Hash{bytes: from_address_hash_bytes}}) do
+  defp pending_entry(%{
+         hash: %Hash{bytes: hash},
+         nonce: nonce,
+         from_address_hash: %Hash{bytes: from_address_hash_bytes}
+       }) do
     {:pending, nonce, from_address_hash_bytes, hash}
   end
 
@@ -111,11 +118,11 @@ defmodule Indexer.Fetcher.ReplacedTransaction do
 
       pending
       |> Enum.map(&pending_params/1)
-      |> Chain.find_and_update_replaced_transactions()
+      |> Transaction.find_and_update_replaced_transactions()
 
       realtime
       |> Enum.map(&params/1)
-      |> Chain.update_replaced_transactions()
+      |> Transaction.update_replaced_transactions()
 
       :ok
     rescue
@@ -123,7 +130,7 @@ defmodule Indexer.Fetcher.ReplacedTransaction do
         Logger.error(fn ->
           [
             "failed to update replaced transactions for transactions: ",
-            inspect(reason)
+            Exception.format(:error, reason, __STACKTRACE__)
           ]
         end)
 

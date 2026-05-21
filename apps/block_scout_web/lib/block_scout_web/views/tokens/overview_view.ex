@@ -1,13 +1,13 @@
 defmodule BlockScoutWeb.Tokens.OverviewView do
   use BlockScoutWeb, :view
 
-  alias Explorer.{Chain, CustomContractsHelpers}
-  alias Explorer.Chain.{Address, SmartContract, Token}
+  alias BlockScoutWeb.{AccessHelper, LayoutView}
+  alias Explorer.{Chain, CustomContractsHelper}
+  alias Explorer.Chain.{Address, CurrencyHelper, SmartContract, Token}
+  alias Explorer.Chain.SmartContract.Proxy
   alias Explorer.SmartContract.{Helper, Writer}
 
-  alias BlockScoutWeb.{AccessHelpers, CurrencyHelpers, LayoutView}
-
-  import BlockScoutWeb.AddressView, only: [from_address_hash: 1]
+  import BlockScoutWeb.AddressView, only: [from_address_hash: 1, contract_interaction_disabled?: 0]
 
   @tabs ["token-transfers", "token-holders", "read-contract", "inventory"]
 
@@ -43,51 +43,36 @@ defmodule BlockScoutWeb.Tokens.OverviewView do
 
   def display_inventory?(%Token{type: "ERC-721"}), do: true
   def display_inventory?(%Token{type: "ERC-1155"}), do: true
+  def display_inventory?(%Token{type: "ERC-404"}), do: true
   def display_inventory?(_), do: false
-
-  def contract?(%Token{contract_address: %Address{contract_code: nil}}), do: false
-
-  def contract?(%Token{contract_address: %Address{contract_code: _}}), do: true
-
-  def contract?(%Token{contract_address: nil}), do: true
-
-  def smart_contract_verified?(%Token{contract_address: %Address{smart_contract: %{metadata_from_verified_twin: true}}}),
-    do: false
-
-  def smart_contract_verified?(%Token{contract_address: %Address{smart_contract: %SmartContract{}}}), do: true
-
-  def smart_contract_verified?(%Token{contract_address: %Address{smart_contract: nil}}), do: false
 
   def smart_contract_with_read_only_functions?(
         %Token{contract_address: %Address{smart_contract: %SmartContract{}}} = token
       ) do
-    Enum.any?(token.contract_address.smart_contract.abi || [], &Helper.queriable_method?(&1))
+    Enum.any?(token.contract_address.smart_contract.abi || [], &Helper.queryable_method?(&1))
   end
 
-  def smart_contract_with_read_only_functions?(%Token{
-        contract_address: %Address{smart_contract: nil}
-      }),
-      do: false
+  def smart_contract_with_read_only_functions?(%Token{contract_address: %Address{smart_contract: nil}}), do: false
 
-  def smart_contract_is_proxy?(%Token{
+  def token_smart_contract_is_proxy?(%Token{
         contract_address: %Address{smart_contract: %SmartContract{} = smart_contract}
       }) do
-    SmartContract.proxy_contract?(smart_contract)
+    Proxy.proxy_contract?(smart_contract)
   end
 
-  def smart_contract_is_proxy?(%Token{contract_address: %Address{smart_contract: nil}}), do: false
+  def token_smart_contract_is_proxy?(%Token{contract_address: %Address{smart_contract: nil}}), do: false
 
   def smart_contract_with_write_functions?(%Token{
         contract_address: %Address{smart_contract: %SmartContract{}} = address
       }) do
-    Enum.any?(
-      address.smart_contract.abi || [],
-      &Writer.write_function?(&1)
-    )
+    !contract_interaction_disabled?() &&
+      Enum.any?(
+        address.smart_contract.abi || [],
+        &Writer.write_function?(&1)
+      )
   end
 
-  def smart_contract_with_write_functions?(%Token{contract_address: %Address{smart_contract: nil}}),
-    do: false
+  def smart_contract_with_write_functions?(%Token{contract_address: %Address{smart_contract: nil}}), do: false
 
   @doc """
   Get the total value of the token supply in USD.
@@ -96,8 +81,8 @@ defmodule BlockScoutWeb.Tokens.OverviewView do
     if Map.has_key?(token, :custom_cap) && token.custom_cap do
       token.custom_cap
     else
-      tokens = CurrencyHelpers.divide_decimals(token.total_supply, token.decimals)
-      price = token.usd_value
+      tokens = CurrencyHelper.divide_decimals(token.total_supply, token.decimals)
+      price = token.fiat_value
       Decimal.mult(tokens, price)
     end
   end

@@ -2,12 +2,14 @@ defmodule BlockScoutWeb.PendingTransactionController do
   use BlockScoutWeb, :controller
 
   import BlockScoutWeb.Chain, only: [paging_options: 1, next_page_params: 3, split_list_by_page: 1]
+  import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
 
   alias BlockScoutWeb.{Controller, TransactionView}
   alias Explorer.Chain
+  alias Explorer.Chain.Transaction
   alias Phoenix.View
 
-  {:ok, burn_address_hash} = Chain.string_to_address_hash("0x0000000000000000000000000000000000000000")
+  {:ok, burn_address_hash} = Chain.string_to_address_hash(burn_address_hash_string())
   @burn_address_hash burn_address_hash
 
   def index(conn, %{"type" => "JSON"} = params) do
@@ -63,7 +65,7 @@ defmodule BlockScoutWeb.PendingTransactionController do
   end
 
   defp get_pending_transactions_and_next_page(options) do
-    transactions_plus_one = Chain.recent_pending_transactions(options, true)
+    transactions_plus_one = Transaction.recent_pending_transactions(options, true)
     split_list_by_page(transactions_plus_one)
   end
 end

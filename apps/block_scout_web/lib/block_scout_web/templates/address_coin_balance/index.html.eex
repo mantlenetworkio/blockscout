@@ -1,7 +1,7 @@
 <section class="container" data-page="coin-balance-history">
   <script defer src="<%= static_path(@conn, "/js/balance-chart-loader.js") %>"></script>
 
-  <% is_proxy = BlockScoutWeb.AddressView.smart_contract_is_proxy?(@address) %>
+  <% is_proxy = SmartContractHelper.address_is_proxy?(@address) %>
 
   <%= render BlockScoutWeb.AddressView, "overview.html", address: @address, is_proxy: is_proxy, conn: @conn, exchange_rate: @exchange_rate, coin_balance_status: @coin_balance_status, counters_path: @counters_path, tags: @tags %>
 
@@ -9,7 +9,7 @@
     <div class="card">
       <%= render BlockScoutWeb.AddressView, "_tabs.html", address: @address, is_proxy: is_proxy, conn: @conn %>
       <div class="card-body" data-async-listing="<%= @current_path %>">
-        <%= render BlockScoutWeb.CommonComponentsView, "_channel_disconnected_message.html", text: gettext("More blocks come in, click for an update") %>
+        <%= render BlockScoutWeb.CommonComponentsView, "_channel_disconnected_message.html", text: gettext("Connection Lost, click to load newer blocks") %>
 
         <h2 class="card-title"><%= gettext "Balances" %></h2>
 
@@ -21,7 +21,7 @@
           <span><%= gettext("There was a problem loading the chart.") %></span>
         </button>
         <div data-chart-container class="mb-4" style="display: none;">
-          <canvas data-chart="coinBalanceHistoryChart" data-coin_balance_history_data_path="<%= AccessHelpers.get_path(@conn, :address_coin_balance_by_day_path, :index, @address) %>" width="350" height="152"></canvas>
+          <canvas data-chart="coinBalanceHistoryChart" data-coin_balance_history_data_path="<%= AccessHelper.get_path(@conn, :address_coin_balance_by_day_path, :index, @address) %>" width="350" height="152"></canvas>
         </div>
 
         <%= render BlockScoutWeb.CommonComponentsView, "_pagination_container.html", position: "top", cur_page_number: "1", show_pagination_limit: true, data_next_page_button: true, data_prev_page_button: true %>

@@ -27,7 +27,7 @@ defmodule Explorer.Token.BalanceReader do
     }
   ]
 
-  @erc1155_balance_function_abi [
+  @nft_balance_function_abi [
     %{
       "constant" => true,
       "inputs" => [%{"name" => "_owner", "type" => "address"}, %{"name" => "_id", "type" => "uint256"}],
@@ -40,7 +40,12 @@ defmodule Explorer.Token.BalanceReader do
   ]
 
   @spec get_balances_of([
-          %{token_contract_address_hash: String.t(), address_hash: String.t(), block_number: non_neg_integer()}
+          %{
+            token_contract_address_hash: String.t(),
+            address_hash: String.t(),
+            block_number: non_neg_integer(),
+            token_id: non_neg_integer() | nil
+          }
         ]) :: [{:ok, non_neg_integer()} | {:error, String.t()}]
   def get_balances_of(token_balance_requests) do
     token_balance_requests
@@ -49,15 +54,60 @@ defmodule Explorer.Token.BalanceReader do
     |> Enum.map(&format_balance_result/1)
   end
 
+  @doc """
+    Gets the token balances for a list of fungible tokens and a list of non-fungible tokens.
+
+    Processes both lists together by formatting the requests appropriately and
+    querying the contracts for the balances.
+
+    ## Parameters
+    - `ft_token_balances_requests`: List of fungible token balance requests
+    - `nft_token_balances_requests`: List of non-fungible token balance requests
+
+    ## Returns
+    - List of tuples, each being either `{:ok, balance}` or `{:error, error_message}`
+  """
+  @spec get_balances_of_all(
+          [
+            %{
+              token_contract_address_hash: String.t(),
+              address_hash: String.t(),
+              block_number: non_neg_integer(),
+              token_id: non_neg_integer() | nil
+            }
+          ],
+          [
+            %{
+              token_contract_address_hash: String.t(),
+              address_hash: String.t(),
+              block_number: non_neg_integer(),
+              token_id: non_neg_integer() | nil
+            }
+          ]
+        ) :: [{:ok, non_neg_integer()} | {:error, String.t()}]
+  def get_balances_of_all(ft_token_balances_requests, nft_token_balances_requests) do
+    ft_formatted_requests = Enum.map(ft_token_balances_requests, &format_balance_request/1)
+    nft_formatted_requests = Enum.map(nft_token_balances_requests, &format_erc_1155_balance_request/1)
+
+    (ft_formatted_requests ++ nft_formatted_requests)
+    |> Reader.query_contracts(@balance_function_abi ++ @nft_balance_function_abi)
+    |> Enum.map(&format_balance_result/1)
+  end
+
   @spec get_balances_of_with_abi(
           [
-            %{token_contract_address_hash: String.t(), address_hash: String.t(), block_number: non_neg_integer()}
+            %{
+              token_contract_address_hash: String.t(),
+              address_hash: String.t(),
+              block_number: non_neg_integer(),
+              token_id: non_neg_integer() | nil
+            }
           ],
           [%{}]
         ) :: [{:ok, non_neg_integer()} | {:error, String.t()}]
   def get_balances_of_with_abi(token_balance_requests, abi) do
     formatted_balances_requests =
-      if abi == @erc1155_balance_function_abi do
+      if abi == @nft_balance_function_abi do
         token_balance_requests
         |> Enum.map(&format_erc_1155_balance_request/1)
       else
@@ -65,13 +115,25 @@ defmodule Explorer.Token.BalanceReader do
         |> Enum.map(&format_balance_request/1)
       end
 
-    if Enum.count(formatted_balances_requests) > 0 do
+    if Enum.empty?(formatted_balances_requests) do
+      []
+    else
       formatted_balances_requests
       |> Reader.query_contracts(abi)
       |> Enum.map(&format_balance_result/1)
-    else
-      []
     end
+  end
+
+  @spec get_balances_of_erc_1155([
+          %{
+            token_contract_address_hash: String.t(),
+            address_hash: String.t(),
+            block_number: non_neg_integer(),
+            token_id: non_neg_integer() | nil
+          }
+        ]) :: [{:ok, non_neg_integer()} | {:error, String.t()}]
+  def get_balances_of_erc_1155(token_balance_requests) do
+    get_balances_of_with_abi(token_balance_requests, @nft_balance_function_abi)
   end
 
   defp format_balance_request(%{

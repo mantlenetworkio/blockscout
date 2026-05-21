@@ -1,25 +1,76 @@
 defmodule EthereumJSONRPC.Blocks do
   @moduledoc """
-  Blocks format as returned by [`eth_getBlockByHash`](https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbyhash)
-  and [`eth_getBlockByNumber`](https://github.com/ethereum/wiki/wiki/JSON-RPC#eth_getblockbynumber) from batch requests.
+  Blocks format as returned by [`eth_getBlockByHash`](https://github.com/ethereum/wiki/wiki/JSON-RPC/e8e0771b9f3677693649d945956bc60e886ceb2b#eth_getblockbyhash)
+  and [`eth_getBlockByNumber`](https://github.com/ethereum/wiki/wiki/JSON-RPC/e8e0771b9f3677693649d945956bc60e886ceb2b#eth_getblockbynumber) from batch requests.
   """
+  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
-  alias EthereumJSONRPC.{Block, Transactions, Transport, Uncles}
+  alias EthereumJSONRPC.{Block, Transactions, Transport, Uncles, Withdrawals}
 
   @type elixir :: [Block.elixir()]
   @type params :: [Block.params()]
+
+  @default_struct_fields [
+    blocks_params: [],
+    block_second_degree_relations_params: [],
+    transactions_params: [],
+    withdrawals_params: [],
+    errors: []
+  ]
+
+  case @chain_type do
+    :zilliqa ->
+      @chain_type_fields quote(
+                           do: [
+                             zilliqa_quorum_certificates_params: [
+                               EthereumJSONRPC.Zilliqa.QuorumCertificate.params()
+                             ],
+                             zilliqa_aggregate_quorum_certificates_params: [
+                               EthereumJSONRPC.Zilliqa.AggregateQuorumCertificate.params()
+                             ],
+                             zilliqa_nested_quorum_certificates_params: [
+                               EthereumJSONRPC.Zilliqa.NestedQuorumCertificates.params()
+                             ]
+                           ]
+                         )
+
+      @chain_type_struct_fields [
+        zilliqa_quorum_certificates_params: [],
+        zilliqa_aggregate_quorum_certificates_params: [],
+        zilliqa_nested_quorum_certificates_params: []
+      ]
+
+    _ ->
+      @chain_type_struct_fields []
+      @chain_type_fields quote(do: [])
+  end
+
   @type t :: %__MODULE__{
+          unquote_splicing(@chain_type_fields),
           blocks_params: [map()],
           block_second_degree_relations_params: [map()],
           transactions_params: [map()],
+          withdrawals_params: Withdrawals.params(),
           errors: [Transport.error()]
         }
 
-  defstruct blocks_params: [],
-            block_second_degree_relations_params: [],
-            transactions_params: [],
-            errors: []
+  defstruct @default_struct_fields ++ @chain_type_struct_fields
 
+  @doc """
+    Generates a list of JSON-RPC requests for fetching block data.
+
+    Takes a map of request IDs to parameters and a request function, and generates
+    a list of JSON-RPC requests by applying the request function to each parameter
+    set after adding the ID.
+
+    ## Parameters
+    - `id_to_params`: Map of request IDs to their corresponding request parameters
+    - `request`: Function that takes a parameter map and returns a JSON-RPC request
+
+    ## Returns
+    - List of JSON-RPC request maps ready to be sent to the Ethereum node
+  """
+  @spec requests(%{EthereumJSONRPC.request_id() => map()}, function()) :: [EthereumJSONRPC.Transport.request()]
   def requests(id_to_params, request) when is_map(id_to_params) and is_function(request, 1) do
     Enum.map(id_to_params, fn {id, params} ->
       params
@@ -28,11 +79,36 @@ defmodule EthereumJSONRPC.Blocks do
     end)
   end
 
-  @spec from_responses(list(), map()) :: t()
-  def from_responses(responses, id_to_params) when is_list(responses) and is_map(id_to_params) do
+  @doc """
+    Processes batch responses from JSON-RPC block requests into structured block data.
+
+    Converts raw JSON-RPC responses into a structured format containing block data,
+    transactions, uncles, withdrawals and any errors encountered during processing.
+    Sanitizes responses by handling missing IDs and adjusts errors to maintain
+    request-response correlation.
+
+    ## Parameters
+    - `responses`: List of JSON-RPC responses from block requests.
+    - `id_to_params`: Map of request IDs to their corresponding requests parameters.
+
+    ## Returns
+    A `t:t/0` struct containing:
+    - `blocks_params`: List of processed block parameters
+    - `block_second_degree_relations_params`: List of uncle block relations
+    - `transactions_params`: List of transaction parameters
+    - `withdrawals_params`: List of withdrawal parameters
+    - `errors`: List of errors encountered during processing, with adjusted IDs to
+      match original requests
+  """
+  @spec from_responses(EthereumJSONRPC.Transport.batch_response(), %{EthereumJSONRPC.request_id() => map()}) :: t()
+  @spec from_responses(EthereumJSONRPC.Transport.batch_response(), %{EthereumJSONRPC.request_id() => map()}, boolean()) ::
+          t()
+  def from_responses(responses, id_to_params, validate_hydrated_transactions? \\ false)
+      when is_list(responses) and is_map(id_to_params) and is_boolean(validate_hydrated_transactions?) do
     %{errors: errors, blocks: blocks} =
       responses
-      |> Enum.map(&Block.from_response(&1, id_to_params))
+      |> EthereumJSONRPC.sanitize_responses(id_to_params)
+      |> Enum.map(&block_from_response(&1, id_to_params, validate_hydrated_transactions?))
       |> Enum.reduce(%{errors: [], blocks: []}, fn
         {:ok, block}, %{blocks: blocks} = acc ->
           %{acc | blocks: [block | blocks]}
@@ -45,17 +121,59 @@ defmodule EthereumJSONRPC.Blocks do
 
     elixir_uncles = elixir_to_uncles(elixir_blocks)
     elixir_transactions = elixir_to_transactions(elixir_blocks)
+    elixir_withdrawals = elixir_to_withdrawals(elixir_blocks)
 
     block_second_degree_relations_params = Uncles.elixir_to_params(elixir_uncles)
     transactions_params = Transactions.elixir_to_params(elixir_transactions)
+    withdrawals_params = Withdrawals.elixir_to_params(elixir_withdrawals)
     blocks_params = elixir_to_params(elixir_blocks)
 
     %__MODULE__{
       errors: errors,
       blocks_params: blocks_params,
       block_second_degree_relations_params: block_second_degree_relations_params,
-      transactions_params: transactions_params
+      transactions_params: transactions_params,
+      withdrawals_params: withdrawals_params
     }
+    |> extend_with_chain_type_fields(elixir_blocks)
+  end
+
+  defp block_from_response(%{id: id, result: %{"transactions" => transactions}} = response, id_to_params, true)
+       when is_list(transactions) do
+    case Enum.find(transactions, &is_binary/1) do
+      nil ->
+        Block.from_response(response, id_to_params)
+
+      transaction_hash ->
+        params = Map.fetch!(id_to_params, id)
+
+        {:error,
+         %{
+           code: :unhydrated_transactions,
+           data: params,
+           message:
+             "Expected hydrated block transactions, but RPC returned transaction hash #{transaction_hash}. " <>
+               "Retrying is required to avoid silently dropping transactions."
+         }}
+    end
+  end
+
+  defp block_from_response(response, id_to_params, _validate_hydrated_transactions?) do
+    Block.from_response(response, id_to_params)
+  end
+
+  @spec extend_with_chain_type_fields(t(), elixir()) :: t()
+  case @chain_type do
+    :zilliqa ->
+      defp extend_with_chain_type_fields(%__MODULE__{} = blocks, elixir_blocks) do
+        # credo:disable-for-next-line Credo.Check.Design.AliasUsage
+        EthereumJSONRPC.Zilliqa.Helper.extend_blocks_struct(blocks, elixir_blocks)
+      end
+
+    _ ->
+      defp extend_with_chain_type_fields(%__MODULE__{} = blocks, _elixir_blocks) do
+        blocks
+      end
   end
 
   @doc """
@@ -109,7 +227,30 @@ defmodule EthereumJSONRPC.Blocks do
           state_root: "0xfad4af258fd11939fae0c6c6eec9d340b1caac0b0196fd9a1bc3f489c5bf00b3",
           timestamp: Timex.parse!("1970-01-01T00:00:00Z", "{ISO:Extended:Z}"),
           total_difficulty: 131072,
-          transactions_root: "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+          transactions_root: "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",\
+  #{case @chain_type do
+    :rsk -> """
+              bitcoin_merged_mining_coinbase_transaction: nil,\
+              bitcoin_merged_mining_header: nil,\
+              bitcoin_merged_mining_merkle_proof: nil,\
+              hash_for_merged_mining: nil,\
+              minimum_gas_price: nil,\
+      """
+    :ethereum -> """
+              withdrawals_root: "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",\
+              blob_gas_used: 0,\
+              excess_blob_gas: 0,\
+      """
+    :arbitrum -> """
+              send_root: nil,\
+              send_count: nil,\
+              l1_block_number: nil,\
+      """
+    :zilliqa -> """
+                zilliqa_view: nil,\
+      """
+    _ -> ""
+  end}
           uncles: ["0xe670ec64341771606e55d6b4ca35a1a6b75ee3d5145a99d05921026d15273311"]
         }
       ]
@@ -272,6 +413,74 @@ defmodule EthereumJSONRPC.Blocks do
   end
 
   @doc """
+  Extracts the `t:EthereumJSONRPC.Withdrawals.elixir/0` from the `t:elixir/0`.
+
+      iex> EthereumJSONRPC.Blocks.elixir_to_withdrawals([
+      ...>   %{
+      ...>     "baseFeePerGas" => 7,
+      ...>     "difficulty" => 0,
+      ...>     "extraData" => "0x",
+      ...>     "gasLimit" => 7_009_844,
+      ...>     "gasUsed" => 0,
+      ...>     "hash" => "0xc0b72358464dc55cb51c990360d94809e40f291603a7664d55cf83f87edb799d",
+      ...>     "logsBloom" => "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+      ...>     "miner" => "0xe7c180eada8f60d63e9671867b2e0ca2649207a8",
+      ...>     "mixHash" => "0x9cc5c22d51f47caf700636f629e0765a5fe3388284682434a3717d099960681a",
+      ...>     "nonce" => "0x0000000000000000",
+      ...>     "number" => 541,
+      ...>     "parentHash" => "0x9bc27f8db423bea352a32b819330df307dd351da71f3b3f8ac4ad56856c1e053",
+      ...>     "receiptsRoot" => "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+      ...>     "sha3Uncles" => "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+      ...>     "size" => 1107,
+      ...>     "stateRoot" => "0x9de54b38595b4b8baeece667ae1f7bec8cfc814a514248985e3d98c91d331c71",
+      ...>     "timestamp" => Timex.parse!("2022-12-15T21:06:15Z", "{ISO:Extended:Z}"),
+      ...>     "totalDifficulty" => 1,
+      ...>     "transactions" => [],
+      ...>     "transactionsRoot" => "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+      ...>     "uncles" => [],
+      ...>     "withdrawals" => [
+      ...>       %{
+      ...>         "address" => "0x388ea662ef2c223ec0b047d41bf3c0f362142ad5",
+      ...>         "amount" => 4_040_000_000_000,
+      ...>         "blockHash" => "0xc0b72358464dc55cb51c990360d94809e40f291603a7664d55cf83f87edb799d",
+      ...>         "index" => 3867,
+      ...>         "validatorIndex" => 1721
+      ...>       },
+      ...>       %{
+      ...>         "address" => "0x388ea662ef2c223ec0b047d41bf3c0f362142ad5",
+      ...>         "amount" => 4_040_000_000_000,
+      ...>         "blockHash" => "0xc0b72358464dc55cb51c990360d94809e40f291603a7664d55cf83f87edb799d",
+      ...>         "index" => 3868,
+      ...>         "validatorIndex" => 1771
+      ...>       }
+      ...>     ],
+      ...>     "withdrawalsRoot" => "0x23e926286a20cba56ee0fcf0eca7aae44f013bd9695aaab58478e8d69b0c3d68"
+      ...>   }
+      ...> ])
+      [
+        %{
+          "address" => "0x388ea662ef2c223ec0b047d41bf3c0f362142ad5",
+          "amount" => 4040000000000,
+          "blockHash" => "0xc0b72358464dc55cb51c990360d94809e40f291603a7664d55cf83f87edb799d",
+          "index" => 3867,
+          "validatorIndex" => 1721
+        },
+        %{
+          "address" => "0x388ea662ef2c223ec0b047d41bf3c0f362142ad5",
+          "amount" => 4040000000000,
+          "blockHash" => "0xc0b72358464dc55cb51c990360d94809e40f291603a7664d55cf83f87edb799d",
+          "index" => 3868,
+          "validatorIndex" => 1771
+        }
+      ]
+
+  """
+  @spec elixir_to_withdrawals(elixir) :: Withdrawals.elixir()
+  def elixir_to_withdrawals(elixir) do
+    Enum.flat_map(elixir, &Block.elixir_to_withdrawals/1)
+  end
+
+  @doc """
   Decodes the stringly typed numerical fields to `t:non_neg_integer/0` and the timestamps to `t:DateTime.t/0`
 
       iex> EthereumJSONRPC.Blocks.to_elixir(
@@ -299,7 +508,22 @@ defmodule EthereumJSONRPC.Blocks do
       ...>       "totalDifficulty" => "0x20000",
       ...>       "transactions" => [],
       ...>       "transactionsRoot" => "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-      ...>       "uncles" => []
+      ...>       "uncles" => [],
+      ...>       "withdrawals" => [
+      ...>         %{
+      ...>           "index" => "0xf1b",
+      ...>           "validatorIndex" => "0x6b9",
+      ...>           "address" => "0x388ea662ef2c223ec0b047d41bf3c0f362142ad5",
+      ...>           "amount" => "0x3aca2c3d000"
+      ...>         },
+      ...>         %{
+      ...>           "index" => "0xf1c",
+      ...>           "validatorIndex" => "0x6eb",
+      ...>           "address" => "0x388ea662ef2c223ec0b047d41bf3c0f362142ad5",
+      ...>           "amount" => "0x3aca2c3d000"
+      ...>         }
+      ...>       ],
+      ...>       "withdrawalsRoot" => "0x23e926286a20cba56ee0fcf0eca7aae44f013bd9695aaab58478e8d69b0c3d68"
       ...>     }
       ...>   ]
       ...> )
@@ -327,12 +551,65 @@ defmodule EthereumJSONRPC.Blocks do
           "totalDifficulty" => 131072,
           "transactions" => [],
           "transactionsRoot" => "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
-          "uncles" => []
+          "uncles" => [],
+          "withdrawals" => [
+            %{
+              "address" => "0x388ea662ef2c223ec0b047d41bf3c0f362142ad5",
+              "amount" => 4_040_000_000_000,
+              "blockHash" => "0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f",
+              "index" => 3867,
+              "validatorIndex" => 1721,
+              "blockNumber" => 0
+            },
+            %{
+              "address" => "0x388ea662ef2c223ec0b047d41bf3c0f362142ad5",
+              "amount" => 4_040_000_000_000,
+              "blockHash" => "0x5b28c1bfd3a15230c9a46b399cd0f9a6920d432e85381cc6a140b06e8410112f",
+              "index" => 3868,
+              "validatorIndex" => 1771,
+              "blockNumber" => 0
+            }
+          ],
+          "withdrawalsRoot" => "0x23e926286a20cba56ee0fcf0eca7aae44f013bd9695aaab58478e8d69b0c3d68"
         }
       ]
   """
   @spec to_elixir([Block.t()]) :: elixir
   def to_elixir(blocks) when is_list(blocks) do
     Enum.map(blocks, &Block.to_elixir/1)
+  end
+
+  @doc """
+  Filters out all data related to provided block numbers
+  """
+  @spec reject_data_by_block_numbers(t(), [non_neg_integer()]) :: t()
+  def reject_data_by_block_numbers(blocks_data, []), do: blocks_data
+
+  def reject_data_by_block_numbers(%{blocks_params: blocks_params} = blocks_data, block_numbers) do
+    {filtered_blocks_params_reversed, block_hashes} =
+      Enum.reduce(blocks_params, {[], []}, fn block_params, {params_acc, hashes_acc} ->
+        if block_params.number in block_numbers do
+          {params_acc, [block_params.hash | hashes_acc]}
+        else
+          {[block_params | params_acc], hashes_acc}
+        end
+      end)
+
+    filtered_blocks_params = Enum.reverse(filtered_blocks_params_reversed)
+
+    keep? = fn
+      %{block_number: block_number} -> block_number not in block_numbers
+      %{block_hash: block_hash} -> block_hash not in block_hashes
+      _ -> true
+    end
+
+    filtered_data =
+      blocks_data
+      |> Map.from_struct()
+      |> Map.drop([:errors, :blocks_params])
+      |> Map.new(fn {data_type, data_list} -> {data_type, Enum.filter(data_list, keep?)} end)
+      |> Map.put(:blocks_params, filtered_blocks_params)
+
+    Map.merge(blocks_data, filtered_data)
   end
 end

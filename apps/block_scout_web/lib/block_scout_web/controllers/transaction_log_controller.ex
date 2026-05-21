@@ -6,34 +6,29 @@ defmodule BlockScoutWeb.TransactionLogController do
   import BlockScoutWeb.Models.GetAddressTags, only: [get_address_tags: 2]
   import BlockScoutWeb.Models.GetTransactionTags, only: [get_transaction_with_addresses_tags: 2]
 
-  alias BlockScoutWeb.{AccessHelpers, Controller, TransactionController, TransactionLogView}
+  alias BlockScoutWeb.{AccessHelper, Controller, TransactionController, TransactionLogView}
   alias Explorer.{Chain, Market}
-  alias Explorer.ExchangeRates.Token
   alias Phoenix.View
-  import EthereumJSONRPC
 
   def index(conn, %{"transaction_id" => transaction_hash_string, "type" => "JSON"} = params) do
-    with {:ok, transaction_hash} <- Chain.string_to_transaction_hash(transaction_hash_string),
+    with {:ok, transaction_hash} <- Chain.string_to_full_hash(transaction_hash_string),
          {:ok, transaction} <-
            Chain.hash_to_transaction(transaction_hash,
              necessity_by_association: %{[to_address: :smart_contract] => :optional}
            ),
-         {:ok, false} <- AccessHelpers.restricted_access?(to_string(transaction.from_address_hash), params),
-         {:ok, false} <- AccessHelpers.restricted_access?(to_string(transaction.to_address_hash), params) do
+         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.from_address_hash), params),
+         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.to_address_hash), params) do
       full_options =
         Keyword.merge(
           [
             necessity_by_association: %{
-              [address: :names] => :optional,
-              [address: :smart_contract] => :optional,
-              address: :optional
+              [address: [:names, :smart_contract, proxy_implementations_smart_contracts_association()]] => :optional
             }
           ],
           paging_options(params)
         )
 
-      from_api = false
-      logs_plus_one = Chain.transaction_to_logs(transaction_hash, from_api, full_options)
+      logs_plus_one = Chain.transaction_to_logs(transaction_hash, full_options)
 
       {logs, next_page} = split_list_by_page(logs_plus_one)
 
@@ -78,7 +73,7 @@ defmodule BlockScoutWeb.TransactionLogController do
   end
 
   def index(conn, %{"transaction_id" => transaction_hash_string} = params) do
-    with {:ok, transaction_hash} <- Chain.string_to_transaction_hash(transaction_hash_string),
+    with {:ok, transaction_hash} <- Chain.string_to_full_hash(transaction_hash_string),
          {:ok, transaction} <-
            Chain.hash_to_transaction(
              transaction_hash,
@@ -91,45 +86,8 @@ defmodule BlockScoutWeb.TransactionLogController do
                :token_transfers => :optional
              }
            ),
-         {:ok, false} <- AccessHelpers.restricted_access?(to_string(transaction.from_address_hash), params),
-         {:ok, false} <- AccessHelpers.restricted_access?(to_string(transaction.to_address_hash), params) do
-          tx_status = EthereumJSONRPC.request(%{id: 0, method: "eth_getTxStatusDetailByHash", params: [transaction_hash_string]})
-          |> json_rpc(Application.get_env(:indexer, :json_rpc_named_arguments))
-          |> case do
-            {:ok, tx}  ->
-              tx["status"]
-            {:error, _} ->
-              nil
-          end
-          updated_transaction = case Chain.hash_to_batch(transaction_hash_string,necessity_by_association: @necessity_by_association) do
-            {:error, _} ->
-              transaction
-            {:ok, %{batch_index: batch_index, data_commitment: data_commitment}} ->
-              res = Map.put(transaction, :batch_index, batch_index)
-              Map.put(res, :data_commitment, data_commitment)
-          end
-          updated_state_transaction = case Chain.block_to_state_batch(transaction.block_number,necessity_by_association: @necessity_by_association) do
-            {:error, _} ->
-              updated_transaction
-            {:ok, %{batch_index: batch_index, submission_tx_hash: submission_tx_hash}} ->
-              res = Map.put(updated_transaction, :state_batch_index, batch_index)
-              Map.put(res, :submission_tx_hash, submission_tx_hash)
-          end
-
-          updated_display_tx_status_state_transaction = if tx_status == nil, do: updated_state_transaction, else: Map.put(updated_state_transaction, :tx_status, tx_status)
-          updated_token_price_transaction = case Chain.get_real_time_token_price() do
-            {:error, _} ->
-              updated_display_tx_status_state_transaction
-            {:ok, %{mnt_to_usd: mnt_to_usd}} ->
-              Map.put(updated_display_tx_status_state_transaction, :real_time_price, mnt_to_usd)
-          end
-
-          updated_token_price_history_transaction = case Chain.get_token_price_history(updated_token_price_transaction.block) do
-            {:error, _} ->
-              updated_token_price_transaction
-            {:ok, %{mnt_to_usd: mnt_to_usd}} ->
-              Map.put(updated_token_price_transaction, :token_price_history, mnt_to_usd)
-            end
+         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.from_address_hash), params),
+         {:ok, false} <- AccessHelper.restricted_access?(to_string(transaction.to_address_hash), params) do
       render(
         conn,
         "index.html",
@@ -137,11 +95,11 @@ defmodule BlockScoutWeb.TransactionLogController do
         show_token_transfers: Chain.transaction_has_token_transfers?(transaction_hash),
         current_path: Controller.current_full_path(conn),
         current_user: current_user(conn),
-        transaction: updated_token_price_history_transaction,
-        exchange_rate: Market.get_exchange_rate(Explorer.coin()) || Token.null(),
+        transaction: transaction,
+        exchange_rate: Market.get_coin_exchange_rate(),
         from_tags: get_address_tags(transaction.from_address_hash, current_user(conn)),
         to_tags: get_address_tags(transaction.to_address_hash, current_user(conn)),
-        tx_tags:
+        transaction_tags:
           get_transaction_with_addresses_tags(
             transaction,
             current_user(conn)

@@ -1,10 +1,20 @@
 defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
   use BlockScoutWeb.ConnCase
-  alias Explorer.Chain.SmartContract
-  alias Explorer.Chain
-  # alias Explorer.{Chain, Factory}
 
   import Mox
+  import Ecto.Query
+
+  alias Explorer.{Repo, TestHelper}
+  alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
+  alias Explorer.Chain.{Address, InternalTransaction, SmartContract}
+
+  setup :verify_on_exit!
+
+  if Application.compile_env(:explorer, :chain_type) == :zksync do
+    @optimization_runs "0"
+  else
+    @optimization_runs 200
+  end
 
   def prepare_contracts do
     insert(:contract_address)
@@ -66,6 +76,14 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
     }
   end
 
+  setup do
+    Application.put_env(:tesla, :adapter, Tesla.Adapter.Mint)
+
+    on_exit(fn ->
+      Application.put_env(:tesla, :adapter, Explorer.Mock.TeslaAdapter)
+    end)
+  end
+
   describe "listcontracts" do
     setup do
       %{params: %{"module" => "contract", "action" => "listcontracts"}}
@@ -78,7 +96,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
         |> json_response(400)
 
       assert response["message"] ==
-               "invalid is not a valid value for `filter`. Please use one of: verified, decompiled, unverified, not_decompiled, 1, 2, 3, 4."
+               "invalid is not a valid value for `filter`. Please use one of: verified, unverified, 1, 2."
 
       assert response["status"] == "0"
       assert :ok = ExJsonSchema.Validator.validate(listcontracts_schema(), response)
@@ -107,7 +125,11 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
       assert response["message"] == "OK"
       assert response["status"] == "1"
 
-      assert response["result"] == [result(contract)]
+      result_props = result(contract) |> Map.keys()
+
+      for prop <- result_props do
+        assert Enum.at(response["result"], 0)[prop] == result(contract)[prop]
+      end
 
       assert :ok = ExJsonSchema.Validator.validate(listcontracts_schema(), response)
     end
@@ -178,7 +200,11 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
       assert response["message"] == "OK"
       assert response["status"] == "1"
 
-      assert response["result"] == [result(contract)]
+      result_props = result(contract) |> Map.keys()
+
+      for prop <- result_props do
+        assert Enum.at(response["result"], 0)[prop] == result(contract)[prop]
+      end
 
       assert :ok = ExJsonSchema.Validator.validate(listcontracts_schema(), response)
     end
@@ -187,7 +213,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
       params: params,
       conn: conn
     } do
-      [contract_1, contract_2, contract_3] = prepare_contracts()
+      [_contract_1, contract_2, _contract_3] = prepare_contracts()
 
       filter_params =
         params
@@ -203,7 +229,11 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
       assert response["message"] == "OK"
       assert response["status"] == "1"
 
-      assert response["result"] == [result(contract_2)]
+      result_props = result(contract_2) |> Map.keys()
+
+      for prop <- result_props do
+        assert Enum.at(response["result"], 0)[prop] == result(contract_2)[prop]
+      end
 
       assert :ok = ExJsonSchema.Validator.validate(listcontracts_schema(), response)
     end
@@ -213,7 +243,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
            params: params,
            conn: conn
          } do
-      [contract_1, contract_2, contract_3] = prepare_contracts()
+      [_contract_1, contract_2, contract_3] = prepare_contracts()
 
       filter_params =
         params
@@ -228,7 +258,12 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
       assert response["message"] == "OK"
       assert response["status"] == "1"
 
-      assert response["result"] == [result(contract_2), result(contract_3)]
+      result_props = result(contract_2) |> Map.keys()
+
+      for prop <- result_props do
+        assert Enum.at(response["result"], 0)[prop] == result(contract_2)[prop]
+        assert Enum.at(response["result"], 1)[prop] == result(contract_3)[prop]
+      end
 
       assert :ok = ExJsonSchema.Validator.validate(listcontracts_schema(), response)
     end
@@ -238,7 +273,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
            params: params,
            conn: conn
          } do
-      [contract_1, contract_2, contract_3] = prepare_contracts()
+      [contract_1, contract_2, _contract_3] = prepare_contracts()
 
       filter_params =
         params
@@ -253,101 +288,12 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
       assert response["message"] == "OK"
       assert response["status"] == "1"
 
-      assert response["result"] == [result(contract_1), result(contract_2)]
+      result_props = result(contract_1) |> Map.keys()
 
-      assert :ok = ExJsonSchema.Validator.validate(listcontracts_schema(), response)
-    end
-
-    test "filtering for only decompiled contracts shows only decompiled contracts", %{params: params, conn: conn} do
-      insert(:contract_address)
-      decompiled_smart_contract = insert(:decompiled_smart_contract)
-
-      response =
-        conn
-        |> get("/api", Map.put(params, "filter", "decompiled"))
-        |> json_response(200)
-
-      assert response["message"] == "OK"
-      assert response["status"] == "1"
-
-      assert response["result"] == [result_not_verified(decompiled_smart_contract.address_hash)]
-
-      assert :ok = ExJsonSchema.Validator.validate(listcontracts_schema(), response)
-    end
-
-    test "filtering for only decompiled contracts, with a decompiled with version filter", %{params: params, conn: conn} do
-      insert(:decompiled_smart_contract, decompiler_version: "foobar")
-      smart_contract = insert(:decompiled_smart_contract, decompiler_version: "bizbuz")
-
-      response =
-        conn
-        |> get("/api", Map.merge(params, %{"filter" => "decompiled", "not_decompiled_with_version" => "foobar"}))
-        |> json_response(200)
-
-      assert response["message"] == "OK"
-      assert response["status"] == "1"
-
-      assert response["result"] == [result_not_verified(smart_contract.address_hash)]
-
-      assert :ok = ExJsonSchema.Validator.validate(listcontracts_schema(), response)
-    end
-
-    test "filtering for only decompiled contracts, with a decompiled with version filter, where another decompiled version exists",
-         %{params: params, conn: conn} do
-      non_match = insert(:decompiled_smart_contract, decompiler_version: "foobar")
-      insert(:decompiled_smart_contract, decompiler_version: "bizbuz", address_hash: non_match.address_hash)
-      smart_contract = insert(:decompiled_smart_contract, decompiler_version: "bizbuz")
-
-      response =
-        conn
-        |> get("/api", Map.merge(params, %{"filter" => "decompiled", "not_decompiled_with_version" => "foobar"}))
-        |> json_response(200)
-
-      assert response["message"] == "OK"
-      assert response["status"] == "1"
-
-      assert result_not_verified(smart_contract.address_hash) in response["result"]
-
-      refute to_string(non_match.address_hash) in Enum.map(response["result"], &Map.get(&1, "Address"))
-      assert :ok = ExJsonSchema.Validator.validate(listcontracts_schema(), response)
-    end
-
-    test "filtering for only not_decompiled (and by extension not verified contracts)", %{params: params, conn: conn} do
-      insert(:decompiled_smart_contract)
-      insert(:smart_contract, contract_code_md5: "123")
-      contract_address = insert(:contract_address)
-
-      response =
-        conn
-        |> get("/api", Map.put(params, "filter", "not_decompiled"))
-        |> json_response(200)
-
-      assert response["message"] == "OK"
-      assert response["status"] == "1"
-
-      assert response["result"] == [result_not_verified(contract_address.hash)]
-
-      assert :ok = ExJsonSchema.Validator.validate(listcontracts_schema(), response)
-    end
-
-    test "filtering for only not_decompiled (and by extension not verified contracts) does not show empty contracts", %{
-      params: params,
-      conn: conn
-    } do
-      insert(:decompiled_smart_contract)
-      insert(:smart_contract, contract_code_md5: "123")
-      insert(:contract_address, contract_code: "0x")
-      contract_address = insert(:contract_address)
-
-      response =
-        conn
-        |> get("/api", Map.put(params, "filter", "not_decompiled"))
-        |> json_response(200)
-
-      assert response["message"] == "OK"
-      assert response["status"] == "1"
-
-      assert response["result"] == [result_not_verified(contract_address.hash)]
+      for prop <- result_props do
+        assert Enum.at(response["result"], 0)[prop] == result(contract_1)[prop]
+        assert Enum.at(response["result"], 1)[prop] == result(contract_2)[prop]
+      end
 
       assert :ok = ExJsonSchema.Validator.validate(listcontracts_schema(), response)
     end
@@ -496,7 +442,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
       contract =
         insert(:smart_contract,
           optimization: true,
-          optimization_runs: 200,
+          optimization_runs: @optimization_runs,
           evm_version: "default",
           contract_code_md5: "123"
         )
@@ -518,21 +464,240 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
           # for `OptimizationUsed` is "1". If it was false, the expected value
           # would be "0".
           "OptimizationUsed" => "true",
-          "OptimizationRuns" => 200,
+          "OptimizationRuns" => @optimization_runs,
           "EVMVersion" => "default",
           "FileName" => "",
           "IsProxy" => "false"
         }
       ]
 
-      get_implementation()
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
 
       assert response =
                conn
                |> get("/api", params)
                |> json_response(200)
 
-      assert response["result"] == expected_result
+      result_props = Enum.at(expected_result, 0) |> Map.keys()
+
+      for prop <- result_props do
+        assert Enum.at(response["result"], 0)[prop] == Enum.at(expected_result, 0)[prop]
+      end
+
+      assert response["status"] == "1"
+      assert response["message"] == "OK"
+      assert :ok = ExJsonSchema.Validator.validate(getsourcecode_schema(), response)
+    end
+
+    test "with a verified proxy contract address", %{conn: conn} do
+      implementation_contract =
+        insert(:smart_contract,
+          name: "Implementation",
+          external_libraries: [],
+          constructor_arguments: "",
+          abi: [
+            %{
+              "type" => "constructor",
+              "inputs" => [
+                %{"type" => "address", "name" => "_proxyStorage"},
+                %{"type" => "address", "name" => "_implementationAddress"}
+              ]
+            },
+            %{
+              "constant" => false,
+              "inputs" => [%{"name" => "x", "type" => "uint256"}],
+              "name" => "set",
+              "outputs" => [],
+              "payable" => false,
+              "stateMutability" => "nonpayable",
+              "type" => "function"
+            },
+            %{
+              "constant" => true,
+              "inputs" => [],
+              "name" => "get",
+              "outputs" => [%{"name" => "", "type" => "uint256"}],
+              "payable" => false,
+              "stateMutability" => "view",
+              "type" => "function"
+            }
+          ],
+          license_type: 9
+        )
+
+      implementation_contract_address_hash_string =
+        Base.encode16(implementation_contract.address_hash.bytes, case: :lower)
+
+      proxy_transaction_input =
+        "0x11b804ab000000000000000000000000" <>
+          implementation_contract_address_hash_string <>
+          "000000000000000000000000000000000000000000000000000000000000006035323031313537360000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000284e159163400000000000000000000000034420c13696f4ac650b9fafe915553a1abcd7dd30000000000000000000000000000000000000000000000000000000000000140000000000000000000000000000000000000000000000000000000000000018000000000000000000000000000000000000000000000000000000000000001c00000000000000000000000000000000000000000000000000000000000000220000000000000000000000000ff5ae9b0a7522736299d797d80b8fc6f31d61100000000000000000000000000ff5ae9b0a7522736299d797d80b8fc6f31d6110000000000000000000000000000000000000000000000000000000000000003e8000000000000000000000000000000000000000000000000000000000000000000000000000000000000000034420c13696f4ac650b9fafe915553a1abcd7dd300000000000000000000000000000000000000000000000000000000000000184f7074696d69736d2053756273637269626572204e465473000000000000000000000000000000000000000000000000000000000000000000000000000000054f504e46540000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000037697066733a2f2f516d66544e504839765651334b5952346d6b52325a6b757756424266456f5a5554545064395538666931503332752f300000000000000000000000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c82bbe41f2cf04e3a8efa18f7032bdd7f6d98a81000000000000000000000000efba8a2a82ec1fb1273806174f5e28fbb917cf9500000000000000000000000000000000000000000000000000000000"
+
+      proxy_deployed_bytecode =
+        "0x363d3d373d3d3d363d73" <> implementation_contract_address_hash_string <> "5af43d82803e903d91602b57fd5bf3"
+
+      proxy_address =
+        insert(:contract_address,
+          contract_code: proxy_deployed_bytecode,
+          verified: true
+        )
+
+      proxy_abi = [
+        %{
+          "type" => "function",
+          "stateMutability" => "nonpayable",
+          "payable" => false,
+          "outputs" => [%{"type" => "bool", "name" => ""}],
+          "name" => "upgradeTo",
+          "inputs" => [%{"type" => "address", "name" => "newImplementation"}],
+          "constant" => false
+        },
+        %{
+          "type" => "function",
+          "stateMutability" => "view",
+          "payable" => false,
+          "outputs" => [%{"type" => "uint256", "name" => ""}],
+          "name" => "version",
+          "inputs" => [],
+          "constant" => true
+        },
+        %{
+          "type" => "function",
+          "stateMutability" => "view",
+          "payable" => false,
+          "outputs" => [%{"type" => "address", "name" => ""}],
+          "name" => "implementation",
+          "inputs" => [],
+          "constant" => true
+        },
+        %{
+          "type" => "function",
+          "stateMutability" => "nonpayable",
+          "payable" => false,
+          "outputs" => [],
+          "name" => "renounceOwnership",
+          "inputs" => [],
+          "constant" => false
+        },
+        %{
+          "type" => "function",
+          "stateMutability" => "view",
+          "payable" => false,
+          "outputs" => [%{"type" => "address", "name" => ""}],
+          "name" => "getOwner",
+          "inputs" => [],
+          "constant" => true
+        },
+        %{
+          "type" => "function",
+          "stateMutability" => "view",
+          "payable" => false,
+          "outputs" => [%{"type" => "address", "name" => ""}],
+          "name" => "getProxyStorage",
+          "inputs" => [],
+          "constant" => true
+        },
+        %{
+          "type" => "function",
+          "stateMutability" => "nonpayable",
+          "payable" => false,
+          "outputs" => [],
+          "name" => "transferOwnership",
+          "inputs" => [%{"type" => "address", "name" => "_newOwner"}],
+          "constant" => false
+        },
+        %{
+          "type" => "constructor",
+          "stateMutability" => "nonpayable",
+          "payable" => false,
+          "inputs" => [
+            %{"type" => "address", "name" => "_proxyStorage"},
+            %{"type" => "address", "name" => "_implementationAddress"}
+          ]
+        },
+        %{"type" => "fallback", "stateMutability" => "nonpayable", "payable" => false},
+        %{
+          "type" => "event",
+          "name" => "Upgraded",
+          "inputs" => [
+            %{"type" => "uint256", "name" => "version", "indexed" => false},
+            %{"type" => "address", "name" => "implementation", "indexed" => true}
+          ],
+          "anonymous" => false
+        },
+        %{
+          "type" => "event",
+          "name" => "OwnershipRenounced",
+          "inputs" => [%{"type" => "address", "name" => "previousOwner", "indexed" => true}],
+          "anonymous" => false
+        },
+        %{
+          "type" => "event",
+          "name" => "OwnershipTransferred",
+          "inputs" => [
+            %{"type" => "address", "name" => "previousOwner", "indexed" => true},
+            %{"type" => "address", "name" => "newOwner", "indexed" => true}
+          ],
+          "anonymous" => false
+        }
+      ]
+
+      proxy_contract =
+        insert(:smart_contract,
+          address_hash: proxy_address.hash,
+          name: "Proxy",
+          abi: proxy_abi
+        )
+
+      insert(:transaction,
+        created_contract_address_hash: proxy_address.hash,
+        input: proxy_transaction_input
+      )
+      |> with_block(status: :ok)
+
+      name = implementation_contract.name
+
+      insert(:proxy_implementation,
+        proxy_address_hash: proxy_address.hash,
+        proxy_type: "eip1167",
+        address_hashes: [implementation_contract.address_hash],
+        names: [name]
+      )
+
+      params = %{
+        "module" => "contract",
+        "action" => "getsourcecode",
+        "address" => Address.checksum(proxy_address.hash)
+      }
+
+      assert response =
+               conn
+               |> get("/api", params)
+               |> json_response(200)
+
+      expected_result = [
+        %{
+          "Address" => to_string(proxy_contract.address_hash),
+          "SourceCode" => proxy_contract.contract_source_code,
+          "ABI" => Jason.encode!(proxy_contract.abi),
+          "ContractName" => proxy_contract.name,
+          "CompilerVersion" => proxy_contract.compiler_version,
+          "FileName" => "",
+          "IsProxy" => "true",
+          "ImplementationAddress" => to_string(implementation_contract.address_hash),
+          "ImplementationAddresses" => [to_string(implementation_contract.address_hash)],
+          "EVMVersion" => nil,
+          "OptimizationUsed" => "false"
+        }
+      ]
+
+      result_props = Enum.at(expected_result, 0) |> Map.keys()
+
+      for prop <- result_props do
+        assert Enum.at(response["result"], 0)[prop] == Enum.at(expected_result, 0)[prop]
+      end
+
       assert response["status"] == "1"
       assert response["message"] == "OK"
       assert :ok = ExJsonSchema.Validator.validate(getsourcecode_schema(), response)
@@ -542,7 +707,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
       contract =
         insert(:smart_contract,
           optimization: true,
-          optimization_runs: 200,
+          optimization_runs: @optimization_runs,
           evm_version: "default",
           constructor_arguments:
             "00000000000000000000000008e7592ce0d7ebabf42844b62ee6a878d4e1913e000000000000000000000000e1b6037da5f1d756499e184ca15254a981c92546",
@@ -563,7 +728,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
           "ContractName" => contract.name,
           "CompilerVersion" => contract.compiler_version,
           "OptimizationUsed" => "true",
-          "OptimizationRuns" => 200,
+          "OptimizationRuns" => @optimization_runs,
           "EVMVersion" => "default",
           "ConstructorArguments" =>
             "00000000000000000000000008e7592ce0d7ebabf42844b62ee6a878d4e1913e000000000000000000000000e1b6037da5f1d756499e184ca15254a981c92546",
@@ -572,14 +737,20 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
         }
       ]
 
-      get_implementation()
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
 
       assert response =
                conn
                |> get("/api", params)
                |> json_response(200)
 
-      assert response["result"] == expected_result
+      result_props = Enum.at(expected_result, 0) |> Map.keys()
+
+      for prop <- result_props do
+        assert Enum.at(response["result"], 0)[prop] == Enum.at(expected_result, 0)[prop]
+      end
+
       assert response["status"] == "1"
       assert response["message"] == "OK"
       assert :ok = ExJsonSchema.Validator.validate(getsourcecode_schema(), response)
@@ -608,8 +779,6 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
         created_contract_address: created_contract_address,
         created_contract_code: smart_contract_bytecode,
         block_number: transaction.block_number,
-        block_hash: transaction.block_hash,
-        block_index: 0,
         transaction_index: transaction.index
       )
 
@@ -640,7 +809,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
           }
         ],
         optimization: true,
-        optimization_runs: 200,
+        optimization_runs: @optimization_runs,
         evm_version: "default"
       }
 
@@ -649,7 +818,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
         %SmartContract.ExternalLibrary{:address_hash => "0x283539e1b1daf24cdd58a3e934d55062ea663c3f", :name => "Test2"}
       ]
 
-      {:ok, %SmartContract{} = contract} = Chain.create_smart_contract(valid_attrs, external_libraries)
+      {:ok, %SmartContract{} = contract} = SmartContract.create_smart_contract(valid_attrs, external_libraries)
 
       params = %{
         "module" => "contract",
@@ -665,7 +834,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
           "ContractName" => contract.name,
           "CompilerVersion" => contract.compiler_version,
           "OptimizationUsed" => "true",
-          "OptimizationRuns" => 200,
+          "OptimizationRuns" => @optimization_runs,
           "EVMVersion" => "default",
           "ExternalLibraries" => [
             %{"name" => "Test", "address_hash" => "0xb18aed9518d735482badb4e8b7fd8d2ba425ce95"},
@@ -676,14 +845,20 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
         }
       ]
 
-      get_implementation()
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
 
       assert response =
                conn
                |> get("/api", params)
                |> json_response(200)
 
-      assert response["result"] == expected_result
+      result_props = Enum.at(expected_result, 0) |> Map.keys()
+
+      for prop <- result_props do
+        assert Enum.at(response["result"], 0)[prop] == Enum.at(expected_result, 0)[prop]
+      end
+
       assert response["status"] == "1"
       assert response["message"] == "OK"
       assert :ok = ExJsonSchema.Validator.validate(getsourcecode_schema(), response)
@@ -712,7 +887,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
       params = %{
         "module" => "contract",
         "action" => "verify_via_sourcify",
-        "addressHash" => "0x18d89C12e9463Be6343c35C9990361bA4C42AfC2"
+        "addressHash" => "0xf26594F585De4EB0Ae9De865d9053FEe02ac6eF1"
       }
 
       response =
@@ -732,17 +907,18 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
       _created_contract_address =
         insert(
           :address,
-          hash: "0x18d89C12e9463Be6343c35C9990361bA4C42AfC2",
+          hash: "0xf26594F585De4EB0Ae9De865d9053FEe02ac6eF1",
           contract_code: smart_contract_bytecode
         )
 
       params = %{
         "module" => "contract",
         "action" => "verify_via_sourcify",
-        "addressHash" => "0x18d89C12e9463Be6343c35C9990361bA4C42AfC2"
+        "addressHash" => "0xf26594F585De4EB0Ae9De865d9053FEe02ac6eF1"
       }
 
-      get_implementation()
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
 
       conn
       |> get("/api", params)
@@ -771,7 +947,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
     #     |> get("/api", params)
     #     |> json_response(200)
 
-    #   verified_contract = Chain.address_hash_to_smart_contract(contract_address.hash)
+    #   verified_contract = SmartContract.address_hash_to_smart_contract(contract_address.hash)
 
     #   expected_result = %{
     #     "Address" => to_string(contract_address.hash),
@@ -844,7 +1020,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
 
     #   result = response["result"]
 
-    #   verified_contract = Chain.address_hash_to_smart_contract(contract_address.hash)
+    #   verified_contract = SmartContract.address_hash_to_smart_contract(contract_address.hash)
 
     #   assert result["Address"] == to_string(contract_address.hash)
 
@@ -853,11 +1029,387 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
     #              contract_source_code
 
     #   assert result["ContractName"] == name
-    #   assert result["DecompiledSourceCode"] == nil
-    #   assert result["DecompilerVersion"] == nil
     #   assert result["OptimizationUsed"] == "true"
     #   assert :ok = ExJsonSchema.Validator.validate(verify_schema(), response)
     # end
+  end
+
+  describe "getcontractcreation" do
+    setup do
+      %{params: %{"module" => "contract", "action" => "getcontractcreation"}}
+    end
+
+    test "return error", %{conn: conn, params: params} do
+      %{
+        "status" => "0",
+        "message" => "Query parameter contractaddresses is required",
+        "result" => "Query parameter contractaddresses is required"
+      } =
+        conn
+        |> get("/api", params)
+        |> json_response(200)
+    end
+
+    test "get empty list", %{conn: conn, params: params} do
+      address = build(:address)
+      address_1 = insert(:address)
+
+      %{
+        "status" => "1",
+        "message" => "OK",
+        "result" => []
+      } =
+        conn
+        |> get("/api", Map.put(params, "contractaddresses", "#{to_string(address)},#{to_string(address_1)}"))
+        |> json_response(200)
+    end
+
+    test "get contract creation info from a transaction", %{conn: conn, params: params} do
+      address_1 = build(:address)
+      address = insert(:contract_address)
+      {:ok, block_timestamp, _} = DateTime.from_iso8601("2021-05-05T21:42:11.000000Z")
+      unix_timestamp = DateTime.to_unix(block_timestamp, :second)
+
+      transaction =
+        insert(:transaction,
+          created_contract_address: address,
+          block_timestamp: block_timestamp
+        )
+
+      %{
+        "status" => "1",
+        "message" => "OK",
+        "result" => [
+          %{
+            "contractAddress" => contract_address,
+            "contractCreator" => contract_creator,
+            "txHash" => transaction_hash,
+            "blockNumber" => block_number,
+            "timestamp" => timestamp,
+            "contractFactory" => "",
+            "creationBytecode" => creation_bytecode
+          }
+        ]
+      } =
+        conn
+        |> get("/api", Map.put(params, "contractaddresses", "#{to_string(address)},#{to_string(address_1)}"))
+        |> json_response(200)
+
+      assert contract_address == to_string(address.hash)
+      assert contract_creator == to_string(transaction.from_address_hash)
+      assert transaction_hash == to_string(transaction.hash)
+      assert block_number == to_string(transaction.block_number)
+      assert timestamp == to_string(unix_timestamp)
+      assert creation_bytecode == to_string(transaction.input)
+    end
+
+    test "returns contract creation info for addresses separated by comma and whitespace", %{conn: conn, params: params} do
+      {:ok, block_timestamp, _} = DateTime.from_iso8601("2021-05-05T21:42:11.000000Z")
+
+      address = insert(:contract_address)
+      address_1 = insert(:contract_address)
+
+      transaction =
+        insert(:transaction,
+          created_contract_address: address,
+          block_timestamp: block_timestamp
+        )
+
+      transaction_1 =
+        insert(:transaction,
+          created_contract_address: address_1,
+          block_timestamp: block_timestamp
+        )
+
+      %{
+        "status" => "1",
+        "message" => "OK",
+        "result" => result
+      } =
+        conn
+        |> get(
+          "/api",
+          Map.put(params, "contractaddresses", "#{to_string(address)}, #{to_string(address_1)}")
+        )
+        |> json_response(200)
+
+      assert length(result) == 2
+
+      assert Enum.map(result, & &1["contractAddress"]) == [
+               to_string(address.hash),
+               to_string(address_1.hash)
+             ]
+
+      assert Enum.map(result, & &1["txHash"]) == [
+               to_string(transaction.hash),
+               to_string(transaction_1.hash)
+             ]
+    end
+
+    test "get contract creation info via internal transaction", %{conn: conn, params: params} do
+      {:ok, block_timestamp, _} = DateTime.from_iso8601("2021-05-05T21:42:11.000000Z")
+      unix_timestamp = DateTime.to_unix(block_timestamp, :second)
+
+      block = insert(:block, timestamp: block_timestamp)
+
+      transaction =
+        :transaction
+        |> insert()
+        |> with_block(block)
+
+      internal_transaction =
+        insert(:internal_transaction_create,
+          transaction: transaction,
+          index: 1,
+          block_number: transaction.block_number,
+          transaction_index: transaction.index
+        )
+        |> InternalTransaction.preload_addresses()
+
+      address = internal_transaction.created_contract_address
+
+      %{
+        "status" => "1",
+        "message" => "OK",
+        "result" => [
+          %{
+            "contractAddress" => contract_address,
+            "contractCreator" => contract_creator,
+            "txHash" => transaction_hash,
+            "blockNumber" => block_number,
+            "timestamp" => timestamp,
+            "contractFactory" => contract_factory,
+            "creationBytecode" => creation_bytecode
+          }
+        ]
+      } =
+        conn
+        |> get("/api", Map.put(params, "contractaddresses", to_string(address)))
+        |> json_response(200)
+
+      assert contract_address == to_string(internal_transaction.created_contract_address_hash)
+      assert contract_creator == to_string(internal_transaction.transaction.from_address_hash)
+      assert transaction_hash == to_string(internal_transaction.transaction.hash)
+      assert block_number == to_string(internal_transaction.transaction.block_number)
+      assert timestamp == to_string(unix_timestamp)
+      assert contract_factory == to_string(internal_transaction.from_address_hash)
+      assert creation_bytecode == to_string(internal_transaction.init)
+    end
+
+    test "get contract creation info via internal transaction with index 0 and parent transaction - contractFactory should be empty",
+         %{
+           conn: conn,
+           params: params
+         } do
+      {:ok, block_timestamp, _} = DateTime.from_iso8601("2021-05-05T21:42:11.000000Z")
+      block = insert(:block, timestamp: block_timestamp)
+      contract_address = insert(:contract_address)
+
+      # Create a transaction that creates the contract
+      transaction =
+        :transaction
+        |> insert(created_contract_address: contract_address)
+        |> with_block(block)
+
+      # Also create an internal transaction with index 0 for the same contract
+      insert(:internal_transaction_create,
+        transaction: transaction,
+        # index 0 should result in empty contractFactory
+        index: 0,
+        created_contract_address: contract_address,
+        block_number: transaction.block_number,
+        transaction_index: transaction.index
+      )
+
+      assert %{
+               "result" => [
+                 %{
+                   "contractFactory" => "",
+                   "contractCreator" => contract_creator
+                 }
+               ]
+             } =
+               conn
+               |> get("/api", Map.put(params, "contractaddresses", to_string(contract_address)))
+               |> json_response(200)
+
+      assert contract_creator == to_string(transaction.from_address_hash)
+    end
+  end
+
+  describe "verifyproxycontract & checkproxyverification" do
+    setup do
+      %{params: %{"module" => "contract"}}
+    end
+
+    @proxy_abi [
+      %{
+        "type" => "function",
+        "stateMutability" => "nonpayable",
+        "payable" => false,
+        "outputs" => [%{"type" => "bool", "name" => ""}],
+        "name" => "upgradeTo",
+        "inputs" => [%{"type" => "address", "name" => "newImplementation"}],
+        "constant" => false
+      },
+      %{
+        "type" => "function",
+        "stateMutability" => "view",
+        "payable" => false,
+        "outputs" => [%{"type" => "uint256", "name" => ""}],
+        "name" => "version",
+        "inputs" => [],
+        "constant" => true
+      },
+      %{
+        "type" => "function",
+        "stateMutability" => "view",
+        "payable" => false,
+        "outputs" => [%{"type" => "address", "name" => ""}],
+        "name" => "implementation",
+        "inputs" => [],
+        "constant" => true
+      },
+      %{
+        "type" => "function",
+        "stateMutability" => "nonpayable",
+        "payable" => false,
+        "outputs" => [],
+        "name" => "renounceOwnership",
+        "inputs" => [],
+        "constant" => false
+      },
+      %{
+        "type" => "function",
+        "stateMutability" => "view",
+        "payable" => false,
+        "outputs" => [%{"type" => "address", "name" => ""}],
+        "name" => "getOwner",
+        "inputs" => [],
+        "constant" => true
+      },
+      %{
+        "type" => "function",
+        "stateMutability" => "view",
+        "payable" => false,
+        "outputs" => [%{"type" => "address", "name" => ""}],
+        "name" => "getProxyStorage",
+        "inputs" => [],
+        "constant" => true
+      },
+      %{
+        "type" => "function",
+        "stateMutability" => "nonpayable",
+        "payable" => false,
+        "outputs" => [],
+        "name" => "transferOwnership",
+        "inputs" => [%{"type" => "address", "name" => "_newOwner"}],
+        "constant" => false
+      },
+      %{
+        "type" => "constructor",
+        "stateMutability" => "nonpayable",
+        "payable" => false,
+        "inputs" => [
+          %{"type" => "address", "name" => "_proxyStorage"},
+          %{"type" => "address", "name" => "_implementationAddress"}
+        ]
+      },
+      %{"type" => "fallback", "stateMutability" => "nonpayable", "payable" => false},
+      %{
+        "type" => "event",
+        "name" => "Upgraded",
+        "inputs" => [
+          %{"type" => "uint256", "name" => "version", "indexed" => false},
+          %{"type" => "address", "name" => "implementation", "indexed" => true}
+        ],
+        "anonymous" => false
+      },
+      %{
+        "type" => "event",
+        "name" => "OwnershipRenounced",
+        "inputs" => [%{"type" => "address", "name" => "previousOwner", "indexed" => true}],
+        "anonymous" => false
+      },
+      %{
+        "type" => "event",
+        "name" => "OwnershipTransferred",
+        "inputs" => [
+          %{"type" => "address", "name" => "previousOwner", "indexed" => true},
+          %{"type" => "address", "name" => "newOwner", "indexed" => true}
+        ],
+        "anonymous" => false
+      }
+    ]
+    @implementation_abi [
+      %{
+        "constant" => false,
+        "inputs" => [%{"name" => "x", "type" => "uint256"}],
+        "name" => "set",
+        "outputs" => [],
+        "payable" => false,
+        "stateMutability" => "nonpayable",
+        "type" => "function"
+      },
+      %{
+        "constant" => true,
+        "inputs" => [],
+        "name" => "get",
+        "outputs" => [%{"name" => "", "type" => "uint256"}],
+        "payable" => false,
+        "stateMutability" => "view",
+        "type" => "function"
+      }
+    ]
+    test "verify", %{conn: conn, params: params} do
+      proxy_contract_address = insert(:contract_address, contract_code: "0xDEADBEEF5c60da1bDEADBEEF")
+
+      insert(:smart_contract, address_hash: proxy_contract_address.hash, abi: @proxy_abi, contract_code_md5: "123")
+
+      implementation_contract_address = insert(:contract_address)
+
+      insert(:smart_contract,
+        address_hash: implementation_contract_address.hash,
+        abi: @implementation_abi,
+        contract_code_md5: "123"
+      )
+
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests(basic_implementation: implementation_contract_address.hash)
+
+      %{
+        "message" => "OK",
+        "result" => uid,
+        "status" => "1"
+      } =
+        conn
+        |> get(
+          "/api",
+          Map.merge(params, %{"action" => "verifyproxycontract", "address" => to_string(proxy_contract_address.hash)})
+        )
+        |> json_response(200)
+
+      :timer.sleep(333)
+
+      result =
+        "The proxy's (#{to_string(proxy_contract_address.hash)}) implementation contract is found at #{to_string(implementation_contract_address.hash)} and is successfully updated."
+
+      %{
+        "message" => "OK",
+        "result" => ^result,
+        "status" => "1"
+      } =
+        conn
+        |> get("/api", Map.merge(params, %{"action" => "checkproxyverification", "guid" => uid}))
+        |> json_response(200)
+
+      assert %Implementation{address_hashes: implementations} =
+               Implementation
+               |> where([i], i.proxy_address_hash == ^proxy_contract_address.hash)
+               |> Repo.one()
+
+      assert implementations == [implementation_contract_address.hash]
+    end
   end
 
   defp listcontracts_schema do
@@ -893,9 +1445,7 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
           "ABI" => %{"type" => "string"},
           "ContractName" => %{"type" => "string"},
           "CompilerVersion" => %{"type" => "string"},
-          "OptimizationUsed" => %{"type" => "string"},
-          "DecompiledSourceCode" => %{"type" => "string"},
-          "DecompilerVersion" => %{"type" => "string"}
+          "OptimizationUsed" => %{"type" => "string"}
         }
       }
     })
@@ -910,8 +1460,6 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
   #       "ABI" => %{"type" => "string"},
   #       "ContractName" => %{"type" => "string"},
   #       "CompilerVersion" => %{"type" => "string"},
-  #       "DecompiledSourceCode" => %{"type" => "string"},
-  #       "DecompilerVersion" => %{"type" => "string"},
   #       "OptimizationUsed" => %{"type" => "string"}
   #     }
   #   })
@@ -927,45 +1475,5 @@ defmodule BlockScoutWeb.API.RPC.ContractControllerTest do
     }
     |> put_in(["properties", "result"], result)
     |> ExJsonSchema.Schema.resolve()
-  end
-
-  def get_implementation do
-    EthereumJSONRPC.Mox
-    |> expect(:json_rpc, fn %{
-                              id: 0,
-                              method: "eth_getStorageAt",
-                              params: [
-                                _,
-                                "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc",
-                                "latest"
-                              ]
-                            },
-                            _options ->
-      {:ok, "0x0000000000000000000000000000000000000000000000000000000000000000"}
-    end)
-    |> expect(:json_rpc, fn %{
-                              id: 0,
-                              method: "eth_getStorageAt",
-                              params: [
-                                _,
-                                "0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee59ff6cb3582b35133d50",
-                                "latest"
-                              ]
-                            },
-                            _options ->
-      {:ok, "0x0000000000000000000000000000000000000000000000000000000000000000"}
-    end)
-    |> expect(:json_rpc, fn %{
-                              id: 0,
-                              method: "eth_getStorageAt",
-                              params: [
-                                _,
-                                "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3",
-                                "latest"
-                              ]
-                            },
-                            _options ->
-      {:ok, "0x0000000000000000000000000000000000000000000000000000000000000000"}
-    end)
   end
 end

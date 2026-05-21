@@ -2,7 +2,7 @@ defmodule BlockScoutWeb.Chain.TransactionHistoryChartController do
   use BlockScoutWeb, :controller
 
   alias Explorer.Chain.Transaction.History.TransactionStats
-  require Logger
+
   def show(conn, _params) do
     if ajax?(conn) do
       [{:history_size, history_size}] = Application.get_env(:block_scout_web, __MODULE__, [{:history_size, 30}])
@@ -12,15 +12,11 @@ defmodule BlockScoutWeb.Chain.TransactionHistoryChartController do
       earliest = Date.add(latest, -1 * history_size)
 
       date_range = TransactionStats.by_date_range(earliest, latest)
-      Logger.info("----------------")
-      Logger.info("#{inspect(today)}")
-      Logger.info("#{inspect(latest)}")
-      Logger.info("#{inspect(earliest)}")
-      Logger.info("#{inspect(date_range)}")
+
       transaction_history_data =
         date_range
-        |> extract_history
-        |> encode_transaction_history_data
+        |> extract_history()
+        |> encode_transaction_history_data()
 
       json(conn, %{
         history_data: transaction_history_data

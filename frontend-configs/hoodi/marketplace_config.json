@@ -1,0 +1,28 @@
+[
+  {
+    "author": "Mantle",
+    "id": "mantle-hoodi-bridge",
+    "title": "Mantle Hoodi Bridge",
+    "logo": "https://cms.mantle.xyz/assets/81f34c7e-374b-41ef-a80e-54ddab4a8680",
+    "categories": ["Bridges"],
+    "shortDescription": "Bridge tokens, and test your dApps deployed on Mantle Hoodi.",
+    "site": "https://bridge.hoodi.mantle.xyz/",
+    "description": "Bridge tokens, and test your dApps deployed on Mantle Hoodi.",
+    "url": "https://bridge.hoodi.mantle.xyz/",
+    "external": true,
+    "internalWallet": false
+  },
+  {
+    "author": "Mantle",
+    "id": "mantle-hoodi-faucet",
+    "title": "Mantle Hoodi Faucet",
+    "logo": "https://cms.mantle.xyz/assets/81f34c7e-374b-41ef-a80e-54ddab4a8680",
+    "categories": ["Faucets"],
+    "shortDescription": "Drip tokens from the faucet, and test your dApps deployed on Mantle Hoodi.",
+    "site": "https://faucet.hoodi.mantle.xyz/",
+    "description": "Drip tokens from the faucet, and test your dApps deployed on Mantle Hoodi.",
+    "url": "https://faucet.hoodi.mantle.xyz/",
+    "external": true,
+    "internalWallet": false
+  }
+]

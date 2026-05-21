@@ -33,7 +33,7 @@ $dark-primary-alternate: $dark-primary;
 		&.active, &:hover {
 			.nav-link-icon {
 				svg path {
-					fill: green;
+					fill: $dark-primary;
 				}
 			}
 			@media (min-width: 992px) {
@@ -96,7 +96,9 @@ $dark-primary-alternate: $dark-primary;
 	.dashboard-banner-chart-legend .dashboard-banner-chart-legend-item:nth-child(1)::before {
 		background-color: $dark-primary;
 	}
-	
+	.dashboard-banner-network-stats-item::before {
+		background-color: $dark-secondary;
+	}
 	.dashboard-banner-chart-legend .dashboard-banner-chart-legend-item:nth-child(2)::before {
 		background-color: $dark-secondary;
 	}
@@ -422,7 +424,7 @@ $dark-primary-alternate: $dark-primary;
 	}
 
 	// download csv button
-	.download-all-transactions .download-all-transactions-link svg path {
+	.download-all-items .download-all-items-link svg path {
 		fill: $dark-primary;
 	}
 

@@ -1,20 +1,21 @@
 defmodule BlockScoutWeb.AddressChannelTest do
   use BlockScoutWeb.ChannelCase,
-    # ETS tables are shared in `Explorer.Counters.AddressesCounter`
+    # ETS tables are shared in `Explorer.Chain.Cache.Counters.AddressesCount`
     async: false
 
   alias BlockScoutWeb.UserSocket
   alias BlockScoutWeb.Notifier
-  alias Explorer.Counters.AddressesCounter
+  alias Explorer.Chain.Wei
+  alias Explorer.Chain.Cache.Counters.AddressesCount
 
   test "subscribed user is notified of new_address count event" do
-    topic = "addresses:new_address"
+    topic = "addresses_old:new_address"
     @endpoint.subscribe(topic)
 
     address = insert(:address)
 
-    start_supervised!(AddressesCounter)
-    AddressesCounter.consolidate()
+    start_supervised!(AddressesCount)
+    AddressesCount.consolidate()
 
     Notifier.handle_event({:chain_event, :addresses, :realtime, [address]})
 
@@ -24,7 +25,7 @@ defmodule BlockScoutWeb.AddressChannelTest do
   describe "user pushing to channel" do
     setup do
       address = insert(:address, fetched_coin_balance: 100_000, fetched_coin_balance_block_number: 1)
-      topic = "addresses:#{address.hash}"
+      topic = "addresses_old:#{address.hash}"
 
       {:ok, _, socket} =
         UserSocket
@@ -47,16 +48,17 @@ defmodule BlockScoutWeb.AddressChannelTest do
   describe "user subscribed to address" do
     setup do
       address = insert(:address)
-      topic = "addresses:#{address.hash}"
+      topic = "addresses_old:#{address.hash}"
       @endpoint.subscribe(topic)
       {:ok, %{address: address, topic: topic}}
     end
 
     test "notified of balance_update for matching address", %{address: address, topic: topic} do
-      address_with_balance = %{address | fetched_coin_balance: 1}
+      {:ok, balance} = Wei.cast(1)
+      address_with_balance = %{address | fetched_coin_balance: balance}
 
-      start_supervised!(AddressesCounter)
-      AddressesCounter.consolidate()
+      start_supervised!(AddressesCount)
+      AddressesCount.consolidate()
 
       Notifier.handle_event({:chain_event, :addresses, :realtime, [address_with_balance]})
 
@@ -67,8 +69,8 @@ defmodule BlockScoutWeb.AddressChannelTest do
     end
 
     test "not notified of balance_update if fetched_coin_balance is nil", %{address: address} do
-      start_supervised!(AddressesCounter)
-      AddressesCounter.consolidate()
+      start_supervised!(AddressesCount)
+      AddressesCount.consolidate()
 
       Notifier.handle_event({:chain_event, :addresses, :realtime, [address]})
 
@@ -80,7 +82,11 @@ defmodule BlockScoutWeb.AddressChannelTest do
 
       Notifier.handle_event({:chain_event, :transactions, :realtime, [pending]})
 
-      assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "pending_transaction", payload: payload},
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^topic,
+                       event: "pending_transaction",
+                       payload: %{transaction: _} = payload
+                     },
                      :timer.seconds(5)
 
       assert payload.address.hash == address.hash
@@ -95,7 +101,13 @@ defmodule BlockScoutWeb.AddressChannelTest do
 
       Notifier.handle_event({:chain_event, :transactions, :realtime, [transaction]})
 
-      assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "transaction", payload: payload}, :timer.seconds(5)
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^topic,
+                       event: "transaction",
+                       payload: %{transaction: _} = payload
+                     },
+                     :timer.seconds(5)
+
       assert payload.address.hash == address.hash
       assert payload.transaction.hash == transaction.hash
     end
@@ -108,7 +120,13 @@ defmodule BlockScoutWeb.AddressChannelTest do
 
       Notifier.handle_event({:chain_event, :transactions, :realtime, [transaction]})
 
-      assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "transaction", payload: payload}, :timer.seconds(5)
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^topic,
+                       event: "transaction",
+                       payload: %{transaction: _} = payload
+                     },
+                     :timer.seconds(5)
+
       assert payload.address.hash == address.hash
       assert payload.transaction.hash == transaction.hash
     end
@@ -121,11 +139,19 @@ defmodule BlockScoutWeb.AddressChannelTest do
 
       Notifier.handle_event({:chain_event, :transactions, :realtime, [transaction]})
 
-      assert_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "transaction", payload: payload}, :timer.seconds(5)
+      assert_receive %Phoenix.Socket.Broadcast{
+                       topic: ^topic,
+                       event: "transaction",
+                       payload: %{transaction: _} = payload
+                     },
+                     :timer.seconds(5)
+
       assert payload.address.hash == address.hash
       assert payload.transaction.hash == transaction.hash
 
-      refute_receive _, 100, "Received duplicate broadcast."
+      refute_receive %Phoenix.Socket.Broadcast{topic: ^topic, event: "transaction", payload: %{transaction: _}},
+                     100,
+                     "Received duplicate broadcast."
     end
 
     test "notified of new_internal_transaction for matching from_address", %{address: address, topic: topic} do
@@ -139,9 +165,9 @@ defmodule BlockScoutWeb.AddressChannelTest do
           :internal_transaction,
           transaction: transaction,
           from_address: address,
+          transaction_index: transaction.index,
           index: 0,
-          block_hash: transaction.block_hash,
-          block_index: 0
+          block_number: transaction.block_number
         )
 
       Notifier.handle_event({:chain_event, :internal_transactions, :realtime, [internal_transaction]})
@@ -157,7 +183,7 @@ defmodule BlockScoutWeb.AddressChannelTest do
                      :timer.seconds(5)
 
       assert address_hash == address.hash
-      assert {transaction_hash, index} == {internal_transaction.transaction_hash, internal_transaction.index}
+      assert {transaction_hash, index} == {transaction.hash, internal_transaction.index}
     end
 
     test "notified of new_internal_transaction for matching to_address", %{address: address, topic: topic} do
@@ -168,11 +194,10 @@ defmodule BlockScoutWeb.AddressChannelTest do
 
       internal_transaction =
         insert(:internal_transaction,
-          transaction: transaction,
           to_address: address,
+          transaction_index: transaction.index,
           index: 0,
-          block_hash: transaction.block_hash,
-          block_index: 0
+          block_number: transaction.block_number
         )
 
       Notifier.handle_event({:chain_event, :internal_transactions, :realtime, [internal_transaction]})
@@ -182,13 +207,19 @@ defmodule BlockScoutWeb.AddressChannelTest do
                        event: "internal_transaction",
                        payload: %{
                          address: %{hash: address_hash},
-                         internal_transaction: %{transaction_hash: transaction_hash, index: index}
+                         internal_transaction: %{
+                           block_number: block_number,
+                           transaction_index: transaction_index,
+                           index: index
+                         }
                        }
                      },
                      :timer.seconds(5)
 
       assert address_hash == address.hash
-      assert {transaction_hash, index} == {internal_transaction.transaction_hash, internal_transaction.index}
+
+      assert {block_number, transaction_index, index} ==
+               {internal_transaction.block_number, internal_transaction.transaction_index, internal_transaction.index}
     end
 
     test "not notified twice of new_internal_transaction if to and from address are equal", %{
@@ -202,12 +233,11 @@ defmodule BlockScoutWeb.AddressChannelTest do
 
       internal_transaction =
         insert(:internal_transaction,
-          transaction: transaction,
           from_address: address,
           to_address: address,
+          transaction_index: transaction.index,
           index: 0,
-          block_hash: transaction.block_hash,
-          block_index: 0
+          block_number: transaction.block_number
         )
 
       Notifier.handle_event({:chain_event, :internal_transactions, :realtime, [internal_transaction]})
@@ -217,13 +247,13 @@ defmodule BlockScoutWeb.AddressChannelTest do
                        event: "internal_transaction",
                        payload: %{
                          address: %{hash: address_hash},
-                         internal_transaction: %{transaction_hash: transaction_hash, index: index}
+                         internal_transaction: %{transaction_index: transaction_index, index: index}
                        }
                      },
                      :timer.seconds(5)
 
       assert address_hash == address.hash
-      assert {transaction_hash, index} == {internal_transaction.transaction_hash, internal_transaction.index}
+      assert {transaction_index, index} == {internal_transaction.transaction_index, internal_transaction.index}
 
       refute_receive _, 100, "Received duplicate broadcast."
     end

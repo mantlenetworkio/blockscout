@@ -4,57 +4,11 @@
 
   <section>
     <div class="card mb-3">
-      <div class="card-tabs js-card-tabs">
-        <%=
-          link(
-            gettext("Transactions"),
-            class: "card-tab #{tab_status("transactions", @conn.request_path)}",
-            to: block_transaction_path(@conn, :index, @conn.params["block_hash_or_number"])
-            )
-        %>
-      </div>
-
-      <div class="card-body txn-list-container" data-async-load data-async-listing="<%= @current_path %>" id="txs">
+      <%= render BlockScoutWeb.BlockView, "_tabs.html", assigns %>
+      
+      <div class="card-body" data-async-load data-async-listing="<%= @current_path %>" id="txs">
 
       <%= render BlockScoutWeb.CommonComponentsView, "_pagination_container.html", position: "top", show_pagination_limit: true, data_next_page_button: true, data_prev_page_button: true %>
-
-
-       <div class="table-tile-header txn-list-table-head-container">
-        <span style="width: 2%;">
-         &nbsp;
-        </span>
-        <span style="width: 10%;">
-           <%= gettext "Txn Hash" %>
-        </span>
-        <span style="width: 10%;">
-           <%= gettext "Txn Type" %>
-        </span>
-        <span style="width: 9%;">
-             <%= gettext "Method" %>
-        </span>
-        <span style="width: 8%;">
-           <%= gettext "Block" %>
-        </span>
-        <span style="width: 10%;">
-           <%= gettext "Age" %>
-        </span>
-        <span style="width: 14%;">
-          <%= gettext "From" %>
-        </span>
-        <span style="width: 3%;">
-        &nbsp;
-        </span>
-        <span style="width: 14%;">
-          <%= gettext "To" %>
-        </span>
-        <span style="width: 10%;">
-           <%= gettext "Value" %>
-        </span>
-        <span style="width: 10%;">
-           <%= gettext "Txn Fee" %>
-        </span>
-      </div>
-
 
         <button data-error-message class="alert alert-danger col-12 text-left" style="display: none;">
           <span href="#" class="alert-link"><%= gettext("Something went wrong, click to reload.") %></span>
@@ -66,7 +20,7 @@
           </div>
         </div>
 
-        <div data-items class="table-list-page">
+        <div data-items>
           <%= render BlockScoutWeb.CommonComponentsView, "_tile-loader.html" %>
         </div>
 

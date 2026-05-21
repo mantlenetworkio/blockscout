@@ -3,23 +3,21 @@ defmodule BlockScoutWeb.Tokens.TokenController do
 
   require Logger
 
-  alias BlockScoutWeb.AccessHelpers
+  alias BlockScoutWeb.AccessHelper
   alias Explorer.Chain
+  alias Explorer.Chain.Token
 
   def show(conn, %{"id" => address_hash_string}) do
-    redirect(conn, to: AccessHelpers.get_path(conn, :token_transfer_path, :index, address_hash_string))
+    redirect(conn, to: AccessHelper.get_path(conn, :token_transfer_path, :index, address_hash_string))
   end
 
   def token_counters(conn, %{"id" => address_hash_string}) do
     case Chain.string_to_address_hash(address_hash_string) do
       {:ok, address_hash} ->
-        {transfer_count, token_holder_count} = Chain.fetch_token_counters(address_hash, 30_000)
-        if(address_hash_string == "0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000") do
-          native_token_holder_count = Chain.native_token_holders()
-          json(conn, %{transfer_count: transfer_count, token_holder_count: native_token_holder_count})
-        else
-          json(conn, %{transfer_count: transfer_count, token_holder_count: token_holder_count})
-        end
+        {transfers_count, holders_count} = Token.fetch_token_counters(address_hash, 30_000)
+
+        json(conn, %{transfer_count: transfers_count, token_holder_count: holders_count})
+
       _ ->
         not_found(conn)
     end
