@@ -179,12 +179,13 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation do
                {:index_operation_progress, check_db_index_operation_progress()},
              {:db_index_operation_status, :not_initialized} <-
                {:db_index_operation_status, db_index_operation_status()} do
-          if db_operation_is_ready_to_start?() do
-            MigrationStatus.set_status(migration_name(), "started")
-            timeout = (db_index_operation() == :ok && 0) || nil
-            schedule_next_db_operation_status_check(timeout)
-          else
-            schedule_next_db_operation_readiness_check()
+          case try_claim_started_slot() do
+            :claimed ->
+              timeout = (db_index_operation() == :ok && 0) || nil
+              schedule_next_db_operation_status_check(timeout)
+
+            :not_ready ->
+              schedule_next_db_operation_readiness_check()
           end
 
           {:noreply, state}
@@ -235,6 +236,38 @@ defmodule Explorer.Migrator.HeavyDbIndexOperation do
 
             all_statuses_completed? && Enum.count(all_statuses) == Enum.count(dependent_from_migrations())
           end
+        end
+      end
+
+      # Serializes the readiness check + "started" write across GenServers
+      # that operate on the same table. Without this, two GenServers can
+      # both observe "no one is started yet" and then both flip themselves
+      # to started, producing concurrent CONCURRENTLY DDL on the same
+      # table that PostgreSQL deadlocks on.
+      defp try_claim_started_slot do
+        lock_key = :erlang.phash2({:heavy_index_table_slot, table_name()})
+
+        case Repo.transaction(fn ->
+               case Repo.query("SELECT pg_try_advisory_xact_lock($1::bigint)", [lock_key]) do
+                 {:ok, %Postgrex.Result{rows: [[true]]}} ->
+                   if db_operation_is_ready_to_start?() do
+                     case MigrationStatus.set_status(migration_name(), "started") do
+                       {:ok, _} -> :claimed
+                       {:error, _} = error -> Repo.rollback(error)
+                     end
+                   else
+                     :not_ready
+                   end
+
+                 {:ok, %Postgrex.Result{rows: [[false]]}} ->
+                   :not_ready
+
+                 {:error, _} ->
+                   :not_ready
+               end
+             end) do
+          {:ok, result} -> result
+          {:error, _} -> :not_ready
         end
       end
 
