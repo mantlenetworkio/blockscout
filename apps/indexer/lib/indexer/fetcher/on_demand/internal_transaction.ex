@@ -12,7 +12,7 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
   alias Explorer.Chain.{Block, BlockNumberHelper, Hash, InternalTransaction, Transaction}
   alias Explorer.Chain.Cache.BlockNumber
   alias Explorer.Repo
-  alias Explorer.Utility.{AddressIdToAddressHash, InternalTransactionsAddressPlaceholder}
+  alias Explorer.Utility.{AddressIdToAddressHash, InternalTransactionHelper, InternalTransactionsAddressPlaceholder}
   alias Indexer.Fetcher.InternalTransaction, as: InternalTransactionFetcher
 
   @default_paging_options %PagingOptions{page_size: 50}
@@ -620,7 +620,8 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransaction do
   end
 
   defp internal_transactions_fetching_disabled? do
-    Application.get_env(:indexer, __MODULE__, [])[:disabled?] == true
+    Application.get_env(:indexer, __MODULE__, [])[:disabled?] == true or
+      not InternalTransactionHelper.primary_key_updated?()
   end
 
   defp page_internal_transaction(_, _, _ \\ %{index_internal_transaction_desc_order: false})

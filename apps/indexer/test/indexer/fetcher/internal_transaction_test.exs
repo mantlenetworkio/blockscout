@@ -11,6 +11,7 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
   alias Ecto.Multi
   alias Explorer.{Chain, Repo}
   alias Explorer.Chain.{Block, PendingBlockOperation, PendingTransactionOperation}
+  alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.Import.Runner.Blocks
   alias Indexer.Fetcher.CoinBalance.Catchup, as: CoinBalanceCatchup
   alias Indexer.Fetcher.{InternalTransaction, PendingTransaction}
@@ -136,10 +137,52 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
   describe "init/2" do
     setup do
       initial_env = Application.get_env(:indexer, Indexer.Fetcher.InternalTransaction)
+      BackgroundMigrations.set_heavy_indexes_update_internal_transactions_primary_key_finished(true)
 
       on_exit(fn ->
         Application.put_env(:indexer, Indexer.Fetcher.InternalTransaction, initial_env)
+        BackgroundMigrations.set_heavy_indexes_update_internal_transactions_primary_key_finished(true)
       end)
+    end
+
+    test "does not buffer blocks when internal transactions primary key migration is incomplete", %{
+      json_rpc_named_arguments: json_rpc_named_arguments
+    } do
+      Application.put_env(:indexer, Indexer.Fetcher.InternalTransaction, disabled?: false)
+      BackgroundMigrations.set_heavy_indexes_update_internal_transactions_primary_key_finished(false)
+
+      block = insert(:block)
+      insert(:pending_block_operation, block_hash: block.hash, block_number: block.number)
+
+      assert InternalTransaction.init(
+               [],
+               fn block_number, acc -> [block_number | acc] end,
+               json_rpc_named_arguments
+             ) == []
+    end
+
+    test "buffers pending blocks after internal transactions primary key migration completes", %{
+      json_rpc_named_arguments: json_rpc_named_arguments
+    } do
+      Application.put_env(:indexer, Indexer.Fetcher.InternalTransaction, disabled?: false)
+      BackgroundMigrations.set_heavy_indexes_update_internal_transactions_primary_key_finished(false)
+
+      block = insert(:block)
+      insert(:pending_block_operation, block_hash: block.hash, block_number: block.number)
+
+      assert InternalTransaction.init(
+               [],
+               fn block_number, acc -> [block_number | acc] end,
+               json_rpc_named_arguments
+             ) == []
+
+      BackgroundMigrations.set_heavy_indexes_update_internal_transactions_primary_key_finished(true)
+
+      assert InternalTransaction.init(
+               [],
+               fn block_number, acc -> [block_number | acc] end,
+               json_rpc_named_arguments
+             ) == [block.number]
     end
 
     test "buffers blocks with unfetched internal transactions", %{
@@ -171,6 +214,27 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
   end
 
   describe "run/2" do
+    setup do
+      BackgroundMigrations.set_heavy_indexes_update_internal_transactions_primary_key_finished(true)
+
+      on_exit(fn ->
+        BackgroundMigrations.set_heavy_indexes_update_internal_transactions_primary_key_finished(true)
+      end)
+    end
+
+    test "skips fetching when internal transactions primary key migration is incomplete", %{
+      json_rpc_named_arguments: json_rpc_named_arguments
+    } do
+      BackgroundMigrations.set_heavy_indexes_update_internal_transactions_primary_key_finished(false)
+
+      block = insert(:block, number: 1)
+      block_hash = block.hash
+      insert(:pending_block_operation, block_hash: block_hash, block_number: block.number)
+
+      assert :ok == InternalTransaction.run([block.number], json_rpc_named_arguments)
+      assert %{block_hash: ^block_hash} = Repo.get(PendingBlockOperation, block_hash)
+    end
+
     test "handles empty block numbers", %{
       json_rpc_named_arguments: json_rpc_named_arguments
     } do

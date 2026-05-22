@@ -4,6 +4,7 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransactionTest do
 
   import Mox
 
+  alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.InternalTransaction
   alias Explorer.PagingOptions
   alias Indexer.Fetcher.OnDemand.InternalTransaction, as: InternalTransactionOnDemand
@@ -14,9 +15,14 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransactionTest do
 
   setup do
     snapshot_env_restore()
+    BackgroundMigrations.set_heavy_indexes_update_internal_transactions_primary_key_finished(true)
 
     %{json_rpc_named_arguments: json_rpc_named_arguments} = EthereumJSONRPC.Case.Geth.Mox.setup()
     Application.put_env(:explorer, :json_rpc_named_arguments, json_rpc_named_arguments)
+
+    on_exit(fn ->
+      BackgroundMigrations.set_heavy_indexes_update_internal_transactions_primary_key_finished(true)
+    end)
   end
 
   test "returns empty results when internal transactions fetcher is disabled" do
@@ -46,6 +52,21 @@ defmodule Indexer.Fetcher.OnDemand.InternalTransactionTest do
       count_froms: 1
     )
 
+    refute InternalTransactionOnDemand.should_fetch?([], 10)
+  end
+
+  test "returns empty results when internal transactions primary key migration is incomplete" do
+    BackgroundMigrations.set_heavy_indexes_update_internal_transactions_primary_key_finished(false)
+
+    transaction = :transaction |> insert() |> with_block()
+    block = transaction.block
+    address = insert(:address)
+    opts = [paging_options: %PagingOptions{page_size: 5}]
+
+    assert [] = InternalTransactionOnDemand.fetch_latest(opts)
+    assert [] = InternalTransactionOnDemand.fetch_by_transaction(transaction, opts)
+    assert [] = InternalTransactionOnDemand.fetch_by_block(block, opts)
+    assert [] = InternalTransactionOnDemand.fetch_by_address(address.hash, opts)
     refute InternalTransactionOnDemand.should_fetch?([], 10)
   end
 
