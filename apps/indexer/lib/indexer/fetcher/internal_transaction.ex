@@ -50,7 +50,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
   *Note*: The internal transactions for individual transactions cannot be paginated,
   so the total number of internal transactions that could be produced is unknown.
   """
-  @spec async_fetch([Block.block_number()], [Transaction.t()], boolean(), boolean(), integer()) :: :ok
+  @spec async_fetch([Block.block_number()], [Transaction.t() | map()], boolean(), boolean(), integer()) :: :ok
   def async_fetch(block_numbers, transactions, realtime?, for_contract_creator? \\ false, timeout \\ 5000)
       when is_list(block_numbers) do
     cond do

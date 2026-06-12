@@ -249,21 +249,43 @@ defmodule Explorer.Chain.PendingOperationsHelper do
 
   @doc """
     Inserts pending operations for the given block numbers.
+
+    Inserts are chunked via `Repo.safe_insert_all/3`: blocks with tens of
+    thousands of transactions would otherwise exceed the 65535-parameter limit
+    of the postgres protocol in a single `insert_all`.
   """
-  @spec insert_pending_operations([integer()], integer() | nil) :: {[integer()], [Explorer.Chain.Transaction.t()]}
+  @spec insert_pending_operations([integer()], integer() | nil) :: {[integer()], [map()]}
   def insert_pending_operations(block_numbers, priority \\ nil) do
+    # safe_insert_all runs multiple statements, so the chunks are wrapped in a
+    # transaction to stay atomic for callers that don't provide one themselves;
+    # when a caller does (e.g. DeleteQueue), this joins the outer transaction
+    {:ok, result} =
+      Repo.transaction(fn -> do_insert_pending_operations(block_numbers, priority) end, timeout: :infinity)
+
+    result
+  end
+
+  defp do_insert_pending_operations(block_numbers, priority) do
     case pending_operations_type() do
       "transactions" ->
         default_on_conflict = default_pto_on_conflict()
-        transactions = Transaction.get_transactions_of_block_numbers(block_numbers)
+
+        # only the fields consumed by `Indexer.Fetcher.InternalTransaction.async_fetch/5`
+        # are selected: loading full structs (with input data) for massive blocks
+        # needlessly holds hundreds of MBs in memory
+        transactions =
+          block_numbers
+          |> Transaction.transactions_for_block_numbers()
+          |> select([t], %{block_number: t.block_number, hash: t.hash, index: t.index, type: t.type})
+          |> Repo.all()
+          |> Transaction.filter_non_traceable_transactions()
 
         pto_params =
           transactions
-          |> Transaction.filter_non_traceable_transactions()
           |> Enum.map(&%{transaction_hash: &1.hash, priority: priority})
           |> Helper.add_timestamps()
 
-        Repo.insert_all(PendingTransactionOperation, pto_params,
+        Repo.safe_insert_all(PendingTransactionOperation, pto_params,
           on_conflict: default_on_conflict,
           conflict_target: [:transaction_hash]
         )
@@ -283,7 +305,7 @@ defmodule Explorer.Chain.PendingOperationsHelper do
           |> Helper.add_timestamps()
 
         {_total, inserted} =
-          Repo.insert_all(PendingBlockOperation, pbo_params,
+          Repo.safe_insert_all(PendingBlockOperation, pbo_params,
             on_conflict: default_on_conflict,
             conflict_target: [:block_hash],
             returning: [:block_number]
