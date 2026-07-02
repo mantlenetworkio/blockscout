@@ -35,6 +35,15 @@ defmodule Explorer.Chain.Token.Schema do
         field(:is_verified_via_admin_panel, :boolean)
         field(:volume_24h, FiatValue)
         field(:transfer_count, :integer)
+        field(:extensions, {:array, :string})
+        field(:scaled_ui_base_multiplier, :decimal)
+        field(:scaled_ui_pending_multiplier, :decimal)
+        field(:scaled_ui_pending_effective_at, :decimal)
+        field(:scaled_ui_capability_block, :integer)
+        field(:scaled_ui_scheduled_ext, :boolean)
+        field(:scaled_ui_iface_checked, :boolean, default: false)
+        field(:scaled_ui_timeline_status, :string)
+        field(:scaled_ui_tainted_from_block, :integer)
 
         belongs_to(
           :contract_address,
@@ -148,7 +157,7 @@ defmodule Explorer.Chain.Token do
   Explorer.Chain.Token.Schema.generate()
 
   @required_attrs ~w(contract_address_hash type)a
-  @optional_attrs ~w(cataloged decimals name symbol total_supply skip_metadata total_supply_updated_at_block metadata_updated_at updated_at fiat_value circulating_market_cap icon_url is_verified_via_admin_panel volume_24h)a
+  @optional_attrs ~w(cataloged decimals name symbol total_supply skip_metadata total_supply_updated_at_block metadata_updated_at updated_at fiat_value circulating_market_cap icon_url is_verified_via_admin_panel volume_24h extensions scaled_ui_base_multiplier scaled_ui_pending_multiplier scaled_ui_pending_effective_at scaled_ui_capability_block scaled_ui_scheduled_ext scaled_ui_iface_checked scaled_ui_timeline_status scaled_ui_tainted_from_block)a
 
   @doc """
     Returns the **ordered** list of allowed NFT type labels.
