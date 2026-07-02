@@ -437,4 +437,63 @@ defmodule Explorer.Chain.TokenTransferTest do
       assert hd(transfers).token_ids == nil
     end
   end
+
+  describe "changeset/2 ERC-8056 snapshot fields" do
+    test "casts ui_value, ui_multiplier and ui_amount_status" do
+      transaction = insert(:transaction) |> with_block()
+      transfer = insert(:token_transfer, transaction: transaction)
+
+      params = %{
+        block_number: transfer.block_number,
+        log_index: transfer.log_index,
+        from_address_hash: transfer.from_address_hash,
+        to_address_hash: transfer.to_address_hash,
+        token_contract_address_hash: transfer.token_contract_address_hash,
+        block_hash: transfer.block_hash,
+        transaction_hash: transfer.transaction_hash,
+        token_type: "ERC-20",
+        ui_value: Decimal.new("3672865380000000000"),
+        ui_multiplier: Decimal.new("1000000000000000000"),
+        ui_amount_status: "ok"
+      }
+
+      changeset = TokenTransfer.changeset(%TokenTransfer{}, params)
+      assert changeset.valid?
+      assert Ecto.Changeset.get_change(changeset, :ui_value) == Decimal.new("3672865380000000000")
+      assert Ecto.Changeset.get_change(changeset, :ui_amount_status) == "ok"
+    end
+
+    test "changeset rejects unknown ui_amount_status (non-bulk callers)" do
+      transaction = insert(:transaction) |> with_block()
+      transfer = insert(:token_transfer, transaction: transaction)
+
+      changeset =
+        TokenTransfer.changeset(%TokenTransfer{}, %{
+          block_number: transfer.block_number,
+          log_index: transfer.log_index,
+          from_address_hash: transfer.from_address_hash,
+          to_address_hash: transfer.to_address_hash,
+          token_contract_address_hash: transfer.token_contract_address_hash,
+          block_hash: transfer.block_hash,
+          transaction_hash: transfer.transaction_hash,
+          token_type: "ERC-20",
+          ui_amount_status: "bogus"
+        })
+
+      refute changeset.valid?
+      assert %{ui_amount_status: _} = changeset_errors(changeset)
+    end
+
+    test "DB CHECK rejects invalid ui_amount_status even via raw insert (bulk-import path)" do
+      transaction = insert(:transaction) |> with_block()
+      transfer = insert(:token_transfer, transaction: transaction)
+
+      assert_raise Postgrex.Error, fn ->
+        Repo.query!(
+          "UPDATE token_transfers SET ui_amount_status = 'bogus' WHERE block_hash = $1 AND log_index = $2",
+          [transfer.block_hash.bytes, transfer.log_index]
+        )
+      end
+    end
+  end
 end

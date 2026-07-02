@@ -60,6 +60,9 @@ defmodule Explorer.Chain.TokenTransfer.Schema do
         field(:token_decimals, :decimal, virtual: true)
         field(:token_type, :string)
         field(:block_consensus, :boolean)
+        field(:ui_value, :decimal)
+        field(:ui_multiplier, :decimal)
+        field(:ui_amount_status, :string)
         field(:token_instance, :any, virtual: true) :: Instance.t() | nil
 
         belongs_to(:from_address, Address,
@@ -205,7 +208,7 @@ defmodule Explorer.Chain.TokenTransfer do
                           _ ->
                             [:transaction_hash | &1]
                         end)).()
-  @optional_attrs ~w(amount amounts token_ids block_consensus)a
+  @optional_attrs ~w(amount amounts token_ids block_consensus ui_value ui_multiplier ui_amount_status)a
                   |> (&(case @chain_identity do
                           {:optimism, :celo} ->
                             [:transaction_hash | &1]
@@ -219,6 +222,7 @@ defmodule Explorer.Chain.TokenTransfer do
     struct
     |> cast(params, @required_attrs ++ @optional_attrs)
     |> validate_required(@required_attrs)
+    |> validate_inclusion(:ui_amount_status, ~w(ok overflow unknown mismatch event_missing))
     |> foreign_key_constraint(:transaction)
   end
 
