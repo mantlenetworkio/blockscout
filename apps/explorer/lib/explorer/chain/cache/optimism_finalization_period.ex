@@ -1,13 +1,19 @@
 defmodule Explorer.Chain.Cache.OptimismFinalizationPeriod do
   @moduledoc """
   Caches Optimism Finalization period.
+
+  The cached value expires after `global_ttl` and is then re-fetched from the
+  L2OutputOracle contract, so on-chain changes of FINALIZATION_PERIOD_SECONDS
+  are picked up without a node restart.
   """
 
   require Logger
 
   use Explorer.Chain.MapCache,
     name: :optimism_finalization_period,
-    key: :period
+    key: :period,
+    ttl_check_interval: :timer.minutes(1),
+    global_ttl: :timer.minutes(5)
 
   import EthereumJSONRPC, only: [json_rpc: 2, quantity_to_integer: 1]
 
