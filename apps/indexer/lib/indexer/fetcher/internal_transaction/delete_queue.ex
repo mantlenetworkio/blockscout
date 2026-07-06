@@ -50,18 +50,24 @@ defmodule Indexer.Fetcher.InternalTransaction.DeleteQueue do
 
   @impl BufferedTask
   def run(block_numbers, _state) when is_list(block_numbers) do
+    # massive blocks make this transaction exceed the default repo timeout:
+    # deleting tens of thousands of internal transactions plus re-inserting
+    # as many pending operations doesn't fit into the 60s connection window
     result =
-      Repo.transaction(fn ->
-        DeleteQueue
-        |> where([dq], dq.block_number in ^block_numbers)
-        |> Repo.delete_all(timeout: :infinity)
+      Repo.transaction(
+        fn ->
+          DeleteQueue
+          |> where([dq], dq.block_number in ^block_numbers)
+          |> Repo.delete_all(timeout: :infinity)
 
-        InternalTransaction
-        |> where([it], it.block_number in ^block_numbers)
-        |> Repo.delete_all(timeout: :infinity)
+          InternalTransaction
+          |> where([it], it.block_number in ^block_numbers)
+          |> Repo.delete_all(timeout: :infinity)
 
-        PendingOperationsHelper.insert_pending_operations(block_numbers)
-      end)
+          PendingOperationsHelper.insert_pending_operations(block_numbers)
+        end,
+        timeout: :infinity
+      )
 
     case result do
       {:ok, {block_numbers, transactions}} ->

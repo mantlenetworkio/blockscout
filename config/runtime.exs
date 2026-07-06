@@ -1225,6 +1225,9 @@ config :indexer, Indexer.Fetcher.Stats.HotSmartContracts.Supervisor,
   disabled?: ConfigHelper.parse_bool_env_var("INDEXER_DISABLE_HOT_SMART_CONTRACTS_FETCHER"),
   enabled: !ConfigHelper.parse_bool_env_var("INDEXER_DISABLE_HOT_SMART_CONTRACTS_FETCHER")
 
+config :indexer, Indexer.Fetcher.Stats.HotSmartContracts,
+  min_chain_age_days: ConfigHelper.parse_integer_env_var("INDEXER_HOT_SMART_CONTRACTS_MIN_CHAIN_AGE_DAYS", 30)
+
 config :indexer, Indexer.Fetcher.EmptyBlocksSanitizer,
   batch_size: ConfigHelper.parse_integer_env_var("INDEXER_EMPTY_BLOCKS_SANITIZER_BATCH_SIZE", 10),
   interval: ConfigHelper.parse_time_env_var("INDEXER_EMPTY_BLOCKS_SANITIZER_INTERVAL", "10s"),

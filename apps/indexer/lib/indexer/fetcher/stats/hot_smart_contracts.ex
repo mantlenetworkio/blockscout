@@ -14,7 +14,11 @@ defmodule Indexer.Fetcher.Stats.HotSmartContracts do
 
   @retry_interval 10_000
   @max_days_ago 30
-  @min_chain_age_days 30
+  @default_min_chain_age_days 30
+
+  defp min_chain_age_days do
+    Application.get_env(:indexer, __MODULE__)[:min_chain_age_days] || @default_min_chain_age_days
+  end
 
   @spec start_link(any()) :: :ignore | {:error, any()} | {:ok, pid()}
   def start_link(_) do
@@ -108,7 +112,7 @@ defmodule Indexer.Fetcher.Stats.HotSmartContracts do
 
       {:wait, delay_ms} ->
         Logger.info(
-          "Hot contracts module delayed: chain is less than #{@min_chain_age_days} days old. Rescheduling startup check."
+          "Hot contracts module delayed: chain is less than #{min_chain_age_days()} days old. Rescheduling startup check."
         )
 
         Process.send_after(self(), :check_chain_age, delay_ms)
@@ -133,12 +137,13 @@ defmodule Indexer.Fetcher.Stats.HotSmartContracts do
       {:ok, block} ->
         now = DateTime.utc_now()
         age_days = DateTime.diff(now, block.timestamp, :day)
+        min_age_days = min_chain_age_days()
 
-        if age_days >= @min_chain_age_days do
+        if age_days >= min_age_days do
           :ok
         else
-          # Calculate delay until chain reaches 30 days old, or next day if that's sooner
-          target_date = DateTime.add(block.timestamp, @min_chain_age_days, :day)
+          # Calculate delay until chain reaches the configured min age, or next day if that's sooner
+          target_date = DateTime.add(block.timestamp, min_age_days, :day)
           next_day = Date.utc_today() |> Date.add(1) |> DateTime.new!(~T[00:00:00], "Etc/UTC")
 
           delay_target = DateTime.diff(target_date, now, :millisecond)

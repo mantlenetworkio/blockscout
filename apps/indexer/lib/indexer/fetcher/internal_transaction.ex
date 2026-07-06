@@ -24,6 +24,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
   alias Explorer.Chain
   alias Explorer.Chain.{Block, Hash, PendingBlockOperation, PendingTransactionOperation, Transaction}
   alias Explorer.Chain.Cache.{Accounts, Blocks}
+  alias Explorer.Utility.InternalTransactionHelper
   alias Indexer.{BufferedTask, Tracer}
   alias Indexer.Transform.{AddressCoinBalances, Addresses, AddressTokenBalances}
   alias Indexer.Transform.Celo.TransactionTokenTransfers, as: CeloTransactionTokenTransfers
@@ -49,18 +50,23 @@ defmodule Indexer.Fetcher.InternalTransaction do
   *Note*: The internal transactions for individual transactions cannot be paginated,
   so the total number of internal transactions that could be produced is unknown.
   """
-  @spec async_fetch([Block.block_number()], [Transaction.t()], boolean(), boolean(), integer()) :: :ok
+  @spec async_fetch([Block.block_number()], [Transaction.t() | map()], boolean(), boolean(), integer()) :: :ok
   def async_fetch(block_numbers, transactions, realtime?, for_contract_creator? \\ false, timeout \\ 5000)
       when is_list(block_numbers) do
-    if disabled?() && !for_contract_creator? do
-      :ok
-    else
-      data =
-        block_numbers
-        |> data_for_buffer(transactions)
-        |> RangesHelper.filter_traceable_block_numbers()
+    cond do
+      !InternalTransactionHelper.primary_key_updated?() ->
+        :ok
 
-      BufferedTask.buffer(__MODULE__, data, realtime?, timeout)
+      disabled?() && !for_contract_creator? ->
+        :ok
+
+      true ->
+        data =
+          block_numbers
+          |> data_for_buffer(transactions)
+          |> RangesHelper.filter_traceable_block_numbers()
+
+        BufferedTask.buffer(__MODULE__, data, realtime?, timeout)
     end
   end
 
@@ -95,41 +101,46 @@ defmodule Indexer.Fetcher.InternalTransaction do
   def init(initial, reducer, json_rpc_named_arguments) do
     stream_reducer = RangesHelper.stream_reducer_traceable(reducer)
 
-    if disabled?() do
-      {:ok, final} =
-        case queue_data_type(json_rpc_named_arguments) do
-          :block_number ->
-            PendingBlockOperation.stream_blocks_with_unfetched_internal_transactions(
-              initial,
-              stream_reducer,
-              false,
-              true
-            )
+    cond do
+      !InternalTransactionHelper.primary_key_updated?() ->
+        initial
 
-          :transaction_params ->
-            PendingTransactionOperation.stream_transactions_with_unfetched_internal_transactions(
-              initial,
-              stream_reducer,
-              false,
-              true
-            )
-        end
+      disabled?() ->
+        {:ok, final} =
+          case queue_data_type(json_rpc_named_arguments) do
+            :block_number ->
+              PendingBlockOperation.stream_blocks_with_unfetched_internal_transactions(
+                initial,
+                stream_reducer,
+                false,
+                true
+              )
 
-      final
-    else
-      {:ok, final} =
-        case queue_data_type(json_rpc_named_arguments) do
-          :block_number ->
-            PendingBlockOperation.stream_blocks_with_unfetched_internal_transactions(initial, stream_reducer)
+            :transaction_params ->
+              PendingTransactionOperation.stream_transactions_with_unfetched_internal_transactions(
+                initial,
+                stream_reducer,
+                false,
+                true
+              )
+          end
 
-          :transaction_params ->
-            PendingTransactionOperation.stream_transactions_with_unfetched_internal_transactions(
-              initial,
-              stream_reducer
-            )
-        end
+        final
 
-      final
+      true ->
+        {:ok, final} =
+          case queue_data_type(json_rpc_named_arguments) do
+            :block_number ->
+              PendingBlockOperation.stream_blocks_with_unfetched_internal_transactions(initial, stream_reducer)
+
+            :transaction_params ->
+              PendingTransactionOperation.stream_transactions_with_unfetched_internal_transactions(
+                initial,
+                stream_reducer
+              )
+          end
+
+        final
     end
   end
 
@@ -145,9 +156,16 @@ defmodule Indexer.Fetcher.InternalTransaction do
               tracer: Tracer
             )
   def run(block_numbers_or_transactions, json_rpc_named_arguments) do
-    data_type = queue_data_type(json_rpc_named_arguments)
-    filtered_data = filter_block_numbers(block_numbers_or_transactions, data_type, json_rpc_named_arguments)
+    if InternalTransactionHelper.primary_key_updated?() do
+      data_type = queue_data_type(json_rpc_named_arguments)
+      filtered_data = filter_block_numbers(block_numbers_or_transactions, data_type, json_rpc_named_arguments)
+      do_run(filtered_data, json_rpc_named_arguments, data_type)
+    else
+      :ok
+    end
+  end
 
+  defp do_run(filtered_data, json_rpc_named_arguments, data_type) do
     case fetch_internal_transactions(filtered_data, json_rpc_named_arguments, data_type) do
       {:ok, internal_transactions_params} ->
         safe_import_internal_transaction(internal_transactions_params, filtered_data, data_type)
