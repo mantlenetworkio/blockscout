@@ -10,6 +10,7 @@ defmodule Explorer.Chain.Import.Stage.TokenReferencing do
   @ctb_runner Runner.Address.CurrentTokenBalances
 
   @rest_runners [
+    Runner.ScaledUiMultiplierUpdates,
     Runner.Address.TokenBalances
   ]
 

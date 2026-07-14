@@ -56,6 +56,7 @@ defmodule Indexer.Block.Fetcher do
     AddressTokenBalances,
     FheOperations,
     MintTransfers,
+    ScaledUiMultiplierUpdates,
     SignedAuthorizations,
     TokenInstances,
     TokenTransfers
@@ -104,6 +105,7 @@ defmodule Indexer.Block.Fetcher do
                 block_rewards: Import.Runner.options(),
                 broadcast: term(),
                 logs: Import.Runner.options(),
+                scaled_ui_multiplier_updates: Import.Runner.options(),
                 token_transfers: Import.Runner.options(),
                 tokens: Import.Runner.options(),
                 transactions: Import.Runner.options()
@@ -183,6 +185,8 @@ defmodule Indexer.Block.Fetcher do
          transactions_with_receipts = Receipts.put(transactions_params_without_receipts, receipts),
          celo_epoch_logs = CeloEpochLogs.fetch(blocks, json_rpc_named_arguments),
          logs = maybe_set_new_log_index(receipt_logs) ++ celo_epoch_logs,
+         block_timestamps = Map.new(blocks, &{&1.number, &1.timestamp}),
+         scaled_ui_multiplier_updates = ScaledUiMultiplierUpdates.parse(logs, block_timestamps),
          %{token_transfers: token_transfers, tokens: tokens} = TokenTransfers.parse(logs),
          %{token_transfers: celo_native_token_transfers, tokens: celo_tokens} =
            CeloTransactionTokenTransfers.parse_transactions(transactions_with_receipts),
@@ -249,6 +253,7 @@ defmodule Indexer.Block.Fetcher do
            block_second_degree_relations: %{params: block_second_degree_relations_params},
            block_rewards: %{errors: beneficiaries_errors, params: beneficiaries_with_gas_payment},
            logs: %{params: logs},
+           scaled_ui_multiplier_updates: %{params: scaled_ui_multiplier_updates},
            token_transfers: %{params: token_transfers},
            tokens: %{params: tokens},
            transactions: %{params: transactions_with_receipts},
