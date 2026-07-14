@@ -76,18 +76,28 @@ defmodule Explorer.Chain.ScaledUiMultiplierUpdate do
   defp validate_event_shape(changeset) do
     case get_field(changeset, :event_type) do
       "updated" ->
-        validate_required(changeset, [:old_multiplier, :new_multiplier, :effective_at])
+        changeset
+        |> validate_required([:old_multiplier, :new_multiplier, :effective_at])
+        |> validate_absent([:overwritten_multiplier, :overwritten_effective_at])
 
       "overwritten" ->
-        validate_required(changeset, [
+        changeset
+        |> validate_required([
           :new_multiplier,
           :effective_at,
           :overwritten_multiplier,
           :overwritten_effective_at
         ])
+        |> validate_absent([:old_multiplier])
 
       _ ->
         changeset
     end
+  end
+
+  defp validate_absent(changeset, fields) do
+    Enum.reduce(fields, changeset, fn field, acc ->
+      if is_nil(get_field(acc, field)), do: acc, else: add_error(acc, field, "must be blank")
+    end)
   end
 end

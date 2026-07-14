@@ -233,67 +233,46 @@ defmodule Explorer.Chain.TokenTest do
     end
   end
 
-  describe "changeset/2 ERC-8056 fields" do
-    test "casts extensions, scaled_ui and taint columns and persists them" do
+  describe "changeset/2 ERC-8056 extensions and scaled_ui_state association" do
+    test "casts and persists extensions" do
       address = insert(:address)
 
-      params = %{
-        contract_address_hash: address.hash,
-        type: "ERC-20",
-        extensions: ["ERC-8056"],
-        scaled_ui_base_multiplier: Decimal.new("1000000000000000000"),
-        scaled_ui_pending_multiplier: Decimal.new("2000000000000000000"),
-        scaled_ui_pending_effective_at: Decimal.new("1900000000"),
-        scaled_ui_capability_block: 100,
-        scaled_ui_scheduled_ext: true,
-        scaled_ui_iface_checked: true,
-        scaled_ui_timeline_status: "tainted",
-        scaled_ui_tainted_from_block: 250
-      }
+      changeset =
+        Token.changeset(%Token{}, %{
+          contract_address_hash: address.hash,
+          type: "ERC-20",
+          extensions: ["ERC-8056"]
+        })
 
-      changeset = Token.changeset(%Token{}, params)
       assert changeset.valid?
-
       {:ok, _} = Repo.insert(changeset)
+
       reloaded = Repo.get_by(Token, contract_address_hash: address.hash)
-
       assert reloaded.extensions == ["ERC-8056"]
-      assert Decimal.equal?(reloaded.scaled_ui_base_multiplier, Decimal.new("1000000000000000000"))
-      assert Decimal.equal?(reloaded.scaled_ui_pending_multiplier, Decimal.new("2000000000000000000"))
-      assert Decimal.equal?(reloaded.scaled_ui_pending_effective_at, Decimal.new("1900000000"))
-      assert reloaded.scaled_ui_capability_block == 100
-      assert reloaded.scaled_ui_scheduled_ext == true
-      assert reloaded.scaled_ui_iface_checked == true
-      assert reloaded.scaled_ui_timeline_status == "tainted"
-      assert reloaded.scaled_ui_tainted_from_block == 250
     end
 
-    test "scaled_ui_iface_checked defaults to false at DB and struct level" do
+    test "preloads scaled_ui_state side-table row" do
       address = insert(:address)
-      # struct-level default (cross-review #19)
-      assert %Token{}.scaled_ui_iface_checked == false
-
-      {:ok, token} = Repo.insert(Token.changeset(%Token{}, %{contract_address_hash: address.hash, type: "ERC-20"}))
-      reloaded = Repo.get_by(Token, contract_address_hash: token.contract_address_hash)
-      assert reloaded.scaled_ui_iface_checked == false
-    end
-
-    test "persists maximum uint256 multiplier without precision loss" do
-      address = insert(:address)
-      # 2^256 - 1 as a Decimal, no float. Bitwise.<<<(1, 256) closes the call, then - 1.
-      max_uint256 = Decimal.new(Integer.to_string(Bitwise.<<<(1, 256) - 1))
 
       {:ok, _} =
         Repo.insert(
-          Token.changeset(%Token{}, %{
-            contract_address_hash: address.hash,
-            type: "ERC-20",
-            scaled_ui_base_multiplier: max_uint256
+          Token.changeset(%Token{}, %{contract_address_hash: address.hash, type: "ERC-20", extensions: ["ERC-8056"]})
+        )
+
+      {:ok, _} =
+        Repo.insert(
+          Explorer.Chain.ScaledUi.TokenState.changeset(%Explorer.Chain.ScaledUi.TokenState{}, %{
+            token_contract_address_hash: address.hash,
+            capability_block: 100
           })
         )
 
-      reloaded = Repo.get_by(Token, contract_address_hash: address.hash)
-      assert Decimal.equal?(reloaded.scaled_ui_base_multiplier, max_uint256)
+      reloaded =
+        Token
+        |> Repo.get_by(contract_address_hash: address.hash)
+        |> Repo.preload(:scaled_ui_state)
+
+      assert reloaded.scaled_ui_state.capability_block == 100
     end
   end
 end

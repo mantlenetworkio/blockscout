@@ -488,12 +488,11 @@ defmodule Explorer.Chain.TokenTransferTest do
       transaction = insert(:transaction) |> with_block()
       transfer = insert(:token_transfer, transaction: transaction)
 
-      assert_raise Postgrex.Error, fn ->
-        Repo.query!(
-          "UPDATE token_transfers SET ui_amount_status = 'bogus' WHERE block_hash = $1 AND log_index = $2",
-          [transfer.block_hash.bytes, transfer.log_index]
-        )
-      end
+      assert {:error, %Postgrex.Error{postgres: %{constraint: "ui_amount_status_known"}}} =
+               Repo.query(
+                 "UPDATE token_transfers SET ui_amount_status = 'bogus' WHERE block_hash = $1 AND log_index = $2",
+                 [transfer.block_hash.bytes, transfer.log_index]
+               )
     end
   end
 end

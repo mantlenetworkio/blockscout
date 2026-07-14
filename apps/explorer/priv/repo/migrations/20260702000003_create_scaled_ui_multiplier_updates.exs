@@ -52,19 +52,29 @@ defmodule Explorer.Repo.Migrations.CreateScaledUiMultiplierUpdates do
       constraint(:scaled_ui_multiplier_updates, :overwritten_row_shape,
         check: """
         event_type <> 'overwritten' OR
-        (new_multiplier IS NOT NULL AND effective_at IS NOT NULL
+        (old_multiplier IS NULL AND new_multiplier IS NOT NULL AND effective_at IS NOT NULL
          AND overwritten_multiplier IS NOT NULL AND overwritten_effective_at IS NOT NULL)
         """
       )
     )
 
     # timeline query (token + effective time)
-    create(index(:scaled_ui_multiplier_updates, [:token_contract_address_hash, :effective_at]))
+    create(
+      index(:scaled_ui_multiplier_updates, [:token_contract_address_hash, :effective_at],
+        name: :scaled_ui_updates_token_effective_index
+      )
+    )
+
     # replay ordering (token + block/log)
-    create(index(:scaled_ui_multiplier_updates, [:token_contract_address_hash, :block_number, :log_index]))
+    create(
+      index(:scaled_ui_multiplier_updates, [:token_contract_address_hash, :block_number, :log_index],
+        name: :scaled_ui_updates_token_block_log_index
+      )
+    )
+
     # reorg rollback (by block_hash)
-    create(index(:scaled_ui_multiplier_updates, [:block_hash]))
+    create(index(:scaled_ui_multiplier_updates, [:block_hash], name: :scaled_ui_updates_block_hash_index))
     # event pairing / diagnostics
-    create(index(:scaled_ui_multiplier_updates, [:transaction_hash]))
+    create(index(:scaled_ui_multiplier_updates, [:transaction_hash], name: :scaled_ui_updates_transaction_hash_index))
   end
 end
