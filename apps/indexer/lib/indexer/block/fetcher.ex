@@ -21,6 +21,7 @@ defmodule Indexer.Block.Fetcher do
   alias Explorer.Chain.Cache.Blocks, as: BlocksCache
   alias Explorer.Chain.Celo.Legacy.Accounts, as: CeloAccountsTransform
   alias Explorer.Chain.Filecoin.PendingAddressOperation, as: FilecoinPendingAddressOperation
+  alias Explorer.Chain.ScaledUi.Annotator, as: ScaledUiAnnotator
   alias Indexer.Block.Catchup.Fetcher, as: CatchupFetcher
   alias Indexer.Block.Catchup.MassiveBlocksFetcher
   alias Indexer.Block.Fetcher.Receipts
@@ -193,7 +194,13 @@ defmodule Indexer.Block.Fetcher do
          %{token_transfers: celo_native_token_transfers, tokens: celo_tokens} =
            CeloTransactionTokenTransfers.parse_transactions(transactions_with_receipts),
          celo_gas_tokens = CeloTransactionGasTokens.parse(transactions_with_receipts),
-         token_transfers = token_transfers ++ celo_native_token_transfers,
+         token_transfers =
+           (token_transfers ++ celo_native_token_transfers)
+           |> ScaledUiAnnotator.annotate(%{
+             updates: scaled_ui_multiplier_updates,
+             capability_rows: scaled_ui_token_states,
+             block_timestamps: block_timestamps
+           }),
          celo_l1_epochs = CeloL1Epochs.parse(blocks),
          celo_l2_epochs = CeloL2Epochs.parse(logs),
          celo_pending_account_operations = parse_celo_pending_account_operations(logs),

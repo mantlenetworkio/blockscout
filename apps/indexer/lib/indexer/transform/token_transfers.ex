@@ -14,6 +14,7 @@ defmodule Indexer.Transform.TokenTransfers do
   import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
   import Explorer.Helper, only: [decode_data: 2, truncate_address_hash: 1]
 
+  alias Explorer.Chain.ScaledUi.Events
   alias Explorer.Chain.{Hash, Token, TokenTransfer}
   alias Explorer.Repo
   alias Indexer.Fetcher.TokenTotalSupplyUpdater
@@ -89,7 +90,11 @@ defmodule Indexer.Transform.TokenTransfers do
         erc20_and_erc721_token_transfers.token_transfers ++ weth_transfers.token_transfers
 
     tokens = sanitize_token_types(rough_tokens, rough_token_transfers)
-    token_transfers = sanitize_weth_transfers(tokens, rough_token_transfers, weth_transfers.token_transfers)
+
+    token_transfers =
+      tokens
+      |> sanitize_weth_transfers(rough_token_transfers, weth_transfers.token_transfers)
+      |> pair_scaled_ui_events(logs)
 
     if !skip_additional_fetchers? do
       token_transfers
@@ -105,6 +110,110 @@ defmodule Indexer.Transform.TokenTransfers do
     }
 
     token_transfers_from_logs_uniq
+  end
+
+  defp pair_scaled_ui_events(token_transfers, logs) do
+    ui_events =
+      logs
+      |> Enum.filter(&(&1.first_topic == Events.transfer_with_ui_amount_topic()))
+      |> Enum.flat_map(&parse_scaled_ui_event/1)
+
+    transfers_by_group =
+      token_transfers
+      |> Enum.filter(&(&1.token_type == "ERC-20"))
+      |> Enum.group_by(&scaled_ui_group_key/1)
+
+    ui_events_by_group = Enum.group_by(ui_events, &scaled_ui_group_key/1)
+
+    matches =
+      Enum.reduce(transfers_by_group, %{}, fn {group_key, transfers}, matches ->
+        group_matches = match_scaled_ui_group(transfers, Map.get(ui_events_by_group, group_key, []))
+        Map.merge(matches, group_matches)
+      end)
+
+    orphan_count = length(ui_events) - map_size(matches)
+
+    if orphan_count > 0 do
+      :telemetry.execute([:indexer, :scaled_ui, :orphan_ui_event], %{count: orphan_count}, %{})
+    end
+
+    Enum.map(token_transfers, fn transfer ->
+      case Map.fetch(matches, token_transfer_to_key(transfer)) do
+        {:ok, ui_value} -> Map.put(transfer, :ui_value, ui_value)
+        :error -> transfer
+      end
+    end)
+  end
+
+  defp parse_scaled_ui_event(log) do
+    [amount, ui_value] = decode_data(log.data, [{:uint, 256}, {:uint, 256}])
+
+    [
+      %{
+        amount: Decimal.new(amount),
+        block_hash: log.block_hash,
+        from_address_hash: truncate_address_hash(log.second_topic),
+        log_index: log.index,
+        to_address_hash: truncate_address_hash(log.third_topic),
+        token_contract_address_hash: log.address_hash,
+        transaction_hash: log.transaction_hash,
+        ui_value: Decimal.new(ui_value)
+      }
+    ]
+  rescue
+    error in [FunctionClauseError, MatchError] ->
+      Logger.error(fn ->
+        ["Unknown TransferWithUIAmount format: #{inspect(log)}", Exception.format(:error, error, __STACKTRACE__)]
+      end)
+
+      []
+  end
+
+  defp match_scaled_ui_group(transfers, ui_events) do
+    transfers = Enum.sort_by(transfers, & &1.log_index)
+    ui_events = Enum.sort_by(ui_events, & &1.log_index)
+
+    {adjacent_matches, unmatched_transfers, remaining_ui_events} =
+      match_scaled_ui_events(transfers, ui_events, %{}, &adjacent_scaled_ui_event?/2)
+
+    {matches, _unmatched_transfers, _remaining_ui_events} =
+      match_scaled_ui_events(unmatched_transfers, remaining_ui_events, adjacent_matches, &scaled_ui_content_matches?/2)
+
+    matches
+  end
+
+  defp match_scaled_ui_events(transfers, ui_events, matches, matcher) do
+    Enum.reduce(transfers, {matches, [], ui_events}, fn transfer, {matches, unmatched, ui_events} ->
+      case take_first_match(ui_events, &matcher.(transfer, &1)) do
+        {nil, ui_events} ->
+          {matches, [transfer | unmatched], ui_events}
+
+        {ui_event, ui_events} ->
+          {Map.put(matches, token_transfer_to_key(transfer), ui_event.ui_value), unmatched, ui_events}
+      end
+    end)
+    |> then(fn {matches, unmatched, ui_events} -> {matches, Enum.reverse(unmatched), ui_events} end)
+  end
+
+  defp take_first_match(events, matcher) do
+    case Enum.split_while(events, &(not matcher.(&1))) do
+      {before, [event | after_events]} -> {event, before ++ after_events}
+      {_before, []} -> {nil, events}
+    end
+  end
+
+  defp adjacent_scaled_ui_event?(transfer, ui_event) do
+    abs(transfer.log_index - ui_event.log_index) == 1 and scaled_ui_content_matches?(transfer, ui_event)
+  end
+
+  defp scaled_ui_content_matches?(transfer, ui_event) do
+    transfer.from_address_hash == ui_event.from_address_hash and
+      transfer.to_address_hash == ui_event.to_address_hash and
+      Decimal.equal?(transfer.amount, ui_event.amount)
+  end
+
+  defp scaled_ui_group_key(event) do
+    {event.block_hash, event.transaction_hash, event.token_contract_address_hash}
   end
 
   defp drop_repeated_token_transfers(weth_acc, erc_20_721_token_transfers) do
