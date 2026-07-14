@@ -88,9 +88,28 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
   end
 
   if @bridged_tokens_enabled do
-    @default_fields_to_replace [:name, :symbol, :total_supply, :decimals, :type, :cataloged, :bridged, :skip_metadata]
+    @default_fields_to_replace [
+      :name,
+      :symbol,
+      :total_supply,
+      :decimals,
+      :type,
+      :cataloged,
+      :bridged,
+      :skip_metadata,
+      :extensions
+    ]
   else
-    @default_fields_to_replace [:name, :symbol, :total_supply, :decimals, :type, :cataloged, :skip_metadata]
+    @default_fields_to_replace [
+      :name,
+      :symbol,
+      :total_supply,
+      :decimals,
+      :type,
+      :cataloged,
+      :skip_metadata,
+      :extensions
+    ]
   end
 
   @impl Import.Runner
@@ -184,6 +203,16 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
     {:ok, filtered_tokens}
   end
 
+  defmacrop merged_extensions(token) do
+    quote do
+      fragment(
+        "CASE WHEN EXCLUDED.extensions IS NULL THEN ? ELSE NULLIF(ARRAY(SELECT DISTINCT value FROM unnest(COALESCE(?, '{}') || EXCLUDED.extensions) AS value ORDER BY value), '{}') END",
+        unquote(token).extensions,
+        unquote(token).extensions
+      )
+    end
+  end
+
   if @bridged_tokens_enabled do
     def default_on_conflict do
       from(
@@ -198,6 +227,7 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
             cataloged: fragment("COALESCE(EXCLUDED.cataloged, ?)", token.cataloged),
             bridged: fragment("COALESCE(EXCLUDED.bridged, ?)", token.bridged),
             skip_metadata: fragment("COALESCE(EXCLUDED.skip_metadata, ?)", token.skip_metadata),
+            extensions: merged_extensions(token),
             # `holder_count` and `transfer_count` are not updated as a pre-existing token means these counts are already initialized OR
             #   need to be migrated with `priv/repo/migrations/scripts/update_new_tokens_holder_count_in_batches.sql.exs`
             # Don't update `contract_address_hash` as it is the primary key and used for the conflict target
@@ -207,7 +237,7 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
         ],
         where:
           fragment(
-            "(EXCLUDED.name, EXCLUDED.symbol, EXCLUDED.total_supply, EXCLUDED.decimals, EXCLUDED.type, EXCLUDED.cataloged, EXCLUDED.bridged, EXCLUDED.skip_metadata) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(EXCLUDED.name, EXCLUDED.symbol, EXCLUDED.total_supply, EXCLUDED.decimals, EXCLUDED.type, EXCLUDED.cataloged, EXCLUDED.bridged, EXCLUDED.skip_metadata) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?) OR ? IS DISTINCT FROM ?",
             token.name,
             token.symbol,
             token.total_supply,
@@ -215,7 +245,9 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
             token.type,
             token.cataloged,
             token.bridged,
-            token.skip_metadata
+            token.skip_metadata,
+            merged_extensions(token),
+            token.extensions
           )
       )
     end
@@ -232,6 +264,7 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
             type: fragment("COALESCE(EXCLUDED.type, ?)", token.type),
             cataloged: fragment("COALESCE(EXCLUDED.cataloged, ?)", token.cataloged),
             skip_metadata: fragment("COALESCE(EXCLUDED.skip_metadata, ?)", token.skip_metadata),
+            extensions: merged_extensions(token),
             # `holder_count` is not updated as a pre-existing token means the `holder_count` is already initialized OR
             #   need to be migrated with `priv/repo/migrations/scripts/update_new_tokens_holder_count_in_batches.sql.exs`
             # Don't update `contract_address_hash` as it is the primary key and used for the conflict target
@@ -241,14 +274,16 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
         ],
         where:
           fragment(
-            "(EXCLUDED.name, EXCLUDED.symbol, EXCLUDED.total_supply, EXCLUDED.decimals, EXCLUDED.type, EXCLUDED.cataloged, EXCLUDED.skip_metadata) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?)",
+            "(EXCLUDED.name, EXCLUDED.symbol, EXCLUDED.total_supply, EXCLUDED.decimals, EXCLUDED.type, EXCLUDED.cataloged, EXCLUDED.skip_metadata) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?) OR ? IS DISTINCT FROM ?",
             token.name,
             token.symbol,
             token.total_supply,
             token.decimals,
             token.type,
             token.cataloged,
-            token.skip_metadata
+            token.skip_metadata,
+            merged_extensions(token),
+            token.extensions
           )
       )
     end
@@ -311,11 +346,21 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
     new_token_params = Map.take(new_token, fields_to_replace)
 
     Enum.reduce_while(new_token_params, false, fn {key, value}, _acc ->
-      if Map.get(existing_token, key) == value do
+      if field_unchanged?(key, value, Map.get(existing_token, key)) do
         {:cont, false}
       else
         {:halt, true}
       end
     end)
   end
+
+  defp field_unchanged?(:extensions, nil, _existing_extensions), do: true
+
+  defp field_unchanged?(:extensions, new_extensions, existing_extensions) do
+    new_extensions
+    |> MapSet.new()
+    |> MapSet.subset?(MapSet.new(existing_extensions || []))
+  end
+
+  defp field_unchanged?(_key, new_value, existing_value), do: new_value == existing_value
 end

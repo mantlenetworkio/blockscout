@@ -3,7 +3,7 @@ defmodule Explorer.Chain.ScaledUi.TokenStateTest do
 
   import Explorer.Factory
 
-  alias Explorer.Chain.ScaledUi.TokenState
+  alias Explorer.Chain.{ScaledUi.TokenState, ScaledUiMultiplierUpdate, Token}
   alias Explorer.Repo
 
   describe "changeset/2" do
@@ -140,6 +140,62 @@ defmodule Explorer.Chain.ScaledUi.TokenStateTest do
     end
   end
 
+  describe "rebuild/2" do
+    test "records a capability boundary before the token is cataloged" do
+      address = insert(:address)
+
+      assert Repo.get(Token, address.hash) == nil
+
+      assert {:ok, [address.hash]} ==
+               TokenState.rebuild(Repo, [%{token_contract_address_hash: address.hash, capability_block: 50}])
+
+      state = Repo.get!(TokenState, address.hash)
+      assert state.capability_block == 50
+      assert state.timeline_status == nil
+      assert state.base_multiplier == nil
+    end
+
+    test "keeps the earliest capability boundary across repeated rebuilds" do
+      address = insert(:address)
+
+      assert {:ok, [_]} =
+               TokenState.rebuild(Repo, [%{token_contract_address_hash: address.hash, capability_block: 100}])
+
+      assert {:ok, [_]} = TokenState.rebuild(Repo, [%{token_contract_address_hash: address.hash, capability_block: 40}])
+      assert {:ok, [_]} = TokenState.rebuild(Repo, [%{token_contract_address_hash: address.hash, capability_block: 80}])
+
+      assert Repo.get!(TokenState, address.hash).capability_block == 40
+    end
+
+    test "rebuilds multiplier summary from the complete timeline" do
+      address = insert(:address)
+      insert_updated(address, 20, 1, 100, 0, 1_000, 100)
+      insert_updated(address, 30, 1, 200, 1_000, 2_000, 300)
+
+      assert {:ok, [_]} = TokenState.rebuild(Repo, [%{token_contract_address_hash: address.hash, capability_block: 10}])
+
+      state = Repo.get!(TokenState, address.hash)
+      assert state.capability_block == 10
+      assert Decimal.equal?(state.base_multiplier, Decimal.new(1_000))
+      assert Decimal.equal?(state.pending_multiplier, Decimal.new(2_000))
+      assert Decimal.equal?(state.pending_effective_at, Decimal.new(300))
+      assert state.timeline_status == "ok"
+      assert state.tainted_from_block == nil
+    end
+
+    test "persists the first tainted block when timeline anchors break" do
+      address = insert(:address)
+      insert_updated(address, 10, 1, 100, 0, 1_000, 100)
+      insert_updated(address, 25, 1, 200, 999, 2_000, 200)
+
+      assert {:ok, [_]} = TokenState.rebuild(Repo, [%{token_contract_address_hash: address.hash, capability_block: 10}])
+
+      state = Repo.get!(TokenState, address.hash)
+      assert state.timeline_status == "tainted"
+      assert state.tainted_from_block == 25
+    end
+  end
+
   describe "DB combination CHECKs (raw SQL bypassing changeset)" do
     # Bulk import bypasses changesets; each invariant must be enforced by the
     # database itself. A legal-data pass only proves the constraint does not
@@ -197,5 +253,24 @@ defmodule Explorer.Chain.ScaledUi.TokenStateTest do
       assert {:error, %Postgrex.Error{postgres: %{constraint: "iface_result_shape"}}} =
                raw_insert(address, ["iface_checked", "core_ext"], [true, true])
     end
+  end
+
+  defp insert_updated(address, block_number, log_index, timestamp, old_multiplier, new_multiplier, effective_at) do
+    transaction = insert(:transaction) |> with_block(insert(:block, number: block_number))
+
+    %ScaledUiMultiplierUpdate{}
+    |> ScaledUiMultiplierUpdate.changeset(%{
+      token_contract_address_hash: address.hash,
+      transaction_hash: transaction.hash,
+      block_hash: transaction.block_hash,
+      block_number: block_number,
+      block_timestamp: Decimal.new(timestamp),
+      log_index: log_index,
+      event_type: "updated",
+      old_multiplier: Decimal.new(old_multiplier),
+      new_multiplier: Decimal.new(new_multiplier),
+      effective_at: Decimal.new(effective_at)
+    })
+    |> Repo.insert!()
   end
 end

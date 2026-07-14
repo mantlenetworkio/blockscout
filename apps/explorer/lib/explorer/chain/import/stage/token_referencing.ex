@@ -11,6 +11,7 @@ defmodule Explorer.Chain.Import.Stage.TokenReferencing do
 
   @rest_runners [
     Runner.ScaledUiMultiplierUpdates,
+    Runner.ScaledUiTokenStates,
     Runner.Address.TokenBalances
   ]
 

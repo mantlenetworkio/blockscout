@@ -106,6 +106,7 @@ defmodule Indexer.Block.Fetcher do
                 broadcast: term(),
                 logs: Import.Runner.options(),
                 scaled_ui_multiplier_updates: Import.Runner.options(),
+                scaled_ui_token_states: Import.Runner.options(),
                 token_transfers: Import.Runner.options(),
                 tokens: Import.Runner.options(),
                 transactions: Import.Runner.options()
@@ -187,6 +188,7 @@ defmodule Indexer.Block.Fetcher do
          logs = maybe_set_new_log_index(receipt_logs) ++ celo_epoch_logs,
          block_timestamps = Map.new(blocks, &{&1.number, &1.timestamp}),
          scaled_ui_multiplier_updates = ScaledUiMultiplierUpdates.parse(logs, block_timestamps),
+         scaled_ui_token_states = ScaledUiMultiplierUpdates.capability_rows(logs),
          %{token_transfers: token_transfers, tokens: tokens} = TokenTransfers.parse(logs),
          %{token_transfers: celo_native_token_transfers, tokens: celo_tokens} =
            CeloTransactionTokenTransfers.parse_transactions(transactions_with_receipts),
@@ -195,7 +197,11 @@ defmodule Indexer.Block.Fetcher do
          celo_l1_epochs = CeloL1Epochs.parse(blocks),
          celo_l2_epochs = CeloL2Epochs.parse(logs),
          celo_pending_account_operations = parse_celo_pending_account_operations(logs),
-         tokens = Enum.uniq(tokens ++ celo_tokens),
+         tokens =
+           tokens
+           |> Kernel.++(celo_tokens)
+           |> Enum.uniq()
+           |> merge_scaled_ui_extensions(scaled_ui_token_states),
          %{fhe_operations: fhe_operations} = FheOperations.parse(logs),
          %{mint_transfers: mint_transfers} = MintTransfers.parse(logs),
          optimism_withdrawals =
@@ -254,6 +260,7 @@ defmodule Indexer.Block.Fetcher do
            block_rewards: %{errors: beneficiaries_errors, params: beneficiaries_with_gas_payment},
            logs: %{params: logs},
            scaled_ui_multiplier_updates: %{params: scaled_ui_multiplier_updates},
+           scaled_ui_token_states: %{params: scaled_ui_token_states},
            token_transfers: %{params: token_transfers},
            tokens: %{params: tokens},
            transactions: %{params: transactions_with_receipts},
@@ -960,6 +967,21 @@ defmodule Indexer.Block.Fetcher do
         end)
 
       Map.put(token_transfer, :token, token)
+    end)
+  end
+
+  @doc false
+  def merge_scaled_ui_extensions(tokens, capability_rows) do
+    capability_hashes = MapSet.new(capability_rows, & &1.token_contract_address_hash)
+
+    Enum.map(tokens, fn token ->
+      if MapSet.member?(capability_hashes, token.contract_address_hash) do
+        Map.update(token, :extensions, ["ERC-8056"], fn extensions ->
+          Enum.uniq((extensions || []) ++ ["ERC-8056"])
+        end)
+      else
+        token
+      end
     end)
   end
 

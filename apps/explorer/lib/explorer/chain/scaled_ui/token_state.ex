@@ -24,7 +24,10 @@ defmodule Explorer.Chain.ScaledUi.TokenState do
 
   use Explorer.Schema
 
-  alias Explorer.Chain.{Address, Hash}
+  import Ecto.Query, only: [from: 2]
+
+  alias Explorer.Chain.{Address, Hash, ScaledUiMultiplierUpdate}
+  alias Explorer.Chain.ScaledUi.Timeline
 
   @timeline_statuses ~w(ok tainted)
 
@@ -64,6 +67,101 @@ defmodule Explorer.Chain.ScaledUi.TokenState do
     |> validate_interface_results()
     |> foreign_key_constraint(:token_contract_address_hash)
   end
+
+  @doc "Rebuilds capability boundaries and multiplier summaries for the supplied token addresses."
+  @spec rebuild(module(), [map()]) :: {:ok, [Hash.Address.t()]}
+  def rebuild(repo, capability_rows), do: rebuild(repo, capability_rows, [])
+
+  @spec rebuild(module(), [map()], keyword()) :: {:ok, [Hash.Address.t()]}
+  def rebuild(repo, capability_rows, options) when is_list(capability_rows) and is_list(options) do
+    rows = normalize_capability_rows(capability_rows)
+    now = DateTime.utc_now()
+    timeout = Keyword.get(options, :timeout, 60_000)
+
+    create_placeholders(repo, rows, now, timeout)
+
+    states = lock_states(repo, Enum.map(rows, & &1.token_contract_address_hash), timeout)
+    events_by_token = load_events(repo, Enum.map(rows, & &1.token_contract_address_hash), timeout)
+    capability_blocks = Map.new(rows, &{&1.token_contract_address_hash, &1.capability_block})
+
+    Enum.each(states, fn state ->
+      summary = Timeline.replay(Map.get(events_by_token, state.token_contract_address_hash, []))
+
+      state
+      |> changeset(%{
+        base_multiplier: summary.base_multiplier,
+        pending_multiplier: summary.pending_multiplier,
+        pending_effective_at: summary.pending_effective_at,
+        capability_block: earliest_block(state.capability_block, capability_blocks[state.token_contract_address_hash]),
+        timeline_status: summary.timeline_status,
+        tainted_from_block: summary.tainted_from_block
+      })
+      |> repo.update!(timeout: timeout)
+    end)
+
+    {:ok, Enum.map(rows, & &1.token_contract_address_hash)}
+  end
+
+  defp normalize_capability_rows(capability_rows) do
+    capability_rows
+    |> Enum.reduce(%{}, fn row, acc ->
+      hash = Map.fetch!(row, :token_contract_address_hash)
+      block = Map.fetch!(row, :capability_block)
+      Map.update(acc, hash, block, &min(&1, block))
+    end)
+    |> Enum.map(fn {hash, block} -> %{token_contract_address_hash: hash, capability_block: block} end)
+    |> Enum.sort_by(&hash_sort_key(&1.token_contract_address_hash))
+  end
+
+  defp create_placeholders(repo, rows, now, timeout) do
+    placeholders =
+      Enum.map(rows, fn row ->
+        %{
+          token_contract_address_hash: row.token_contract_address_hash,
+          iface_checked: false,
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+
+    repo.insert_all(__MODULE__, placeholders,
+      conflict_target: :token_contract_address_hash,
+      on_conflict: :nothing,
+      timeout: timeout
+    )
+  end
+
+  defp lock_states(repo, token_hashes, timeout) do
+    query =
+      from(state in __MODULE__,
+        where: state.token_contract_address_hash in ^token_hashes,
+        order_by: [asc: state.token_contract_address_hash],
+        lock: "FOR UPDATE"
+      )
+
+    repo.all(query, timeout: timeout)
+  end
+
+  defp load_events(repo, token_hashes, timeout) do
+    query =
+      from(event in ScaledUiMultiplierUpdate,
+        where: event.token_contract_address_hash in ^token_hashes,
+        order_by: [
+          asc: event.token_contract_address_hash,
+          asc: event.block_number,
+          asc: event.log_index
+        ]
+      )
+
+    query
+    |> repo.all(timeout: timeout)
+    |> Enum.group_by(& &1.token_contract_address_hash)
+  end
+
+  defp earliest_block(nil, incoming), do: incoming
+  defp earliest_block(existing, incoming), do: min(existing, incoming)
+
+  defp hash_sort_key(%Hash{bytes: bytes}), do: bytes
 
   defp validate_pending_pair(changeset) do
     pending_multiplier = get_field(changeset, :pending_multiplier)
