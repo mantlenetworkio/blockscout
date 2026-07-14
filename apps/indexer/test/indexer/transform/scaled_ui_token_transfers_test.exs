@@ -11,6 +11,7 @@ defmodule Indexer.Transform.ScaledUiTokenTransfersTest do
   @to "0x4444444444444444444444444444444444444444"
   @transaction_hash "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   @block_hash "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  @zero "0x0000000000000000000000000000000000000000"
 
   describe "parse/2 ERC-8056 pairing" do
     test "pairs an adjacent UI event emitted after Transfer" do
@@ -23,6 +24,20 @@ defmodule Indexer.Transform.ScaledUiTokenTransfersTest do
       result = TokenTransfers.parse([transfer_log(2), ui_log(1, 10, 15)], true)
 
       assert ui_value(result, 2) == Decimal.new(15)
+    end
+
+    test "pairs mint and burn events using the zero address" do
+      logs = [
+        transfer_log(1, @token_a, address_topic(@zero), address_topic(@to)),
+        ui_log(2, 10, 15, @token_a, address_topic(@zero), address_topic(@to)),
+        transfer_log(3, @token_a, address_topic(@to), address_topic(@zero)),
+        ui_log(4, 10, 15, @token_a, address_topic(@to), address_topic(@zero))
+      ]
+
+      result = TokenTransfers.parse(logs, true)
+
+      assert ui_value(result, 1) == Decimal.new(15)
+      assert ui_value(result, 3) == Decimal.new(15)
     end
 
     test "consumes repeated matching UI events once in log order" do
@@ -91,13 +106,13 @@ defmodule Indexer.Transform.ScaledUiTokenTransfersTest do
 
   defp ui_value(result, log_index), do: result |> transfer(log_index) |> Map.fetch!(:ui_value)
 
-  defp transfer_log(index, token \\ @token_a) do
+  defp transfer_log(index, token \\ @token_a, from \\ address_topic(@from), to \\ address_topic(@to)) do
     base_log(index, token)
     |> Map.merge(%{
       data: uint_data([10]),
       first_topic: TokenTransfer.constant(),
-      second_topic: address_topic(@from),
-      third_topic: address_topic(@to)
+      second_topic: from,
+      third_topic: to
     })
   end
 
