@@ -19,6 +19,7 @@ defmodule Explorer.Repo.Migrations.CreateScaledUiBackfillGaps do
       add(:to_block, :bigint, null: false)
       add(:retry_count, :integer, null: false, default: 0)
       add(:next_retry_at, :utc_datetime_usec, null: false, default: fragment("NOW()"))
+      add(:lease_id, :uuid)
       add(:last_error, :string)
 
       timestamps(type: :utc_datetime_usec)
@@ -27,6 +28,12 @@ defmodule Explorer.Repo.Migrations.CreateScaledUiBackfillGaps do
     create(index(:scaled_ui_backfill_gaps, [:next_retry_at]))
 
     create(constraint(:scaled_ui_backfill_gaps, :scaled_ui_backfill_gaps_valid_range, check: "from_block <= to_block"))
+
+    create(
+      constraint(:scaled_ui_backfill_gaps, :scaled_ui_backfill_gaps_non_negative_range,
+        check: "from_block >= 0 AND to_block >= 0"
+      )
+    )
 
     create(
       constraint(:scaled_ui_backfill_gaps, :scaled_ui_backfill_gaps_retry_count_non_negative, check: "retry_count >= 0")

@@ -67,7 +67,7 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     assert Repo.aggregate(ScaledUiMultiplierUpdate, :count) == 1
   end
 
-  test "keeps affected rows unknown and registers a retry while block coverage is missing" do
+  test "defers transfer replay and registers a retry while block coverage is missing" do
     token = insert(:token)
     block = insert(:block, consensus: true)
     transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
@@ -85,9 +85,10 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     assert {:ok, _result} = ScaledUiBackfill.backfill_token(token.contract_address_hash, block.number)
 
     transfer = reload(transfer)
-    assert Decimal.equal?(transfer.ui_value, Decimal.new(6))
+    assert transfer.ui_value == nil
     assert transfer.ui_multiplier == nil
-    assert transfer.ui_amount_status == "unknown"
+    assert transfer.ui_amount_status == nil
+    assert Repo.aggregate(ScaledUiMultiplierUpdate, :count) == 0
 
     gap = Repo.one!(BackfillGap)
     assert gap.from_block == block.number
@@ -99,6 +100,29 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     transfer = reload(transfer)
     assert Decimal.equal?(transfer.ui_multiplier, Decimal.new("3000000000000000000"))
     assert transfer.ui_amount_status == "ok"
+  end
+
+  test "updates duplicate log indexes by the full token transfer identity" do
+    token = insert(:token)
+    block = insert(:block, consensus: true)
+    from_address = insert(:address)
+    to_address = insert(:address)
+
+    first_transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+    second_transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+
+    first_transfer = insert_transfer(token, block, first_transaction, from_address, to_address, 10)
+    second_transfer = insert_transfer(token, block, second_transaction, from_address, to_address, 10)
+
+    insert_multiplier_log(token, block, first_transaction, 1, "3000000000000000000")
+    insert_ui_log(token, block, first_transaction, from_address, to_address, 11, 2, 6)
+    insert_ui_log(token, block, second_transaction, from_address, to_address, 11, 2, 8)
+
+    assert {:ok, %{updated_transfers: 2}} =
+             ScaledUiBackfill.backfill_token(token.contract_address_hash, block.number)
+
+    assert Decimal.equal?(reload(first_transfer).ui_value, Decimal.new(6))
+    assert Decimal.equal?(reload(second_transfer).ui_value, Decimal.new(8))
   end
 
   test "uses an internal contract creation as the coverage lower bound" do
@@ -241,6 +265,79 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     assert reload(second_transfer).ui_amount_status == "ok"
   end
 
+  test "serializes concurrent backfills for the same token" do
+    token = insert(:token)
+    parent = self()
+
+    lock_task =
+      Task.async(fn ->
+        connection_options =
+          Keyword.take(Repo.config(), [:database, :hostname, :password, :port, :socket_options, :ssl, :username])
+
+        {:ok, connection} = Postgrex.start_link(connection_options)
+
+        try do
+          Postgrex.query!(connection, "SELECT pg_advisory_lock(hashtextextended($1, 0))", [
+            "scaled_ui_backfill:" <> to_string(token.contract_address_hash)
+          ])
+
+          send(parent, :token_locked)
+
+          receive do
+            :unlock_token -> :ok
+          end
+
+          Postgrex.query!(connection, "SELECT pg_advisory_unlock(hashtextextended($1, 0))", [
+            "scaled_ui_backfill:" <> to_string(token.contract_address_hash)
+          ])
+        after
+          GenServer.stop(connection)
+        end
+      end)
+
+    assert_receive :token_locked
+    backfill_task = Task.async(fn -> ScaledUiBackfill.backfill_token(token.contract_address_hash, 0) end)
+    assert Task.yield(backfill_task, 100) == nil
+
+    send(lock_task.pid, :unlock_token)
+    Task.await(lock_task)
+    assert {:ok, _result} = Task.await(backfill_task)
+  end
+
+  test "stops before the next batch when the canonical target changes" do
+    token = insert(:token)
+    block = insert(:block, consensus: true)
+    from_address = insert(:address)
+    to_address = insert(:address)
+
+    first_transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+    second_transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+
+    insert_transfer(token, block, first_transaction, from_address, to_address, 10)
+    insert_transfer(token, block, second_transaction, from_address, to_address, 20)
+    insert_multiplier_log(token, block, first_transaction, 1, "3000000000000000000")
+    insert_ui_log(token, block, first_transaction, from_address, to_address, 11, 2, 6)
+    insert_ui_log(token, block, second_transaction, from_address, to_address, 21, 2, 6)
+
+    Repo.query!("""
+    CREATE FUNCTION scaled_ui_test_change_canonical_target() RETURNS trigger AS $$
+    BEGIN
+      UPDATE blocks SET consensus = FALSE WHERE hash = NEW.block_hash;
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql
+    """)
+
+    Repo.query!("""
+    CREATE TRIGGER scaled_ui_test_change_canonical_target
+    AFTER UPDATE OF ui_amount_status ON token_transfers
+    FOR EACH ROW EXECUTE FUNCTION scaled_ui_test_change_canonical_target()
+    """)
+
+    assert {:error, :canonical_anchor_changed} =
+             ScaledUiBackfill.backfill_token(token.contract_address_hash, block.number)
+  end
+
   test "validates the deferred transfer status constraint on finish" do
     assert :ok = ScaledUiBackfill.on_finish()
 
@@ -361,7 +458,11 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
   end
 
   defp reload(transfer) do
-    Repo.get_by!(TokenTransfer, block_hash: transfer.block_hash, log_index: transfer.log_index)
+    Repo.get_by!(TokenTransfer,
+      transaction_hash: transfer.transaction_hash,
+      block_hash: transfer.block_hash,
+      log_index: transfer.log_index
+    )
   end
 
   defp topic(value) do

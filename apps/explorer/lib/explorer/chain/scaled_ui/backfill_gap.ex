@@ -2,9 +2,9 @@ defmodule Explorer.Chain.ScaledUi.BackfillGap do
   @moduledoc """
   Persistent retry queue for block ranges that prevent complete ERC-8056 backfill.
 
-  Claims use a short lease so RPC or database work never runs while row locks are
-  held. Completion and failure updates match the lease timestamp, preventing a
-  stale worker from modifying a row that has already been reclaimed.
+  Claims use a short renewable lease so database work never runs while row locks
+  are held. All ranges for one token share a stable lease ID, preventing concurrent
+  full-token replays and stale workers from modifying reclaimed rows.
   """
 
   use Explorer.Schema
@@ -23,6 +23,7 @@ defmodule Explorer.Chain.ScaledUi.BackfillGap do
     field(:to_block, :integer)
     field(:retry_count, :integer, default: 0)
     field(:next_retry_at, :utc_datetime_usec)
+    field(:lease_id, Ecto.UUID)
     field(:last_error, :string)
 
     belongs_to(:token_contract_address, Address,
@@ -81,6 +82,7 @@ defmodule Explorer.Chain.ScaledUi.BackfillGap do
             set: [
               to_block: fragment("GREATEST(?, EXCLUDED.to_block)", gap.to_block),
               next_retry_at: fragment("EXCLUDED.next_retry_at"),
+              lease_id: nil,
               updated_at: fragment("EXCLUDED.updated_at")
             ]
           ]
@@ -89,33 +91,51 @@ defmodule Explorer.Chain.ScaledUi.BackfillGap do
     )
   end
 
-  @doc "Claims due gaps with SKIP LOCKED and returns their lease timestamp."
-  @spec claim_due(pos_integer(), keyword()) :: [map()]
-  def claim_due(limit \\ 10, options \\ []) do
+  @doc "Claims one due token with SKIP LOCKED and returns its combined gap range."
+  @spec claim_due(keyword()) :: [map()]
+  def claim_due(options \\ []) do
     lease_seconds = Keyword.get(options, :lease_seconds, @lease_seconds)
+    lease_id = Ecto.UUID.generate()
+    {:ok, dumped_lease_id} = Ecto.UUID.dump(lease_id)
 
     Repo.transaction(
       fn ->
         Repo.query!(
           """
-          WITH due AS (
-            SELECT token_contract_address_hash, from_block
-            FROM scaled_ui_backfill_gaps
-            WHERE next_retry_at <= NOW()
-            ORDER BY next_retry_at, token_contract_address_hash, from_block
-            FOR UPDATE SKIP LOCKED
-            LIMIT $1
+          WITH due_token AS (
+            SELECT leader.token_contract_address_hash
+            FROM scaled_ui_backfill_gaps AS leader
+            WHERE leader.from_block = (
+                    SELECT MIN(candidate.from_block)
+                    FROM scaled_ui_backfill_gaps AS candidate
+                    WHERE candidate.token_contract_address_hash = leader.token_contract_address_hash
+                  )
+              AND leader.next_retry_at <= NOW()
+              AND NOT EXISTS (
+                    SELECT 1
+                    FROM scaled_ui_backfill_gaps AS blocked
+                    WHERE blocked.token_contract_address_hash = leader.token_contract_address_hash
+                      AND blocked.next_retry_at > NOW()
+                  )
+            ORDER BY leader.next_retry_at, leader.token_contract_address_hash
+            FOR UPDATE OF leader SKIP LOCKED
+            LIMIT 1
+          ), claimed AS (
+            UPDATE scaled_ui_backfill_gaps AS gap
+            SET lease_id = $2::uuid,
+                next_retry_at = NOW() + ($1 * INTERVAL '1 second'),
+                updated_at = NOW()
+            FROM due_token
+            WHERE gap.token_contract_address_hash = due_token.token_contract_address_hash
+            RETURNING gap.token_contract_address_hash, gap.from_block, gap.to_block,
+                      gap.retry_count, gap.next_retry_at, gap.lease_id
           )
-          UPDATE scaled_ui_backfill_gaps AS gap
-          SET next_retry_at = NOW() + ($2 * INTERVAL '1 second'),
-              updated_at = NOW()
-          FROM due
-          WHERE gap.token_contract_address_hash = due.token_contract_address_hash
-            AND gap.from_block = due.from_block
-          RETURNING gap.token_contract_address_hash, gap.from_block, gap.to_block,
-                    gap.retry_count, gap.next_retry_at
+          SELECT token_contract_address_hash, MIN(from_block), MAX(to_block), MAX(retry_count),
+                 MAX(next_retry_at), MIN(lease_id::text)
+          FROM claimed
+          GROUP BY token_contract_address_hash
           """,
-          [limit, lease_seconds]
+          [lease_seconds, dumped_lease_id]
         ).rows
       end,
       timeout: :infinity
@@ -126,12 +146,28 @@ defmodule Explorer.Chain.ScaledUi.BackfillGap do
     end
   end
 
-  @doc "Deletes a gap only if the caller still owns its lease."
+  @doc "Extends a token claim only while the caller still owns it."
+  def renew_claim(claim, options \\ []) do
+    lease_seconds = Keyword.get(options, :lease_seconds, @lease_seconds)
+
+    from(gap in __MODULE__,
+      where: gap.token_contract_address_hash == ^claim.token_contract_address_hash,
+      where: gap.lease_id == ^claim.lease_id,
+      update: [
+        set: [
+          next_retry_at: fragment("NOW() + (? * INTERVAL '1 second')", ^lease_seconds),
+          updated_at: fragment("NOW()")
+        ]
+      ]
+    )
+    |> Repo.update_all([], timeout: :infinity)
+  end
+
+  @doc "Deletes all token gaps only if the caller still owns the claim."
   def complete_claim(claim) do
     from(gap in __MODULE__,
       where: gap.token_contract_address_hash == ^claim.token_contract_address_hash,
-      where: gap.from_block == ^claim.from_block,
-      where: gap.next_retry_at == ^claim.lease_until
+      where: gap.lease_id == ^claim.lease_id
     )
     |> Repo.delete_all(timeout: :infinity)
   end
@@ -143,12 +179,12 @@ defmodule Explorer.Chain.ScaledUi.BackfillGap do
 
     from(gap in __MODULE__,
       where: gap.token_contract_address_hash == ^claim.token_contract_address_hash,
-      where: gap.from_block == ^claim.from_block,
-      where: gap.next_retry_at == ^claim.lease_until,
+      where: gap.lease_id == ^claim.lease_id,
       update: [
         set: [
           retry_count: gap.retry_count + 1,
           next_retry_at: ^DateTime.add(now, backoff_seconds, :second),
+          lease_id: nil,
           last_error: ^error_message(error),
           updated_at: ^now
         ]
@@ -159,7 +195,7 @@ defmodule Explorer.Chain.ScaledUi.BackfillGap do
 
   def count, do: Repo.aggregate(__MODULE__, :count, timeout: :infinity)
 
-  defp row_to_claim([token_hash, from_block, to_block, retry_count, lease_until]) do
+  defp row_to_claim([token_hash, from_block, to_block, retry_count, lease_until, lease_id]) do
     {:ok, token_hash} = Hash.Address.load(token_hash)
 
     %{
@@ -167,7 +203,8 @@ defmodule Explorer.Chain.ScaledUi.BackfillGap do
       from_block: from_block,
       to_block: to_block,
       retry_count: retry_count,
-      lease_until: normalize_timestamp(lease_until)
+      lease_until: normalize_timestamp(lease_until),
+      lease_id: lease_id
     }
   end
 

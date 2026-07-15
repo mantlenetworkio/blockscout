@@ -25,6 +25,16 @@ defmodule Explorer.Chain.ScaledUi.BackfillGapTest do
                insert_gap(address.hash.bytes, 20, 10)
     end
 
+    test "rejects negative block bounds" do
+      address = insert(:address)
+
+      assert {:error, %Postgrex.Error{postgres: %{constraint: "scaled_ui_backfill_gaps_non_negative_range"}}} =
+               insert_gap(address.hash.bytes, -1, 10)
+
+      assert {:error, %Postgrex.Error{postgres: %{constraint: "scaled_ui_backfill_gaps_non_negative_range"}}} =
+               insert_gap(address.hash.bytes, 10, -1)
+    end
+
     test "rejects a negative retry count" do
       address = insert(:address)
 
@@ -42,6 +52,40 @@ defmodule Explorer.Chain.ScaledUi.BackfillGapTest do
   end
 
   describe "retry leases" do
+    test "claims all ranges for one token as one unit" do
+      address = insert(:address)
+      now = DateTime.utc_now()
+
+      BackfillGap.put_ranges(
+        Repo,
+        address.hash,
+        [%{from_block: 10, to_block: 20}, %{from_block: 30, to_block: 40}],
+        now: now
+      )
+
+      assert [claim] = BackfillGap.claim_due(lease_seconds: 60)
+      assert claim.from_block == 10
+      assert claim.to_block == 40
+      assert BackfillGap.claim_due(lease_seconds: 60) == []
+    end
+
+    test "renews a token claim without changing its ownership" do
+      address = insert(:address)
+      now = DateTime.utc_now()
+      BackfillGap.put_ranges(Repo, address.hash, [%{from_block: 10, to_block: 20}], now: now)
+
+      assert [claim] = BackfillGap.claim_due(lease_seconds: 60)
+      assert is_binary(claim.lease_id)
+      original_lease_until = claim.lease_until
+
+      assert {1, nil} = BackfillGap.renew_claim(claim, lease_seconds: 120)
+
+      gap = Repo.get_by!(BackfillGap, token_contract_address_hash: address.hash, from_block: 10)
+      assert gap.lease_id == claim.lease_id
+      assert DateTime.compare(gap.next_retry_at, original_lease_until) == :gt
+      assert {1, nil} = BackfillGap.complete_claim(claim)
+    end
+
     test "claims due rows once and applies capped retry state outside the lock transaction" do
       address = insert(:address)
       now = DateTime.utc_now()
@@ -49,10 +93,10 @@ defmodule Explorer.Chain.ScaledUi.BackfillGapTest do
       assert {1, nil} =
                BackfillGap.put_ranges(Repo, address.hash, [%{from_block: 10, to_block: 20}], now: now)
 
-      assert [claim] = BackfillGap.claim_due(1, lease_seconds: 60)
+      assert [claim] = BackfillGap.claim_due(lease_seconds: 60)
       assert claim.from_block == 10
       assert claim.to_block == 20
-      assert BackfillGap.claim_due(1, lease_seconds: 60) == []
+      assert BackfillGap.claim_due(lease_seconds: 60) == []
 
       assert {1, nil} = BackfillGap.fail_claim(claim, :archive_unavailable, now: now)
 
@@ -68,7 +112,7 @@ defmodule Explorer.Chain.ScaledUi.BackfillGapTest do
       now = DateTime.utc_now()
       BackfillGap.put_ranges(Repo, address.hash, [%{from_block: 10, to_block: 20}], now: now)
 
-      [old_claim] = BackfillGap.claim_due(1, lease_seconds: 60)
+      [old_claim] = BackfillGap.claim_due(lease_seconds: 60)
 
       from(gap in BackfillGap,
         where: gap.token_contract_address_hash == ^address.hash,
@@ -76,7 +120,7 @@ defmodule Explorer.Chain.ScaledUi.BackfillGapTest do
       )
       |> Repo.update_all(set: [next_retry_at: DateTime.add(now, -1, :second)])
 
-      [new_claim] = BackfillGap.claim_due(1, lease_seconds: 60)
+      [new_claim] = BackfillGap.claim_due(lease_seconds: 60)
       stale_claim = %{old_claim | lease_until: DateTime.add(old_claim.lease_until, -1, :second)}
 
       assert {0, nil} = BackfillGap.complete_claim(stale_claim)
@@ -90,7 +134,7 @@ defmodule Explorer.Chain.ScaledUi.BackfillGapTest do
       address = insert(:address)
       now = DateTime.utc_now()
       BackfillGap.put_ranges(Repo, address.hash, [%{from_block: 10, to_block: 20}], now: now)
-      [old_claim] = BackfillGap.claim_due(1, lease_seconds: 60)
+      [old_claim] = BackfillGap.claim_due(lease_seconds: 60)
 
       rediscovered_at = DateTime.add(now, 1, :second)
       BackfillGap.put_ranges(Repo, address.hash, [%{from_block: 10, to_block: 30}], now: rediscovered_at)

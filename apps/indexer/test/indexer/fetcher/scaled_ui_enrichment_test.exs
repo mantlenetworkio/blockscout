@@ -34,6 +34,44 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
     assert_transfer(mismatch_transfer, "mismatch", "3000000000000000000")
   end
 
+  test "updates only the transfer identified by transaction hash, block hash, and log index" do
+    block = insert(:block, consensus: true)
+    selected_transfer = insert_unknown_transfer(Decimal.new(6), block: block, log_index: 10)
+    untouched_transfer = insert_unknown_transfer(Decimal.new(7), block: block, log_index: 10)
+    insert_multiplier(selected_transfer, Decimal.new("3000000000000000000"))
+
+    candidate =
+      10
+      |> ScaledUiEnrichment.candidates()
+      |> Enum.find(&(&1.token_contract_address_hash == selected_transfer.token_contract_address_hash))
+      |> Map.put(:transaction_hash, selected_transfer.transaction_hash)
+
+    assert {:ok, 1} = ScaledUiEnrichment.enrich_candidates([candidate])
+
+    assert_transfer(selected_transfer, "ok", "3000000000000000000")
+    assert_transfer(untouched_transfer, "unknown", nil)
+  end
+
+  test "advances past an unresolved first page" do
+    previous_config = Application.get_env(:indexer, ScaledUiEnrichment)
+    Application.put_env(:indexer, ScaledUiEnrichment, batch_size: 1, interval: :timer.minutes(1))
+
+    on_exit(fn -> Application.put_env(:indexer, ScaledUiEnrichment, previous_config) end)
+
+    _unresolved_transfer = insert_unknown_transfer(Decimal.new(6))
+    resolvable_transfer = insert_unknown_transfer(Decimal.new(6))
+    insert_multiplier(resolvable_transfer, Decimal.new("3000000000000000000"))
+
+    name = Module.concat(__MODULE__, "Worker#{System.unique_integer([:positive])}")
+    assert {:ok, pid} = ScaledUiEnrichment.start_link([], name: name)
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+
+    assert_eventually(fn ->
+      updated = transfer_by_id(resolvable_transfer)
+      updated.ui_amount_status == "ok"
+    end)
+  end
+
   test "leaves a transfer unknown while the timeline still has no trusted multiplier" do
     transfer = insert_unknown_transfer(Decimal.new(6))
     original_updated_at = transfer.updated_at
@@ -103,9 +141,10 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
 
   test "retries a gap only through the migration's fixed target head" do
     token = insert(:token)
-    block = insert(:block, consensus: true)
+    target_block = insert(:block, number: 10, consensus: true)
+    block = insert(:block, number: 11, consensus: true)
     transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
-    target_head = block.number - 1
+    target_head = target_block.number
     now = DateTime.utc_now()
 
     insert(:log,
@@ -160,7 +199,7 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
   end
 
   defp insert_unknown_transfer(ui_value, options \\ []) do
-    block = insert(:block, consensus: true)
+    block = Keyword.get_lazy(options, :block, fn -> insert(:block, consensus: true) end)
     token = insert(:token)
     from_address = insert(:address)
     to_address = insert(:address)
@@ -178,7 +217,7 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
         block: block,
         block_number: block.number,
         from_address: from_address,
-        log_index: 10,
+        log_index: Keyword.get(options, :log_index, 10),
         to_address: to_address,
         token_contract_address: token.contract_address,
         token_type: token.type,
@@ -225,7 +264,7 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
   end
 
   defp assert_transfer(transfer, status, multiplier) do
-    updated = Repo.get_by!(TokenTransfer, block_hash: transfer.block_hash, log_index: transfer.log_index)
+    updated = transfer_by_id(transfer)
 
     assert updated.ui_amount_status == status
 
@@ -235,6 +274,27 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
       assert updated.ui_multiplier == nil
     end
   end
+
+  defp transfer_by_id(transfer) do
+    Repo.get_by!(TokenTransfer,
+      transaction_hash: transfer.transaction_hash,
+      block_hash: transfer.block_hash,
+      log_index: transfer.log_index
+    )
+  end
+
+  defp assert_eventually(assertion, attempts \\ 20)
+
+  defp assert_eventually(assertion, attempts) when attempts > 0 do
+    if assertion.() do
+      :ok
+    else
+      Process.sleep(25)
+      assert_eventually(assertion, attempts - 1)
+    end
+  end
+
+  defp assert_eventually(_assertion, 0), do: flunk("condition did not become true")
 
   defp topic(value) do
     {:ok, topic} = Hash.Full.cast(value)

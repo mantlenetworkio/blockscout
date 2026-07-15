@@ -74,14 +74,30 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
 
   @doc "Backfills one token through a fixed canonical head and invalidates counters after commit."
   def backfill_token(token_hash, target_head) do
-    with {:ok, prepared} <- Repo.transaction(fn -> prepare_token(token_hash, target_head) end, timeout: @timeout) do
-      updated_transfers =
-        case prepared do
-          nil -> 0
-          prepared -> process_transfer_batches(prepared, nil, 0)
-        end
+    Repo.checkout(
+      fn -> with_token_lock(token_hash, fn -> backfill_token_locked(token_hash, target_head) end) end,
+      timeout: @timeout
+    )
+  end
 
-      {:ok, %{token_contract_address_hash: token_hash, updated_transfers: updated_transfers}}
+  defp backfill_token_locked(token_hash, target_head) do
+    case Repo.transaction(fn -> prepare_token(token_hash, target_head) end, timeout: @timeout) do
+      {:ok, prepared} -> backfill_prepared(token_hash, prepared)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp backfill_prepared(token_hash, prepared) when prepared in [nil, :deferred] do
+    {:ok, %{token_contract_address_hash: token_hash, updated_transfers: 0}}
+  end
+
+  defp backfill_prepared(token_hash, prepared) do
+    case process_transfer_batches(prepared, nil, 0) do
+      {:ok, updated_transfers} ->
+        {:ok, %{token_contract_address_hash: token_hash, updated_transfers: updated_transfers}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -139,20 +155,28 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
         gaps = coverage_gaps(scan_start, target_head)
 
         BackfillGap.put_ranges(Repo, token_hash, gaps)
-        import_multiplier_updates(canonical_multiplier_log_rows(token_hash, target_head))
 
-        {:ok, [_]} =
-          TokenState.rebuild(Repo, [
-            %{token_contract_address_hash: token_hash, capability_block: capability_block}
-          ])
+        if gaps == [] do
+          import_multiplier_updates(canonical_multiplier_log_rows(token_hash, target_head))
 
-        %{
-          token_contract_address_hash: token_hash,
-          capability_block: capability_block,
-          target_head: target_head,
-          coverage_missing?: gaps != [],
-          multiplier_updates: canonical_multiplier_updates(token_hash)
-        }
+          {:ok, [_]} =
+            TokenState.rebuild(Repo, [
+              %{token_contract_address_hash: token_hash, capability_block: capability_block}
+            ])
+
+          state = Repo.get!(TokenState, token_hash, timeout: @timeout)
+
+          %{
+            token_contract_address_hash: token_hash,
+            capability_block: capability_block,
+            scan_start: scan_start,
+            target_head: target_head,
+            target_block_hash: canonical_block_hash(target_head),
+            state_updated_at: state.updated_at
+          }
+        else
+          :deferred
+        end
     end
   end
 
@@ -236,26 +260,53 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
   end
 
   defp process_transfer_batches(prepared, cursor, updated_total) do
-    transaction_keys = transfer_transaction_keys(prepared, cursor, transfer_batch_size())
+    case Repo.transaction(fn -> process_transfer_batch(prepared, cursor) end, timeout: @timeout) do
+      {:ok, :done} ->
+        {:ok, updated_total}
 
-    case transaction_keys do
-      [] ->
-        updated_total
+      {:ok, :deferred} ->
+        {:ok, updated_total}
 
-      _ ->
-        {:ok, %{addresses: addresses, updated_count: updated_count}} =
-          Repo.transaction(
-            fn -> backfill_transfer_batch(prepared, transaction_keys) end,
-            timeout: @timeout
-          )
-
+      {:ok, {:batch, transaction_cursor, %{addresses: addresses, updated_count: updated_count}}} ->
         invalidate_counters(addresses)
 
         process_transfer_batches(
           prepared,
-          List.last(transaction_keys),
+          transaction_cursor,
           updated_total + updated_count
         )
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp process_transfer_batch(prepared, cursor) do
+    state = lock_token_state(prepared.token_contract_address_hash)
+
+    if canonical_anchor_changed?(prepared, state) do
+      Repo.rollback(:canonical_anchor_changed)
+    end
+
+    gaps = coverage_gaps(prepared.scan_start, prepared.target_head)
+
+    if gaps == [] do
+      transaction_keys = transfer_transaction_keys(prepared, cursor, transfer_batch_size())
+
+      case transaction_keys do
+        [] ->
+          :done
+
+        _ ->
+          multiplier_updates =
+            canonical_multiplier_updates(prepared.token_contract_address_hash, prepared.target_head)
+
+          result = backfill_transfer_batch(prepared, transaction_keys, multiplier_updates)
+          {:batch, List.last(transaction_keys), result}
+      end
+    else
+      BackfillGap.put_ranges(Repo, prepared.token_contract_address_hash, gaps)
+      :deferred
     end
   end
 
@@ -299,7 +350,7 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
     Repo.all(query, timeout: @timeout)
   end
 
-  defp backfill_transfer_batch(prepared, transaction_keys) do
+  defp backfill_transfer_batch(prepared, transaction_keys, multiplier_updates) do
     transfer_rows = canonical_transfer_rows(prepared.token_contract_address_hash, transaction_keys)
     transfers = Enum.map(transfer_rows, & &1.transfer)
     ui_events = load_ui_events(prepared.token_contract_address_hash, transaction_keys)
@@ -308,7 +359,7 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
     updates =
       Enum.map(
         transfer_rows,
-        &transfer_update(&1, matches, prepared.multiplier_updates, prepared.coverage_missing?)
+        &transfer_update(&1, matches, multiplier_updates)
       )
 
     update_keys = MapSet.new(updates, & &1.key)
@@ -384,12 +435,13 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
     end)
   end
 
-  defp canonical_multiplier_updates(token_hash) do
+  defp canonical_multiplier_updates(token_hash, target_head) do
     from(event in ScaledUiMultiplierUpdate,
       join: block in Block,
       on: block.hash == event.block_hash,
       where: event.token_contract_address_hash == ^token_hash,
       where: block.consensus == true,
+      where: event.block_number <= ^target_head,
       order_by: [asc: event.block_number, asc: event.log_index]
     )
     |> Repo.all(timeout: @timeout)
@@ -405,31 +457,25 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
     |> Enum.unzip()
   end
 
-  defp transfer_update(%{transfer: transfer, block_timestamp: timestamp}, matches, events, coverage_missing?) do
+  defp transfer_update(%{transfer: transfer, block_timestamp: timestamp}, matches, events) do
     key = update_key(transfer)
     ui_value = Map.get(matches, TransferPairing.transfer_key(transfer))
 
     multiplier =
-      if coverage_missing? do
-        nil
-      else
-        Timeline.multiplier_at(
-          events,
-          transfer.block_number,
-          transfer.log_index,
-          timestamp |> DateTime.to_unix() |> Decimal.new()
-        )
-      end
+      Timeline.multiplier_at(
+        events,
+        transfer.block_number,
+        transfer.log_index,
+        timestamp |> DateTime.to_unix() |> Decimal.new()
+      )
 
-    status =
-      if coverage_missing?,
-        do: "unknown",
-        else: transfer.amount |> Status.judge(ui_value, multiplier) |> Atom.to_string()
+    status = transfer.amount |> Status.judge(ui_value, multiplier) |> Atom.to_string()
 
     %{
       key: key,
       block_hash: transfer.block_hash,
       log_index: transfer.log_index,
+      transaction_hash: transfer.transaction_hash,
       ui_value: ui_value,
       multiplier: multiplier,
       status: status
@@ -439,12 +485,15 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
   defp update_transfers([]), do: {0, nil}
 
   defp update_transfers(updates) do
-    {block_hashes, log_indexes, ui_values, multipliers, statuses} =
-      Enum.reduce(updates, {[], [], [], [], []}, fn update,
-                                                    {block_hashes, log_indexes, ui_values, multipliers, statuses} ->
+    {transaction_hashes, block_hashes, log_indexes, ui_values, multipliers, statuses} =
+      Enum.reduce(updates, {[], [], [], [], [], []}, fn update,
+                                                        {transaction_hashes, block_hashes, log_indexes, ui_values,
+                                                         multipliers, statuses} ->
         {:ok, block_hash} = Hash.Full.dump(update.block_hash)
+        {:ok, transaction_hash} = Hash.Full.dump(update.transaction_hash)
 
         {
+          [transaction_hash | transaction_hashes],
           [block_hash | block_hashes],
           [update.log_index | log_indexes],
           [update.ui_value | ui_values],
@@ -458,14 +507,17 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
     from(transfer in TokenTransfer,
       join:
         replacement in fragment(
-          "(SELECT unnest(?::bytea[]) AS block_hash, unnest(?::integer[]) AS log_index, unnest(?::numeric[]) AS ui_value, unnest(?::numeric[]) AS multiplier, unnest(?::varchar[]) AS status)",
+          "(SELECT unnest(?::bytea[]) AS transaction_hash, unnest(?::bytea[]) AS block_hash, unnest(?::integer[]) AS log_index, unnest(?::numeric[]) AS ui_value, unnest(?::numeric[]) AS multiplier, unnest(?::varchar[]) AS status)",
+          ^transaction_hashes,
           ^block_hashes,
           ^log_indexes,
           ^ui_values,
           ^multipliers,
           ^statuses
         ),
-      on: transfer.block_hash == replacement.block_hash and transfer.log_index == replacement.log_index,
+      on:
+        transfer.transaction_hash == replacement.transaction_hash and transfer.block_hash == replacement.block_hash and
+          transfer.log_index == replacement.log_index,
       join: block in Block,
       on: block.hash == transfer.block_hash,
       where: transfer.block_consensus == true and block.consensus == true,
@@ -587,6 +639,42 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
     |> Repo.exists?(timeout: @timeout)
   end
 
+  defp with_token_lock(token_hash, callback) do
+    lock_name = "scaled_ui_backfill:" <> to_string(token_hash)
+    Repo.query!("SELECT pg_advisory_lock(hashtextextended($1, 0))", [lock_name], timeout: @timeout)
+
+    try do
+      callback.()
+    after
+      Repo.query!("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lock_name], timeout: @timeout)
+    end
+  end
+
+  defp lock_token_state(token_hash) do
+    Repo.one!(
+      from(state in TokenState,
+        where: state.token_contract_address_hash == ^token_hash,
+        lock: "FOR UPDATE"
+      ),
+      timeout: @timeout
+    )
+  end
+
+  defp canonical_anchor_changed?(prepared, state) do
+    state.updated_at != prepared.state_updated_at or
+      canonical_block_hash(prepared.target_head) != prepared.target_block_hash
+  end
+
+  defp canonical_block_hash(block_number) do
+    Repo.one(
+      from(block in Block,
+        where: block.number == ^block_number and block.consensus == true,
+        select: block.hash
+      ),
+      timeout: @timeout
+    )
+  end
+
   defp invalidate_counters(addresses) do
     addresses
     |> Enum.uniq()
@@ -597,7 +685,7 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
     Application.get_env(:explorer, __MODULE__, [])[:transfer_batch_size] || @default_transfer_batch_size
   end
 
-  defp update_key(transfer), do: {transfer.block_hash, transfer.log_index}
+  defp update_key(transfer), do: {transfer.transaction_hash, transfer.block_hash, transfer.log_index}
 
   defp topic_hashes do
     multiplier_topic_hashes() ++ ui_topic_hashes()

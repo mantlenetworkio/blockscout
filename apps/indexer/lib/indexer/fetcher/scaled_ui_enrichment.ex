@@ -16,6 +16,7 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
   alias Explorer.Repo
 
   @batch_size 500
+  @gap_lease_seconds 300
   @interval :timer.seconds(10)
   @timeout :timer.minutes(1)
 
@@ -44,72 +45,92 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
 
   @impl GenServer
   def handle_info(:enrich, state) do
-    enrichment_result = enrich_batch()
+    enrichment_result = enrich_page(cursor: state)
     retry_backfill_gaps()
 
-    case enrichment_result do
-      {:ok, count} when count > 0 ->
-        send(self(), :enrich)
+    next_state =
+      case enrichment_result do
+        {:ok, _count, nil} ->
+          Process.send_after(self(), :enrich, interval())
+          nil
 
-      {:ok, _count} ->
-        Process.send_after(self(), :enrich, interval())
-    end
+        {:ok, _count, next_cursor} ->
+          send(self(), :enrich)
+          next_cursor
+      end
 
-    {:noreply, state}
+    {:noreply, next_state}
   end
 
   @doc false
   def retry_backfill_gaps(options \\ []) do
-    options
-    |> Keyword.get(:batch_size, 10)
-    |> BackfillGap.claim_due()
-    |> Enum.each(&retry_backfill_gap/1)
+    batch_size = Keyword.get(options, :batch_size, 10)
+    lease_seconds = Keyword.get(options, :lease_seconds, @gap_lease_seconds)
+    heartbeat_interval = Keyword.get(options, :heartbeat_interval, max(div(lease_seconds, 3), 1))
 
+    retry_due_gaps(batch_size, lease_seconds, heartbeat_interval)
     :ok
   end
 
   @doc "Re-evaluates one batch after the supporting partial index is available."
   @spec enrich_batch(keyword()) :: {:ok, non_neg_integer()}
   def enrich_batch(options \\ []) do
-    if BackgroundMigrations.get_heavy_indexes_create_token_transfers_ui_amount_status_unknown_index_finished() do
-      options
-      |> Keyword.get(:batch_size, batch_size())
-      |> candidates()
-      |> enrich_candidates()
-    else
-      {:ok, 0}
+    case enrich_page(options) do
+      {:ok, count, _next_cursor} -> {:ok, count}
     end
   end
 
   @doc false
-  def candidates(limit) when is_integer(limit) and limit > 0 do
-    from(transfer in TokenTransfer,
-      join: block in Block,
-      on: block.hash == transfer.block_hash,
-      join: state in TokenState,
-      on: state.token_contract_address_hash == transfer.token_contract_address_hash,
-      where: transfer.ui_amount_status == "unknown",
-      where: transfer.block_consensus == true,
-      where: block.consensus == true,
-      where: not is_nil(state.capability_block),
-      where: transfer.block_number >= state.capability_block,
-      order_by: [
-        asc: transfer.token_contract_address_hash,
-        asc: transfer.block_number,
-        asc: transfer.block_hash,
-        asc: transfer.log_index
-      ],
-      limit: ^limit,
-      select: %{
-        amount: transfer.amount,
-        block_hash: transfer.block_hash,
-        block_number: transfer.block_number,
-        block_timestamp: block.timestamp,
-        log_index: transfer.log_index,
-        token_contract_address_hash: transfer.token_contract_address_hash,
-        ui_value: transfer.ui_value
-      }
-    )
+  def enrich_page(options \\ []) do
+    if BackgroundMigrations.get_heavy_indexes_create_token_transfers_ui_amount_status_unknown_index_finished() do
+      candidates = candidates(Keyword.get(options, :batch_size, batch_size()), Keyword.get(options, :cursor))
+
+      with {:ok, count} <- enrich_candidates(candidates) do
+        {:ok, count, candidate_cursor(List.last(candidates))}
+      end
+    else
+      {:ok, 0, nil}
+    end
+  end
+
+  @doc false
+  def candidates(limit), do: candidates(limit, nil)
+
+  def candidates(limit, cursor) when is_integer(limit) and limit > 0 do
+    query =
+      from(transfer in TokenTransfer,
+        join: block in Block,
+        on: block.hash == transfer.block_hash,
+        join: state in TokenState,
+        on: state.token_contract_address_hash == transfer.token_contract_address_hash,
+        where: transfer.ui_amount_status == "unknown",
+        where: transfer.block_consensus == true,
+        where: block.consensus == true,
+        where: not is_nil(transfer.transaction_hash),
+        where: not is_nil(state.capability_block),
+        where: transfer.block_number >= state.capability_block,
+        order_by: [
+          asc: transfer.token_contract_address_hash,
+          asc: transfer.block_number,
+          asc: transfer.block_hash,
+          asc: transfer.transaction_hash,
+          asc: transfer.log_index
+        ],
+        limit: ^limit,
+        select: %{
+          amount: transfer.amount,
+          block_hash: transfer.block_hash,
+          block_number: transfer.block_number,
+          block_timestamp: block.timestamp,
+          log_index: transfer.log_index,
+          token_contract_address_hash: transfer.token_contract_address_hash,
+          transaction_hash: transfer.transaction_hash,
+          ui_value: transfer.ui_value
+        }
+      )
+
+    query
+    |> after_cursor(cursor)
     |> Repo.all(timeout: @timeout)
   end
 
@@ -131,7 +152,8 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
                 block_hash: candidate.block_hash,
                 log_index: candidate.log_index,
                 multiplier: multiplier,
-                status: candidate.amount |> Status.judge(candidate.ui_value, multiplier) |> Atom.to_string()
+                status: candidate.amount |> Status.judge(candidate.ui_value, multiplier) |> Atom.to_string(),
+                transaction_hash: candidate.transaction_hash
               }
             ]
 
@@ -160,11 +182,15 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
   defp update_transfers([]), do: {:ok, 0}
 
   defp update_transfers(updates) do
-    {block_hashes, log_indexes, multipliers, statuses} =
-      Enum.reduce(updates, {[], [], [], []}, fn update, {block_hashes, log_indexes, multipliers, statuses} ->
+    {transaction_hashes, block_hashes, log_indexes, multipliers, statuses} =
+      Enum.reduce(updates, {[], [], [], [], []}, fn update,
+                                                    {transaction_hashes, block_hashes, log_indexes, multipliers,
+                                                     statuses} ->
         {:ok, block_hash} = Hash.Full.dump(update.block_hash)
+        {:ok, transaction_hash} = Hash.Full.dump(update.transaction_hash)
 
         {
+          [transaction_hash | transaction_hashes],
           [block_hash | block_hashes],
           [update.log_index | log_indexes],
           [update.multiplier | multipliers],
@@ -178,13 +204,16 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
       from(transfer in TokenTransfer,
         join:
           replacement in fragment(
-            "(SELECT unnest(?::bytea[]) AS block_hash, unnest(?::integer[]) AS log_index, unnest(?::numeric[]) AS multiplier, unnest(?::varchar[]) AS status)",
+            "(SELECT unnest(?::bytea[]) AS transaction_hash, unnest(?::bytea[]) AS block_hash, unnest(?::integer[]) AS log_index, unnest(?::numeric[]) AS multiplier, unnest(?::varchar[]) AS status)",
+            ^transaction_hashes,
             ^block_hashes,
             ^log_indexes,
             ^multipliers,
             ^statuses
           ),
-        on: transfer.block_hash == replacement.block_hash and transfer.log_index == replacement.log_index,
+        on:
+          transfer.transaction_hash == replacement.transaction_hash and transfer.block_hash == replacement.block_hash and
+            transfer.log_index == replacement.log_index,
         join: block in Block,
         on: block.hash == transfer.block_hash,
         where: transfer.ui_amount_status == "unknown",
@@ -203,6 +232,40 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
     {:ok, count}
   end
 
+  defp after_cursor(query, nil), do: query
+
+  defp after_cursor(query, cursor) do
+    where(
+      query,
+      [transfer, _block, _state],
+      fragment(
+        "ROW(?, ?, ?, ?, ?) > ROW(?, ?, ?, ?, ?)",
+        transfer.token_contract_address_hash,
+        transfer.block_number,
+        transfer.block_hash,
+        transfer.transaction_hash,
+        transfer.log_index,
+        type(^cursor.token_contract_address_hash, Hash.Address),
+        ^cursor.block_number,
+        type(^cursor.block_hash, Hash.Full),
+        type(^cursor.transaction_hash, Hash.Full),
+        ^cursor.log_index
+      )
+    )
+  end
+
+  defp candidate_cursor(nil), do: nil
+
+  defp candidate_cursor(candidate) do
+    Map.take(candidate, [
+      :token_contract_address_hash,
+      :block_number,
+      :block_hash,
+      :transaction_hash,
+      :log_index
+    ])
+  end
+
   defp batch_size do
     Application.get_env(:indexer, __MODULE__, [])[:batch_size] || @batch_size
   end
@@ -211,19 +274,24 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
     Application.get_env(:indexer, __MODULE__, [])[:interval] || @interval
   end
 
-  defp retry_backfill_gap(claim) do
-    result =
-      if ScaledUiBackfill.range_missing?(claim.from_block, claim.to_block) do
-        {:error, :block_range_still_missing}
-      else
-        case ScaledUiBackfill.migration_target_head() do
-          {:ok, target_head} ->
-            ScaledUiBackfill.backfill_token(claim.token_contract_address_hash, target_head)
+  defp retry_due_gaps(remaining, _lease_seconds, _heartbeat_interval) when remaining <= 0, do: :ok
 
-          :error ->
-            {:error, :backfill_target_head_unavailable}
-        end
-      end
+  defp retry_due_gaps(remaining, lease_seconds, heartbeat_interval) do
+    case BackfillGap.claim_due(lease_seconds: lease_seconds) do
+      [] ->
+        :ok
+
+      [claim] ->
+        retry_backfill_gap(claim, lease_seconds, heartbeat_interval)
+        retry_due_gaps(remaining - 1, lease_seconds, heartbeat_interval)
+    end
+  end
+
+  defp retry_backfill_gap(claim, lease_seconds, heartbeat_interval) do
+    result =
+      with_claim_heartbeat(claim, lease_seconds, heartbeat_interval, fn ->
+        retry_claim(claim)
+      end)
 
     case result do
       {:ok, _backfill_result} -> BackfillGap.complete_claim(claim)
@@ -231,5 +299,63 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
     end
   rescue
     error -> BackfillGap.fail_claim(claim, error)
+  end
+
+  defp retry_claim(claim) do
+    if ScaledUiBackfill.range_missing?(claim.from_block, claim.to_block) do
+      {:error, :block_range_still_missing}
+    else
+      backfill_claim(claim)
+    end
+  end
+
+  defp backfill_claim(claim) do
+    case ScaledUiBackfill.migration_target_head() do
+      {:ok, target_head} -> ScaledUiBackfill.backfill_token(claim.token_contract_address_hash, target_head)
+      :error -> {:error, :backfill_target_head_unavailable}
+    end
+  end
+
+  defp with_claim_heartbeat(claim, lease_seconds, heartbeat_interval, callback) do
+    owner = self()
+    heartbeat = spawn(fn -> claim_heartbeat(owner, claim, lease_seconds, heartbeat_interval) end)
+
+    try do
+      callback.()
+    after
+      stop_claim_heartbeat(heartbeat)
+    end
+  end
+
+  defp claim_heartbeat(owner, claim, lease_seconds, heartbeat_interval) do
+    owner_ref = Process.monitor(owner)
+    claim_heartbeat_loop(owner_ref, claim, lease_seconds, heartbeat_interval)
+  end
+
+  defp claim_heartbeat_loop(owner_ref, claim, lease_seconds, heartbeat_interval) do
+    receive do
+      {:stop, caller, stop_ref} ->
+        send(caller, {:stopped, stop_ref})
+
+      {:DOWN, ^owner_ref, :process, _pid, _reason} ->
+        :ok
+    after
+      :timer.seconds(heartbeat_interval) ->
+        case BackfillGap.renew_claim(claim, lease_seconds: lease_seconds) do
+          {count, _} when count > 0 -> claim_heartbeat_loop(owner_ref, claim, lease_seconds, heartbeat_interval)
+          _ -> :ok
+        end
+    end
+  end
+
+  defp stop_claim_heartbeat(heartbeat) do
+    stop_ref = make_ref()
+    send(heartbeat, {:stop, self(), stop_ref})
+
+    receive do
+      {:stopped, ^stop_ref} -> :ok
+    after
+      1_000 -> :ok
+    end
   end
 end
