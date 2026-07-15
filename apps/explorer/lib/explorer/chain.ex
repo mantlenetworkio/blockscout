@@ -1212,6 +1212,7 @@ defmodule Explorer.Chain do
     case Import.all(options) do
       {:ok, imported} = result ->
         invalidate_address_counters(imported)
+        invalidate_scaled_ui_reorg_counters(imported[:scaled_ui_reorg])
 
         assets_to_import = %{
           addresses: imported[:addresses] || [],
@@ -1260,6 +1261,50 @@ defmodule Explorer.Chain do
       imported[:celo_election_rewards] || [],
       &celo_election_reward_address_hashes/1
     )
+  end
+
+  defp invalidate_scaled_ui_reorg_counters(nil), do: :ok
+
+  defp invalidate_scaled_ui_reorg_counters(%{
+         addresses: addresses,
+         removed_token_hashes: removed_token_hashes
+       }) do
+    invalidate_counter_types(addresses, [:token_transfers, :token_transfers_erc8056])
+    invalidate_removed_scaled_ui_token_counters(removed_token_hashes)
+  end
+
+  defp invalidate_removed_scaled_ui_token_counters([]), do: :ok
+
+  defp invalidate_removed_scaled_ui_token_counters(token_hashes) do
+    query =
+      from(transfer in TokenTransfer,
+        where: transfer.token_contract_address_hash in ^token_hashes,
+        where: transfer.block_consensus == true,
+        where: not is_nil(transfer.ui_amount_status),
+        select: {transfer.from_address_hash, transfer.to_address_hash}
+      )
+
+    Repo.transaction(
+      fn ->
+        query
+        |> Repo.stream(max_rows: 500)
+        |> Stream.flat_map(fn {from, to} -> [from, to] end)
+        |> Stream.reject(&is_nil/1)
+        |> Stream.chunk_every(500)
+        |> Enum.each(&invalidate_counter_types(&1, [:token_transfers_erc8056]))
+      end,
+      timeout: :infinity
+    )
+
+    :ok
+  end
+
+  defp invalidate_counter_types(addresses, counter_types) do
+    addresses
+    |> Enum.uniq()
+    |> Enum.each(fn address_hash ->
+      Enum.each(counter_types, &AddressTabsElementsCount.invalidate_counter(&1, address_hash))
+    end)
   end
 
   defp invalidate_address_transaction_counters(transactions) do

@@ -33,6 +33,7 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
   alias Explorer.Chain.Import.Runner.Address.CurrentTokenBalances
   alias Explorer.Chain.Import.Runner.{Addresses, TokenInstances, Tokens}
   alias Explorer.Chain.InternalTransaction.DeleteQueue, as: InternalTransactionDeleteQueue
+  alias Explorer.Chain.ScaledUi.Reorg, as: ScaledUiReorg
   alias Explorer.Chain.Zilliqa.Zrc2.TokenTransfer, as: Zrc2TokenTransfer
   alias Explorer.Prometheus.Instrumenter
   alias Explorer.Repo, as: ExplorerRepo
@@ -92,6 +93,14 @@ defmodule Explorer.Chain.Import.Runner.Blocks do
         :address_referencing,
         :blocks,
         :lose_consensus
+      )
+    end)
+    |> Multi.run(:scaled_ui_reorg, fn repo, %{lose_consensus: non_consensus_blocks} ->
+      Instrumenter.block_import_stage_runner(
+        fn -> ScaledUiReorg.rollback(repo, non_consensus_blocks, timeout: insert_options.timeout) end,
+        :address_referencing,
+        :blocks,
+        :scaled_ui_reorg
       )
     end)
     |> Multi.run(:blocks, fn repo, _ ->

@@ -16,6 +16,7 @@ defmodule Explorer.Chain.Cache.Counters.AddressTabsElementsCount do
            :validations
            | :transactions
            | :token_transfers
+           | :token_transfers_erc8056
            | :token_balances
            | :logs
            | :withdrawals

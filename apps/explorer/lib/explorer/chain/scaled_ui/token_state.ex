@@ -77,34 +77,72 @@ defmodule Explorer.Chain.ScaledUi.TokenState do
     rows = normalize_capability_rows(capability_rows)
     now = DateTime.utc_now()
     timeout = Keyword.get(options, :timeout, 60_000)
+    token_hashes = Enum.map(rows, & &1.token_contract_address_hash)
 
-    Token.merge_extensions(repo, Enum.map(rows, & &1.token_contract_address_hash), ["ERC-8056"],
+    Token.merge_extensions(repo, token_hashes, ["ERC-8056"],
       updated_at: now,
       timeout: timeout
     )
 
+    rebuild_states(repo, token_hashes, Map.new(rows, &{&1.token_contract_address_hash, &1.capability_block}),
+      capability_mode: :earliest,
+      now: now,
+      timeout: timeout
+    )
+
+    {:ok, token_hashes}
+  end
+
+  @doc "Rebuilds summaries and replaces capability boundaries after canonical-chain changes."
+  @spec replace_capabilities(module(), [Hash.Address.t()], [map()], keyword()) :: {:ok, [Hash.Address.t()]}
+  def replace_capabilities(repo, token_hashes, capability_rows, options \\ []) do
+    rows = normalize_capability_rows(capability_rows)
+    token_hashes = token_hashes |> Enum.uniq() |> Enum.sort_by(&hash_sort_key/1)
+    capability_blocks = Map.new(rows, &{&1.token_contract_address_hash, &1.capability_block})
+    enabled_token_hashes = Map.keys(capability_blocks)
+    now = DateTime.utc_now()
+    timeout = Keyword.get(options, :timeout, 60_000)
+
+    Token.sync_extension(repo, token_hashes, enabled_token_hashes, "ERC-8056",
+      updated_at: now,
+      timeout: timeout
+    )
+
+    rebuild_states(repo, token_hashes, capability_blocks,
+      capability_mode: :replace,
+      now: now,
+      timeout: timeout
+    )
+
+    {:ok, token_hashes -- enabled_token_hashes}
+  end
+
+  defp rebuild_states(repo, token_hashes, capability_blocks, options) do
+    now = Keyword.fetch!(options, :now)
+    timeout = Keyword.fetch!(options, :timeout)
+    capability_mode = Keyword.fetch!(options, :capability_mode)
+    rows = Enum.map(token_hashes, &%{token_contract_address_hash: &1})
+
     create_placeholders(repo, rows, now, timeout)
 
-    states = lock_states(repo, Enum.map(rows, & &1.token_contract_address_hash), timeout)
-    events_by_token = load_events(repo, Enum.map(rows, & &1.token_contract_address_hash), timeout)
-    capability_blocks = Map.new(rows, &{&1.token_contract_address_hash, &1.capability_block})
+    states = lock_states(repo, token_hashes, timeout)
+    events_by_token = load_events(repo, token_hashes, timeout)
 
     Enum.each(states, fn state ->
       summary = Timeline.replay(Map.get(events_by_token, state.token_contract_address_hash, []))
+      incoming_capability_block = capability_blocks[state.token_contract_address_hash]
 
       state
       |> changeset(%{
         base_multiplier: summary.base_multiplier,
         pending_multiplier: summary.pending_multiplier,
         pending_effective_at: summary.pending_effective_at,
-        capability_block: earliest_block(state.capability_block, capability_blocks[state.token_contract_address_hash]),
+        capability_block: capability_block(capability_mode, state.capability_block, incoming_capability_block),
         timeline_status: summary.timeline_status,
         tainted_from_block: summary.tainted_from_block
       })
       |> repo.update!(timeout: timeout)
     end)
-
-    {:ok, Enum.map(rows, & &1.token_contract_address_hash)}
   end
 
   defp normalize_capability_rows(capability_rows) do
@@ -165,6 +203,9 @@ defmodule Explorer.Chain.ScaledUi.TokenState do
 
   defp earliest_block(nil, incoming), do: incoming
   defp earliest_block(existing, incoming), do: min(existing, incoming)
+
+  defp capability_block(:earliest, existing, incoming), do: earliest_block(existing, incoming)
+  defp capability_block(:replace, _existing, incoming), do: incoming
 
   defp hash_sort_key(%Hash{bytes: bytes}), do: bytes
 

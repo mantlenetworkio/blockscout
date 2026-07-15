@@ -226,6 +226,74 @@ defmodule Explorer.Chain.Token do
     :ok
   end
 
+  @doc "Synchronizes one extension across existing tokens while preserving every other extension."
+  @spec sync_extension(module(), [Hash.Address.t()], [Hash.Address.t()], String.t(), keyword()) :: :ok
+  def sync_extension(repo, token_hashes, enabled_token_hashes, extension, options \\ []) do
+    token_hashes = Enum.uniq(token_hashes)
+    enabled_token_hashes = Enum.uniq(enabled_token_hashes)
+    disabled_token_hashes = token_hashes -- enabled_token_hashes
+    timeout = Keyword.get(options, :timeout, @timeout)
+    updated_at = Keyword.get(options, :updated_at, DateTime.utc_now())
+
+    from(token in Token,
+      where: token.contract_address_hash in ^token_hashes,
+      order_by: [asc: token.contract_address_hash],
+      lock: "FOR NO KEY UPDATE"
+    )
+    |> repo.all(timeout: timeout)
+
+    add_extension(repo, enabled_token_hashes, extension, updated_at, timeout)
+    remove_extension(repo, disabled_token_hashes, extension, updated_at, timeout)
+
+    :ok
+  end
+
+  defp add_extension(_repo, [], _extension, _updated_at, _timeout), do: :ok
+
+  defp add_extension(repo, token_hashes, extension, updated_at, timeout) do
+    from(token in Token,
+      where: token.contract_address_hash in ^token_hashes,
+      where: not fragment("COALESCE(?, ARRAY[]::varchar[]) @> ARRAY[?]::varchar[]", token.extensions, ^extension),
+      update: [
+        set: [
+          extensions:
+            fragment(
+              "(SELECT array_agg(DISTINCT value ORDER BY value) FROM unnest(COALESCE(?, ARRAY[]::varchar[]) || ARRAY[?]::varchar[]) AS value)",
+              token.extensions,
+              ^extension
+            ),
+          updated_at: ^updated_at
+        ]
+      ]
+    )
+    |> repo.update_all([], timeout: timeout)
+
+    :ok
+  end
+
+  defp remove_extension(_repo, [], _extension, _updated_at, _timeout), do: :ok
+
+  defp remove_extension(repo, token_hashes, extension, updated_at, timeout) do
+    from(token in Token,
+      where: token.contract_address_hash in ^token_hashes,
+      where: fragment("? @> ARRAY[?]::varchar[]", token.extensions, ^extension),
+      update: [
+        set: [
+          extensions:
+            fragment(
+              "NULLIF(ARRAY(SELECT value FROM unnest(?) AS value WHERE value <> ? ORDER BY value), ARRAY[]::varchar[])",
+              token.extensions,
+              ^extension
+            ),
+          updated_at: ^updated_at
+        ]
+      ]
+    )
+    |> repo.update_all([], timeout: timeout)
+
+    :ok
+  end
+
   defp trim_name(%Changeset{valid?: false} = changeset), do: changeset
 
   defp trim_name(%Changeset{valid?: true} = changeset) do
