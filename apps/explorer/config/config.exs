@@ -154,6 +154,7 @@ for index_operation <- [
       Explorer.Migrator.HeavyDbIndexOperation.DropLogsAddressHashTransactionHashIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropLogsIndexIndex,
       Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressHashFirstTopicBlockNumberIndexIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateTokenTransfersUiAmountStatusUnknownIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsFromAddressHashIndex,
       Explorer.Migrator.HeavyDbIndexOperation.CreateInternalTransactionsBlockNumberDescTransactionIndexDescIndexDescIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropTokenTransfersBlockNumberAscLogIndexAscIndex,

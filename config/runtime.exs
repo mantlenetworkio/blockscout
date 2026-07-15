@@ -1168,6 +1168,9 @@ config :indexer, Indexer.Fetcher.TokenCountersUpdater.Supervisor,
 config :indexer, Indexer.Fetcher.EmptyBlocksSanitizer.Supervisor,
   disabled?: ConfigHelper.parse_bool_env_var("INDEXER_DISABLE_EMPTY_BLOCKS_SANITIZER")
 
+config :indexer, Indexer.Fetcher.ScaledUiEnrichment.Supervisor,
+  disabled?: ConfigHelper.parse_bool_env_var("INDEXER_DISABLE_SCALED_UI_ENRICHMENT_FETCHER")
+
 config :indexer, Indexer.Block.Realtime.Supervisor,
   enabled: !ConfigHelper.parse_bool_env_var("DISABLE_REALTIME_INDEXER")
 
@@ -1232,6 +1235,10 @@ config :indexer, Indexer.Fetcher.EmptyBlocksSanitizer,
   batch_size: ConfigHelper.parse_integer_env_var("INDEXER_EMPTY_BLOCKS_SANITIZER_BATCH_SIZE", 10),
   interval: ConfigHelper.parse_time_env_var("INDEXER_EMPTY_BLOCKS_SANITIZER_INTERVAL", "10s"),
   head_offset: ConfigHelper.parse_integer_env_var("INDEXER_EMPTY_BLOCKS_SANITIZER_HEAD_OFFSET", 1000)
+
+config :indexer, Indexer.Fetcher.ScaledUiEnrichment,
+  batch_size: ConfigHelper.parse_integer_env_var("INDEXER_SCALED_UI_ENRICHMENT_BATCH_SIZE", 500),
+  interval: ConfigHelper.parse_time_env_var("INDEXER_SCALED_UI_ENRICHMENT_INTERVAL", "10s")
 
 config :indexer, Indexer.Block.Realtime.Fetcher,
   max_gap: ConfigHelper.parse_integer_env_var("INDEXER_REALTIME_FETCHER_MAX_GAP", 1_000),

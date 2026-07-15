@@ -51,6 +51,7 @@ defmodule Indexer.Supervisor do
     PendingTransaction,
     ReplacedTransaction,
     RootstockData,
+    ScaledUiEnrichment,
     Token,
     TokenCountersUpdater,
     TokenHoldersCountUpdater,
@@ -274,6 +275,7 @@ defmodule Indexer.Supervisor do
 
         # Out-of-band fetchers
         {EmptyBlocksSanitizer.Supervisor, [[json_rpc_named_arguments: json_rpc_named_arguments]]},
+        {ScaledUiEnrichment.Supervisor, [[]]},
         {PendingTransactionsSanitizer, [[json_rpc_named_arguments: json_rpc_named_arguments]]},
         {TokenTotalSupplyUpdater, [[]]},
         AddressImporter,
