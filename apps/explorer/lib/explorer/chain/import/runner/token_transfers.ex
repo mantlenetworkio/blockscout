@@ -112,13 +112,16 @@ defmodule Explorer.Chain.Import.Runner.TokenTransfers do
               token_ids: fragment("EXCLUDED.token_ids"),
               token_type: fragment("EXCLUDED.token_type"),
               block_consensus: fragment("EXCLUDED.block_consensus"),
+              ui_value: fragment("EXCLUDED.ui_value"),
+              ui_multiplier: fragment("EXCLUDED.ui_multiplier"),
+              ui_amount_status: fragment("EXCLUDED.ui_amount_status"),
               inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token_transfer.inserted_at),
               updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token_transfer.updated_at)
             ]
           ],
           where:
             fragment(
-              "(EXCLUDED.amount, EXCLUDED.from_address_hash, EXCLUDED.to_address_hash, EXCLUDED.token_contract_address_hash, EXCLUDED.token_ids, EXCLUDED.token_type, EXCLUDED.block_consensus, EXCLUDED.transaction_hash) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?)",
+              "(EXCLUDED.amount, EXCLUDED.from_address_hash, EXCLUDED.to_address_hash, EXCLUDED.token_contract_address_hash, EXCLUDED.token_ids, EXCLUDED.token_type, EXCLUDED.block_consensus, EXCLUDED.transaction_hash, EXCLUDED.ui_value, EXCLUDED.ui_multiplier, EXCLUDED.ui_amount_status) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
               token_transfer.amount,
               token_transfer.from_address_hash,
               token_transfer.to_address_hash,
@@ -126,7 +129,10 @@ defmodule Explorer.Chain.Import.Runner.TokenTransfers do
               token_transfer.token_ids,
               token_transfer.token_type,
               token_transfer.block_consensus,
-              token_transfer.transaction_hash
+              token_transfer.transaction_hash,
+              token_transfer.ui_value,
+              token_transfer.ui_multiplier,
+              token_transfer.ui_amount_status
             )
         )
 
@@ -144,20 +150,26 @@ defmodule Explorer.Chain.Import.Runner.TokenTransfers do
               token_ids: fragment("EXCLUDED.token_ids"),
               token_type: fragment("EXCLUDED.token_type"),
               block_consensus: fragment("EXCLUDED.block_consensus"),
+              ui_value: fragment("EXCLUDED.ui_value"),
+              ui_multiplier: fragment("EXCLUDED.ui_multiplier"),
+              ui_amount_status: fragment("EXCLUDED.ui_amount_status"),
               inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", token_transfer.inserted_at),
               updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", token_transfer.updated_at)
             ]
           ],
           where:
             fragment(
-              "(EXCLUDED.amount, EXCLUDED.from_address_hash, EXCLUDED.to_address_hash, EXCLUDED.token_contract_address_hash, EXCLUDED.token_ids, EXCLUDED.token_type, EXCLUDED.block_consensus) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?)",
+              "(EXCLUDED.amount, EXCLUDED.from_address_hash, EXCLUDED.to_address_hash, EXCLUDED.token_contract_address_hash, EXCLUDED.token_ids, EXCLUDED.token_type, EXCLUDED.block_consensus, EXCLUDED.ui_value, EXCLUDED.ui_multiplier, EXCLUDED.ui_amount_status) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
               token_transfer.amount,
               token_transfer.from_address_hash,
               token_transfer.to_address_hash,
               token_transfer.token_contract_address_hash,
               token_transfer.token_ids,
               token_transfer.token_type,
-              token_transfer.block_consensus
+              token_transfer.block_consensus,
+              token_transfer.ui_value,
+              token_transfer.ui_multiplier,
+              token_transfer.ui_amount_status
             )
         )
     end

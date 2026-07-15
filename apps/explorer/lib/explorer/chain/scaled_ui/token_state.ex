@@ -26,7 +26,7 @@ defmodule Explorer.Chain.ScaledUi.TokenState do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Explorer.Chain.{Address, Hash, ScaledUiMultiplierUpdate}
+  alias Explorer.Chain.{Address, Hash, ScaledUiMultiplierUpdate, Token}
   alias Explorer.Chain.ScaledUi.Timeline
 
   @timeline_statuses ~w(ok tainted)
@@ -77,6 +77,11 @@ defmodule Explorer.Chain.ScaledUi.TokenState do
     rows = normalize_capability_rows(capability_rows)
     now = DateTime.utc_now()
     timeout = Keyword.get(options, :timeout, 60_000)
+
+    Token.merge_extensions(repo, Enum.map(rows, & &1.token_contract_address_hash), ["ERC-8056"],
+      updated_at: now,
+      timeout: timeout
+    )
 
     create_placeholders(repo, rows, now, timeout)
 

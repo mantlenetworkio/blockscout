@@ -21,8 +21,6 @@ defmodule Indexer.Fetcher.Token do
   @behaviour BufferedTask
 
   @default_max_concurrency 10
-  @scaled_ui_extension "ERC-8056"
-
   @doc false
   def child_spec([init_options, gen_server_options]) do
     {state, mergeable_init_options} = Keyword.pop(init_options, :json_rpc_named_arguments)
@@ -126,28 +124,7 @@ defmodule Indexer.Fetcher.Token do
   defp reconcile_scaled_ui_extensions([]), do: :ok
 
   defp reconcile_scaled_ui_extensions(token_hashes) do
-    now = DateTime.utc_now()
-
-    from(token in Token,
-      where: token.contract_address_hash in ^token_hashes,
-      where:
-        is_nil(token.extensions) or
-          not fragment("? @> ARRAY[?]::varchar[]", token.extensions, ^@scaled_ui_extension),
-      update: [
-        set: [
-          extensions:
-            fragment(
-              "(SELECT array_agg(DISTINCT extension ORDER BY extension) FROM unnest(COALESCE(?, ARRAY[]::varchar[]) || ARRAY[?]::varchar[]) AS extension)",
-              token.extensions,
-              ^@scaled_ui_extension
-            ),
-          updated_at: ^now
-        ]
-      ]
-    )
-    |> Repo.update_all([])
-
-    :ok
+    Token.merge_extensions(Repo, token_hashes, ["ERC-8056"])
   end
 
   defp maybe_check_scaled_ui_interfaces(_token, nil, _json_rpc_named_arguments), do: :ok

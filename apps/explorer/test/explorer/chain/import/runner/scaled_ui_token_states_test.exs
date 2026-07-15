@@ -2,10 +2,10 @@ defmodule Explorer.Chain.Import.Runner.ScaledUiTokenStatesTest do
   use Explorer.DataCase
 
   alias Ecto.Multi
+  alias Explorer.Chain.{ScaledUiMultiplierUpdate, Token}
   alias Explorer.Chain.Import.Runner.{ScaledUiMultiplierUpdates, ScaledUiTokenStates}
   alias Explorer.Chain.Import.Stage.TokenReferencing
   alias Explorer.Chain.ScaledUi.TokenState
-  alias Explorer.Chain.ScaledUiMultiplierUpdate
   alias Explorer.Repo
 
   describe "run/3" do
@@ -24,6 +24,19 @@ defmodule Explorer.Chain.Import.Runner.ScaledUiTokenStatesTest do
 
       assert Repo.get!(TokenState, address.hash).capability_block == 25
       assert Repo.aggregate(ScaledUiMultiplierUpdate, :count) == 0
+      refute Repo.get(Token, address.hash)
+    end
+
+    test "adds ERC-8056 to an existing token for a capability-only batch" do
+      token = insert(:token, extensions: ["ERC-7802"])
+
+      assert {:ok, %{scaled_ui_token_states: [token.contract_address_hash]}} ==
+               run_states([
+                 %{token_contract_address_hash: token.contract_address_hash, capability_block: 25}
+               ])
+
+      assert MapSet.new(Repo.get!(Token, token.contract_address_hash).extensions) ==
+               MapSet.new(["ERC-7802", "ERC-8056"])
     end
 
     test "rolls timeline inserts back when state rebuild fails" do

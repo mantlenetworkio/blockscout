@@ -180,6 +180,52 @@ defmodule Explorer.Chain.Token do
     |> unique_constraint(:contract_address_hash)
   end
 
+  @doc "Atomically adds extensions to existing tokens without removing their current extensions."
+  @spec merge_extensions(module(), [Hash.Address.t()], [String.t()], keyword()) :: :ok
+  def merge_extensions(repo, token_hashes, extensions, options \\ [])
+
+  def merge_extensions(_repo, [], _extensions, _options), do: :ok
+  def merge_extensions(_repo, _token_hashes, [], _options), do: :ok
+
+  def merge_extensions(repo, token_hashes, extensions, options) do
+    extensions = Enum.uniq(extensions)
+    token_hashes = Enum.uniq(token_hashes)
+    timeout = Keyword.get(options, :timeout, @timeout)
+    updated_at = Keyword.get(options, :updated_at, DateTime.utc_now())
+
+    locked_tokens =
+      from(token in Token,
+        where: token.contract_address_hash in ^token_hashes,
+        select: token.contract_address_hash,
+        order_by: [asc: token.contract_address_hash],
+        lock: "FOR NO KEY UPDATE"
+      )
+
+    from(token in Token,
+      where: token.contract_address_hash in subquery(locked_tokens),
+      where:
+        not fragment(
+          "COALESCE(?, ARRAY[]::varchar[]) @> ?",
+          token.extensions,
+          type(^extensions, {:array, :string})
+        ),
+      update: [
+        set: [
+          extensions:
+            fragment(
+              "(SELECT array_agg(DISTINCT extension ORDER BY extension) FROM unnest(COALESCE(?, ARRAY[]::varchar[]) || ?) AS extension)",
+              token.extensions,
+              type(^extensions, {:array, :string})
+            ),
+          updated_at: ^updated_at
+        ]
+      ]
+    )
+    |> repo.update_all([], timeout: timeout)
+
+    :ok
+  end
+
   defp trim_name(%Changeset{valid?: false} = changeset), do: changeset
 
   defp trim_name(%Changeset{valid?: true} = changeset) do

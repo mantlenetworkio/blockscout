@@ -4,7 +4,7 @@ defmodule Explorer.Chain.ScaledUi.TokenStateConcurrencyTest do
   import Ecto.Query, only: [from: 2]
   import Explorer.Factory
 
-  alias Explorer.Chain.{Address, Block, Hash, ScaledUiMultiplierUpdate, Transaction}
+  alias Explorer.Chain.{Address, Block, Hash, ScaledUiMultiplierUpdate, Token, Transaction}
   alias Explorer.Chain.ScaledUi.TokenState
   alias Explorer.Repo
 
@@ -89,6 +89,63 @@ defmodule Explorer.Chain.ScaledUi.TokenStateConcurrencyTest do
     state = Repo.get!(TokenState, address.hash)
     assert Decimal.equal?(state.base_multiplier, Decimal.new(2_000))
     assert state.timeline_status == "ok"
+  end
+
+  test "rebuild follows token then state lock order" do
+    Ecto.Adapters.SQL.Sandbox.mode(Repo, :auto)
+
+    parent = self()
+    address = insert_unique_address()
+    token = Repo.insert!(%Token{contract_address_hash: address.hash, type: "ERC-20"})
+    row = %{token_contract_address_hash: address.hash, capability_block: 100}
+
+    assert {:ok, [_]} = TokenState.rebuild(Repo, [row])
+
+    Repo.update_all(
+      from(existing_token in Token, where: existing_token.contract_address_hash == ^address.hash),
+      set: [extensions: nil]
+    )
+
+    on_exit(fn ->
+      Repo.delete_all(from(state in TokenState, where: state.token_contract_address_hash == ^address.hash))
+      Repo.delete!(token)
+      Repo.delete!(address)
+    end)
+
+    token_first =
+      Task.async(fn ->
+        Repo.transaction(fn ->
+          Repo.one!(
+            from(locked_token in Token,
+              where: locked_token.contract_address_hash == ^address.hash,
+              lock: "FOR NO KEY UPDATE"
+            )
+          )
+
+          send(parent, :token_locked)
+
+          receive do
+            :lock_state -> :ok
+          end
+
+          Repo.one!(
+            from(state in TokenState, where: state.token_contract_address_hash == ^address.hash, lock: "FOR UPDATE")
+          )
+        end)
+      end)
+
+    assert_receive :token_locked, 5_000
+
+    rebuild =
+      Task.async(fn ->
+        Repo.transaction(fn -> TokenState.rebuild(Repo, [row]) end, timeout: 10_000)
+      end)
+
+    refute Task.yield(rebuild, 100)
+    send(token_first.pid, :lock_state)
+
+    assert {:ok, %TokenState{}} = Task.await(token_first, 10_000)
+    assert {:ok, {:ok, [_]}} = Task.await(rebuild, 10_000)
   end
 
   defp capability_row(address, block_number) do
