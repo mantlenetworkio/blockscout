@@ -19,7 +19,7 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
   alias Explorer.Chain.Import
   alias Explorer.Chain.Import.Runner.ScaledUiMultiplierUpdates
   alias Explorer.Chain.ScaledUi.{BackfillGap, Events, MultiplierParser, Status, Timeline, TokenState, TransferPairing}
-  alias Explorer.Migrator.FillingMigration
+  alias Explorer.Migrator.{FillingMigration, MigrationStatus}
   alias Explorer.Repo
   alias Explorer.Utility.MissingBlockRange
 
@@ -32,8 +32,7 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
 
   @impl FillingMigration
   def last_unprocessed_identifiers(state) do
-    state = Map.put_new_lazy(state, "target_head", &canonical_head/0)
-    target_head = state["target_head"]
+    {target_head, state} = ensure_target_head(state)
     cursor = Map.get(state, "last_token_hash")
     limit = batch_size() * concurrency()
 
@@ -91,7 +90,15 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
     coverage_gaps(from_block, to_block) != []
   end
 
-  @doc "Returns the current canonical head used by retry workers."
+  @doc "Returns the fixed canonical head persisted for this migration."
+  def migration_target_head do
+    case MigrationStatus.fetch(@migration_name) do
+      %{meta: %{"target_head" => target_head}} when is_integer(target_head) -> {:ok, target_head}
+      _ -> :error
+    end
+  end
+
+  @doc "Returns the current canonical head."
   def canonical_head do
     Repo.one(from(block in Block, where: block.consensus == true, select: max(block.number)), timeout: @timeout) || -1
   end
@@ -101,6 +108,25 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
       {:ok, _result} -> :ok
       {:error, reason} -> raise "scaled UI backfill failed: #{inspect(reason)}"
     end
+  end
+
+  defp ensure_target_head(%{"target_head" => target_head} = state) when is_integer(target_head),
+    do: {target_head, state}
+
+  defp ensure_target_head(state) do
+    target_head =
+      case migration_target_head() do
+        {:ok, persisted_target_head} -> persisted_target_head
+        :error -> canonical_head()
+      end
+
+    case MigrationStatus.update_meta(@migration_name, %{"target_head" => target_head}) do
+      :ok -> :ok
+      {:ok, _migration_status} -> :ok
+      {:error, changeset} -> raise "failed to persist scaled UI backfill target head: #{inspect(changeset.errors)}"
+    end
+
+    {target_head, Map.put(state, "target_head", target_head)}
   end
 
   defp prepare_token(token_hash, target_head) do
@@ -535,10 +561,8 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
     internal_transaction_block =
       InternalTransaction
       |> InternalTransaction.where_address_match(:created_contract_address, token_hash)
-      |> join(:inner, [internal_transaction], block in Block,
-        on: block.number == internal_transaction.block_number and block.consensus == true
-      )
-      |> select([internal_transaction, _block], min(internal_transaction.block_number))
+      |> InternalTransaction.join_transaction_query()
+      |> select([internal_transaction, transaction: _transaction], min(internal_transaction.block_number))
       |> Repo.one(timeout: @timeout)
 
     [transaction_block, internal_transaction_block]

@@ -216,10 +216,13 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
       if ScaledUiBackfill.range_missing?(claim.from_block, claim.to_block) do
         {:error, :block_range_still_missing}
       else
-        ScaledUiBackfill.backfill_token(
-          claim.token_contract_address_hash,
-          ScaledUiBackfill.canonical_head()
-        )
+        case ScaledUiBackfill.migration_target_head() do
+          {:ok, target_head} ->
+            ScaledUiBackfill.backfill_token(claim.token_contract_address_hash, target_head)
+
+          :error ->
+            {:error, :backfill_target_head_unavailable}
+        end
       end
 
     case result do

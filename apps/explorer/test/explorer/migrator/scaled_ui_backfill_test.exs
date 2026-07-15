@@ -3,7 +3,7 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
 
   alias Explorer.Chain.{Hash, ScaledUiMultiplierUpdate, TokenTransfer}
   alias Explorer.Chain.ScaledUi.{BackfillGap, Events, TokenState}
-  alias Explorer.Migrator.ScaledUiBackfill
+  alias Explorer.Migrator.{MigrationStatus, ScaledUiBackfill}
   alias Explorer.Repo
   alias Explorer.Utility.MissingBlockRange
 
@@ -138,6 +138,46 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     assert gap.to_block == creation_block.number + 1
   end
 
+  test "ignores an internal creation whose parent transaction is not canonical" do
+    token = insert(:token)
+    creation_block = insert(:block, consensus: true)
+
+    orphaned_creation_transaction =
+      insert(:transaction)
+      |> with_block(creation_block,
+        block_consensus: false,
+        cumulative_gas_used: 1,
+        gas_used: 1
+      )
+
+    insert(:internal_transaction_create,
+      block_number: creation_block.number,
+      created_contract_address: token.contract_address,
+      index: 1,
+      transaction: orphaned_creation_transaction,
+      transaction_index: orphaned_creation_transaction.index
+    )
+
+    capability_block = insert(:block, number: creation_block.number + 2, consensus: true)
+
+    capability_transaction =
+      insert(:transaction) |> with_block(capability_block, cumulative_gas_used: 1, gas_used: 1)
+
+    insert_multiplier_log(token, capability_block, capability_transaction, 1, "3000000000000000000")
+
+    %MissingBlockRange{}
+    |> MissingBlockRange.changeset(%{
+      from_number: creation_block.number + 1,
+      to_number: creation_block.number + 1
+    })
+    |> Repo.insert!()
+
+    assert {:ok, _result} =
+             ScaledUiBackfill.backfill_token(token.contract_address_hash, capability_block.number)
+
+    assert BackfillGap.count() == 0
+  end
+
   test "re-judges a non-unknown snapshot after historical data is repaired" do
     token = insert(:token)
     block = insert(:block, consensus: true)
@@ -218,6 +258,17 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     assert token_hash == token.contract_address_hash
     assert target_head == block.number
     assert state["target_head"] == block.number
+  end
+
+  test "persists the target head before returning the first migration batch" do
+    assert {:ok, _status} = MigrationStatus.set_status(ScaledUiBackfill.migration_name(), "started")
+    block = insert(:block, consensus: true)
+
+    assert {_identifiers, %{"target_head" => target_head}} =
+             ScaledUiBackfill.last_unprocessed_identifiers(%{})
+
+    assert target_head == block.number
+    assert MigrationStatus.fetch(ScaledUiBackfill.migration_name()).meta["target_head"] == block.number
   end
 
   test "resumes token discovery after the persisted hash cursor" do

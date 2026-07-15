@@ -3,9 +3,10 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
 
   import Ecto.Query
 
-  alias Explorer.Chain.{Block, ScaledUiMultiplierUpdate, TokenTransfer}
+  alias Explorer.Chain.{Block, Hash, ScaledUiMultiplierUpdate, TokenTransfer}
   alias Explorer.Chain.Cache.BackgroundMigrations
-  alias Explorer.Chain.ScaledUi.{BackfillGap, TokenState}
+  alias Explorer.Chain.ScaledUi.{BackfillGap, Events, TokenState}
+  alias Explorer.Migrator.{MigrationStatus, ScaledUiBackfill}
   alias Explorer.Repo
   alias Explorer.Utility.MissingBlockRange
   alias Indexer.Fetcher.ScaledUiEnrichment
@@ -93,10 +94,40 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
   test "retries claimed backfill gaps after normal block coverage is restored" do
     token = insert(:token)
     now = DateTime.utc_now()
+    put_backfill_target_head(20)
     BackfillGap.put_ranges(Repo, token.contract_address_hash, [%{from_block: 10, to_block: 20}], now: now)
 
     assert :ok = ScaledUiEnrichment.retry_backfill_gaps(batch_size: 1)
     assert BackfillGap.count() == 0
+  end
+
+  test "retries a gap only through the migration's fixed target head" do
+    token = insert(:token)
+    block = insert(:block, consensus: true)
+    transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+    target_head = block.number - 1
+    now = DateTime.utc_now()
+
+    insert(:log,
+      address: token.contract_address,
+      block: block,
+      block_number: block.number,
+      first_topic: topic(Events.transfer_with_ui_amount_topic()),
+      transaction: transaction
+    )
+
+    put_backfill_target_head(target_head)
+
+    BackfillGap.put_ranges(
+      Repo,
+      token.contract_address_hash,
+      [%{from_block: target_head, to_block: target_head}],
+      now: now
+    )
+
+    assert :ok = ScaledUiEnrichment.retry_backfill_gaps(batch_size: 1)
+    assert BackfillGap.count() == 0
+    assert Repo.get(TokenState, token.contract_address_hash) == nil
   end
 
   test "backs off a claimed gap while its block range is still missing" do
@@ -113,6 +144,19 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
     gap = Repo.one!(BackfillGap)
     assert gap.retry_count == 1
     assert gap.last_error == ":block_range_still_missing"
+  end
+
+  test "backs off instead of retrying against the current head when the migration target is unavailable" do
+    token = insert(:token)
+    now = DateTime.utc_now()
+    BackfillGap.put_ranges(Repo, token.contract_address_hash, [%{from_block: 10, to_block: 20}], now: now)
+
+    assert :ok = ScaledUiEnrichment.retry_backfill_gaps(batch_size: 1)
+
+    gap = Repo.one!(BackfillGap)
+    assert gap.retry_count == 1
+    assert gap.last_error == ":backfill_target_head_unavailable"
+    assert Repo.get(TokenState, token.contract_address_hash) == nil
   end
 
   defp insert_unknown_transfer(ui_value, options \\ []) do
@@ -156,6 +200,11 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
     transfer
   end
 
+  defp put_backfill_target_head(target_head) do
+    assert {:ok, _status} = MigrationStatus.set_status(ScaledUiBackfill.migration_name(), "started")
+    assert {:ok, _status} = MigrationStatus.set_meta(ScaledUiBackfill.migration_name(), %{"target_head" => target_head})
+  end
+
   defp insert_multiplier(transfer, multiplier) do
     block_timestamp = Decimal.new(DateTime.to_unix(transfer.block.timestamp))
 
@@ -185,5 +234,10 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
     else
       assert updated.ui_multiplier == nil
     end
+  end
+
+  defp topic(value) do
+    {:ok, topic} = Hash.Full.cast(value)
+    topic
   end
 end
