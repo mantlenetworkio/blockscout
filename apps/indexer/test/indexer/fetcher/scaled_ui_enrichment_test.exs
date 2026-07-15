@@ -3,6 +3,7 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
 
   import Ecto.Query
 
+  alias Ecto.Adapters.SQL.Sandbox
   alias Explorer.Chain.{Block, Hash, ScaledUiMultiplierUpdate, TokenTransfer}
   alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.ScaledUi.{BackfillGap, Events, TokenState}
@@ -196,6 +197,97 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
     assert gap.retry_count == 1
     assert gap.last_error == ":backfill_target_head_unavailable"
     assert Repo.get(TokenState, token.contract_address_hash) == nil
+  end
+
+  test "stops a replay whose heartbeat loses claim ownership" do
+    Sandbox.mode(Repo, {:shared, self()})
+
+    token = insert(:token)
+    block = insert(:block, number: 10, consensus: true)
+    transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+    now = DateTime.utc_now()
+
+    insert(:log,
+      address: token.contract_address,
+      block: block,
+      block_number: block.number,
+      first_topic: topic(Events.transfer_with_ui_amount_topic()),
+      transaction: transaction
+    )
+
+    put_backfill_target_head(block.number)
+    BackfillGap.put_ranges(Repo, token.contract_address_hash, [%{from_block: 10, to_block: 10}], now: now)
+
+    parent = self()
+    replacement_lease_id = Ecto.UUID.generate()
+
+    renew_claim = fn claim, _options ->
+      from(gap in BackfillGap,
+        where: gap.token_contract_address_hash == ^claim.token_contract_address_hash,
+        where: gap.lease_id == ^claim.lease_id
+      )
+      |> Repo.update_all(set: [lease_id: replacement_lease_id])
+
+      send(parent, :lease_replaced)
+      {0, nil}
+    end
+
+    backfill = fn _claim, cancellation_check ->
+      receive do
+        :lease_replaced -> cancellation_check.()
+      after
+        1_000 -> {:error, :heartbeat_not_observed}
+      end
+    end
+
+    assert :ok =
+             ScaledUiEnrichment.retry_backfill_gaps(
+               backfill: backfill,
+               batch_size: 1,
+               heartbeat_interval: 0,
+               lease_seconds: 1,
+               renew_claim: renew_claim
+             )
+
+    assert Repo.get(TokenState, token.contract_address_hash) == nil
+    assert Repo.one!(BackfillGap).lease_id == replacement_lease_id
+  end
+
+  test "treats a crashed heartbeat as a lost claim" do
+    Sandbox.mode(Repo, {:shared, self()})
+
+    token = insert(:token)
+    now = DateTime.utc_now()
+    put_backfill_target_head(10)
+    BackfillGap.put_ranges(Repo, token.contract_address_hash, [%{from_block: 10, to_block: 10}], now: now)
+
+    parent = self()
+
+    renew_claim = fn _claim, _options ->
+      send(parent, :renew_attempted)
+      exit(:heartbeat_failed)
+    end
+
+    backfill = fn _claim, cancellation_check ->
+      receive do
+        :renew_attempted -> cancellation_check.()
+      after
+        1_000 -> {:error, :heartbeat_not_observed}
+      end
+    end
+
+    assert :ok =
+             ScaledUiEnrichment.retry_backfill_gaps(
+               backfill: backfill,
+               batch_size: 1,
+               heartbeat_interval: 0,
+               lease_seconds: 1,
+               renew_claim: renew_claim
+             )
+
+    gap = Repo.one!(BackfillGap)
+    assert gap.retry_count == 1
+    assert gap.last_error == ":backfill_claim_lost"
   end
 
   defp insert_unknown_transfer(ui_value, options \\ []) do

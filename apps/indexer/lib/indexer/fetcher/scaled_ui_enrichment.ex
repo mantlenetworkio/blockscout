@@ -64,11 +64,17 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
 
   @doc false
   def retry_backfill_gaps(options \\ []) do
-    batch_size = Keyword.get(options, :batch_size, 10)
     lease_seconds = Keyword.get(options, :lease_seconds, @gap_lease_seconds)
-    heartbeat_interval = Keyword.get(options, :heartbeat_interval, max(div(lease_seconds, 3), 1))
 
-    retry_due_gaps(batch_size, lease_seconds, heartbeat_interval)
+    retry_options = %{
+      backfill: Keyword.get(options, :backfill, &backfill_claim/2),
+      heartbeat_interval: Keyword.get(options, :heartbeat_interval, max(div(lease_seconds, 3), 1)),
+      lease_seconds: lease_seconds,
+      remaining: Keyword.get(options, :batch_size, 10),
+      renew_claim: Keyword.get(options, :renew_claim, &BackfillGap.renew_claim/2)
+    }
+
+    retry_due_gaps(retry_options)
     :ok
   end
 
@@ -274,23 +280,23 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
     Application.get_env(:indexer, __MODULE__, [])[:interval] || @interval
   end
 
-  defp retry_due_gaps(remaining, _lease_seconds, _heartbeat_interval) when remaining <= 0, do: :ok
+  defp retry_due_gaps(%{remaining: remaining}) when remaining <= 0, do: :ok
 
-  defp retry_due_gaps(remaining, lease_seconds, heartbeat_interval) do
-    case BackfillGap.claim_due(lease_seconds: lease_seconds) do
+  defp retry_due_gaps(options) do
+    case BackfillGap.claim_due(lease_seconds: options.lease_seconds) do
       [] ->
         :ok
 
       [claim] ->
-        retry_backfill_gap(claim, lease_seconds, heartbeat_interval)
-        retry_due_gaps(remaining - 1, lease_seconds, heartbeat_interval)
+        retry_backfill_gap(claim, options)
+        retry_due_gaps(%{options | remaining: options.remaining - 1})
     end
   end
 
-  defp retry_backfill_gap(claim, lease_seconds, heartbeat_interval) do
+  defp retry_backfill_gap(claim, options) do
     result =
-      with_claim_heartbeat(claim, lease_seconds, heartbeat_interval, fn ->
-        retry_claim(claim)
+      with_claim_heartbeat(claim, options, fn cancellation_check ->
+        retry_claim(claim, cancellation_check, options.backfill)
       end)
 
     case result do
@@ -301,38 +307,71 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
     error -> BackfillGap.fail_claim(claim, error)
   end
 
-  defp retry_claim(claim) do
+  defp retry_claim(claim, cancellation_check, backfill) do
+    case cancellation_check.() do
+      :ok -> retry_active_claim(claim, cancellation_check, backfill)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp retry_active_claim(claim, cancellation_check, backfill) do
     if ScaledUiBackfill.range_missing?(claim.from_block, claim.to_block) do
       {:error, :block_range_still_missing}
     else
-      backfill_claim(claim)
+      backfill.(claim, cancellation_check)
     end
   end
 
-  defp backfill_claim(claim) do
+  defp backfill_claim(claim, cancellation_check) do
     case ScaledUiBackfill.migration_target_head() do
-      {:ok, target_head} -> ScaledUiBackfill.backfill_token(claim.token_contract_address_hash, target_head)
-      :error -> {:error, :backfill_target_head_unavailable}
+      {:ok, target_head} ->
+        ScaledUiBackfill.backfill_token(claim.token_contract_address_hash, target_head,
+          cancellation_check: cancellation_check
+        )
+
+      :error ->
+        {:error, :backfill_target_head_unavailable}
     end
   end
 
-  defp with_claim_heartbeat(claim, lease_seconds, heartbeat_interval, callback) do
+  defp with_claim_heartbeat(claim, options, callback) do
     owner = self()
-    heartbeat = spawn(fn -> claim_heartbeat(owner, claim, lease_seconds, heartbeat_interval) end)
+    heartbeat_ref = make_ref()
+
+    {heartbeat, monitor_ref} =
+      spawn_monitor(fn ->
+        claim_heartbeat(owner, heartbeat_ref, claim, options)
+      end)
+
+    cancellation_check = fn -> claim_heartbeat_status(heartbeat_ref, monitor_ref) end
 
     try do
-      callback.()
+      run_with_cancellation_check(callback, cancellation_check)
     after
-      stop_claim_heartbeat(heartbeat)
+      stop_claim_heartbeat(heartbeat, monitor_ref)
     end
   end
 
-  defp claim_heartbeat(owner, claim, lease_seconds, heartbeat_interval) do
-    owner_ref = Process.monitor(owner)
-    claim_heartbeat_loop(owner_ref, claim, lease_seconds, heartbeat_interval)
+  defp run_with_cancellation_check(callback, cancellation_check) do
+    case cancellation_check.() do
+      :ok -> ensure_claim_after_callback(callback.(cancellation_check), cancellation_check)
+      {:error, reason} -> {:error, reason}
+    end
   end
 
-  defp claim_heartbeat_loop(owner_ref, claim, lease_seconds, heartbeat_interval) do
+  defp ensure_claim_after_callback(result, cancellation_check) do
+    case cancellation_check.() do
+      :ok -> result
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp claim_heartbeat(owner, heartbeat_ref, claim, options) do
+    owner_ref = Process.monitor(owner)
+    claim_heartbeat_loop(owner, owner_ref, heartbeat_ref, claim, options)
+  end
+
+  defp claim_heartbeat_loop(owner, owner_ref, heartbeat_ref, claim, options) do
     receive do
       {:stop, caller, stop_ref} ->
         send(caller, {:stopped, stop_ref})
@@ -340,22 +379,36 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
       {:DOWN, ^owner_ref, :process, _pid, _reason} ->
         :ok
     after
-      :timer.seconds(heartbeat_interval) ->
-        case BackfillGap.renew_claim(claim, lease_seconds: lease_seconds) do
-          {count, _} when count > 0 -> claim_heartbeat_loop(owner_ref, claim, lease_seconds, heartbeat_interval)
-          _ -> :ok
+      :timer.seconds(options.heartbeat_interval) ->
+        case options.renew_claim.(claim, lease_seconds: options.lease_seconds) do
+          {count, _} when count > 0 -> claim_heartbeat_loop(owner, owner_ref, heartbeat_ref, claim, options)
+          _ -> send(owner, {:scaled_ui_backfill_claim_lost, heartbeat_ref})
         end
     end
   end
 
-  defp stop_claim_heartbeat(heartbeat) do
-    stop_ref = make_ref()
-    send(heartbeat, {:stop, self(), stop_ref})
-
+  defp claim_heartbeat_status(heartbeat_ref, monitor_ref) do
     receive do
-      {:stopped, ^stop_ref} -> :ok
+      {:scaled_ui_backfill_claim_lost, ^heartbeat_ref} -> {:error, :backfill_claim_lost}
+      {:DOWN, ^monitor_ref, :process, _pid, _reason} -> {:error, :backfill_claim_lost}
     after
-      1_000 -> :ok
+      0 -> :ok
     end
+  end
+
+  defp stop_claim_heartbeat(heartbeat, monitor_ref) do
+    if Process.alive?(heartbeat) do
+      stop_ref = make_ref()
+      send(heartbeat, {:stop, self(), stop_ref})
+
+      receive do
+        {:stopped, ^stop_ref} -> :ok
+        {:DOWN, ^monitor_ref, :process, ^heartbeat, _reason} -> :ok
+      after
+        1_000 -> :ok
+      end
+    end
+
+    Process.demonitor(monitor_ref, [:flush])
   end
 end

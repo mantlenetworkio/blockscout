@@ -265,6 +265,42 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     assert reload(second_transfer).ui_amount_status == "ok"
   end
 
+  test "stops between transfer batches after cancellation" do
+    token = insert(:token)
+    block = insert(:block, consensus: true)
+    from_address = insert(:address)
+    to_address = insert(:address)
+
+    first_transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+    second_transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+
+    transfers = [
+      insert_transfer(token, block, first_transaction, from_address, to_address, 10),
+      insert_transfer(token, block, second_transaction, from_address, to_address, 20)
+    ]
+
+    insert_multiplier_log(token, block, first_transaction, 1, "3000000000000000000")
+    insert_ui_log(token, block, first_transaction, from_address, to_address, 11, 2, 6)
+    insert_ui_log(token, block, second_transaction, from_address, to_address, 21, 2, 6)
+
+    counter_key = make_ref()
+    Process.put(counter_key, 0)
+
+    cancellation_check = fn ->
+      check_count = Process.get(counter_key) + 1
+      Process.put(counter_key, check_count)
+
+      if check_count < 3, do: :ok, else: {:error, :backfill_claim_lost}
+    end
+
+    assert {:error, :backfill_claim_lost} =
+             ScaledUiBackfill.backfill_token(token.contract_address_hash, block.number,
+               cancellation_check: cancellation_check
+             )
+
+    assert Enum.count(transfers, &(reload(&1).ui_amount_status != nil)) == 1
+  end
+
   test "serializes concurrent backfills for the same token" do
     token = insert(:token)
     parent = self()

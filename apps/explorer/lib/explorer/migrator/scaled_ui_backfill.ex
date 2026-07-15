@@ -73,26 +73,37 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
   end
 
   @doc "Backfills one token through a fixed canonical head and invalidates counters after commit."
-  def backfill_token(token_hash, target_head) do
+  def backfill_token(token_hash, target_head, options \\ []) do
+    cancellation_check = Keyword.get(options, :cancellation_check, fn -> :ok end)
+
     Repo.checkout(
-      fn -> with_token_lock(token_hash, fn -> backfill_token_locked(token_hash, target_head) end) end,
+      fn ->
+        with_token_lock(token_hash, fn -> backfill_token_locked(token_hash, target_head, cancellation_check) end)
+      end,
       timeout: @timeout
     )
   end
 
-  defp backfill_token_locked(token_hash, target_head) do
-    case Repo.transaction(fn -> prepare_token(token_hash, target_head) end, timeout: @timeout) do
-      {:ok, prepared} -> backfill_prepared(token_hash, prepared)
+  defp backfill_token_locked(token_hash, target_head, cancellation_check) do
+    case cancellation_check.() do
+      :ok -> prepare_and_backfill_token(token_hash, target_head, cancellation_check)
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp backfill_prepared(token_hash, prepared) when prepared in [nil, :deferred] do
+  defp prepare_and_backfill_token(token_hash, target_head, cancellation_check) do
+    case Repo.transaction(fn -> prepare_token(token_hash, target_head) end, timeout: @timeout) do
+      {:ok, prepared} -> backfill_prepared(token_hash, prepared, cancellation_check)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp backfill_prepared(token_hash, prepared, _cancellation_check) when prepared in [nil, :deferred] do
     {:ok, %{token_contract_address_hash: token_hash, updated_transfers: 0}}
   end
 
-  defp backfill_prepared(token_hash, prepared) do
-    case process_transfer_batches(prepared, nil, 0) do
+  defp backfill_prepared(token_hash, prepared, cancellation_check) do
+    case process_transfer_batches(prepared, nil, 0, cancellation_check) do
       {:ok, updated_transfers} ->
         {:ok, %{token_contract_address_hash: token_hash, updated_transfers: updated_transfers}}
 
@@ -259,7 +270,14 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
       })
   end
 
-  defp process_transfer_batches(prepared, cursor, updated_total) do
+  defp process_transfer_batches(prepared, cursor, updated_total, cancellation_check) do
+    case cancellation_check.() do
+      :ok -> process_transfer_batches_active(prepared, cursor, updated_total, cancellation_check)
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp process_transfer_batches_active(prepared, cursor, updated_total, cancellation_check) do
     case Repo.transaction(fn -> process_transfer_batch(prepared, cursor) end, timeout: @timeout) do
       {:ok, :done} ->
         {:ok, updated_total}
@@ -273,7 +291,8 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
         process_transfer_batches(
           prepared,
           transaction_cursor,
-          updated_total + updated_count
+          updated_total + updated_count,
+          cancellation_check
         )
 
       {:error, reason} ->
