@@ -385,6 +385,25 @@ defmodule Explorer.Utility.MissingBlockRange do
     |> Repo.one()
   end
 
+  @doc "Returns every missing interval intersecting the supplied ascending block range."
+  @spec intersections(Block.block_number(), Block.block_number()) :: [
+          %{from_block: Block.block_number(), to_block: Block.block_number()}
+        ]
+  def intersections(lower_number, higher_number)
+      when is_integer(lower_number) and lower_number >= 0 and
+             is_integer(higher_number) and lower_number <= higher_number do
+    from(range in __MODULE__,
+      where: range.to_number <= ^higher_number,
+      where: range.from_number >= ^lower_number,
+      order_by: [asc: range.to_number],
+      select: %{
+        from_block: fragment("GREATEST(?, ?)", range.to_number, ^lower_number),
+        to_block: fragment("LEAST(?, ?)", range.from_number, ^higher_number)
+      }
+    )
+    |> Repo.all()
+  end
+
   # Inserts a new missing block range record with the provided parameters
   @spec insert_range(map()) :: {:ok, t()} | {:error, Ecto.Changeset.t()}
   defp insert_range(%{from_number: from, to_number: to} = params) do

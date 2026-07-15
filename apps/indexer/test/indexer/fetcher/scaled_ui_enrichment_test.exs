@@ -5,8 +5,9 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
 
   alias Explorer.Chain.{Block, ScaledUiMultiplierUpdate, TokenTransfer}
   alias Explorer.Chain.Cache.BackgroundMigrations
-  alias Explorer.Chain.ScaledUi.TokenState
+  alias Explorer.Chain.ScaledUi.{BackfillGap, TokenState}
   alias Explorer.Repo
+  alias Explorer.Utility.MissingBlockRange
   alias Indexer.Fetcher.ScaledUiEnrichment
 
   setup do
@@ -87,6 +88,31 @@ defmodule Indexer.Fetcher.ScaledUiEnrichmentTest do
 
     assert {:ok, 0} = ScaledUiEnrichment.enrich_batch()
     assert_transfer(transfer, "unknown", nil)
+  end
+
+  test "retries claimed backfill gaps after normal block coverage is restored" do
+    token = insert(:token)
+    now = DateTime.utc_now()
+    BackfillGap.put_ranges(Repo, token.contract_address_hash, [%{from_block: 10, to_block: 20}], now: now)
+
+    assert :ok = ScaledUiEnrichment.retry_backfill_gaps(batch_size: 1)
+    assert BackfillGap.count() == 0
+  end
+
+  test "backs off a claimed gap while its block range is still missing" do
+    token = insert(:token)
+    now = DateTime.utc_now()
+    BackfillGap.put_ranges(Repo, token.contract_address_hash, [%{from_block: 10, to_block: 20}], now: now)
+
+    %MissingBlockRange{}
+    |> MissingBlockRange.changeset(%{from_number: 20, to_number: 10})
+    |> Repo.insert!()
+
+    assert :ok = ScaledUiEnrichment.retry_backfill_gaps(batch_size: 1)
+
+    gap = Repo.one!(BackfillGap)
+    assert gap.retry_count == 1
+    assert gap.last_error == ":block_range_still_missing"
   end
 
   defp insert_unknown_transfer(ui_value, options \\ []) do

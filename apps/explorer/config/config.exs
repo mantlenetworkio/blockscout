@@ -128,6 +128,7 @@ for migrator <- [
       Explorer.Migrator.SanitizeMissingTokenBalances,
       Explorer.Migrator.SanitizeReplacedTransactions,
       Explorer.Migrator.ReindexInternalTransactionsWithIncompatibleStatus,
+      Explorer.Migrator.ScaledUiBackfill,
       Explorer.Migrator.SanitizeDuplicatedLogIndexLogs,
       Explorer.Migrator.RefetchContractCodes,
       Explorer.Migrator.BackfillMultichainSearchDB,

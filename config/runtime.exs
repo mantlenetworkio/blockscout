@@ -1240,6 +1240,12 @@ config :indexer, Indexer.Fetcher.ScaledUiEnrichment,
   batch_size: ConfigHelper.parse_integer_env_var("INDEXER_SCALED_UI_ENRICHMENT_BATCH_SIZE", 500),
   interval: ConfigHelper.parse_time_env_var("INDEXER_SCALED_UI_ENRICHMENT_INTERVAL", "10s")
 
+config :explorer, Explorer.Migrator.ScaledUiBackfill,
+  batch_size: ConfigHelper.parse_integer_env_var("INDEXER_SCALED_UI_BACKFILL_BATCH_SIZE", 100),
+  concurrency: ConfigHelper.parse_integer_env_var("INDEXER_SCALED_UI_BACKFILL_CONCURRENCY", 4),
+  timeout: ConfigHelper.parse_time_env_var("INDEXER_SCALED_UI_BACKFILL_INTERVAL", "10s"),
+  transfer_batch_size: ConfigHelper.parse_integer_env_var("INDEXER_SCALED_UI_BACKFILL_TRANSFER_BATCH_SIZE", 500)
+
 config :indexer, Indexer.Block.Realtime.Fetcher,
   max_gap: ConfigHelper.parse_integer_env_var("INDEXER_REALTIME_FETCHER_MAX_GAP", 1_000),
   polling_period: ConfigHelper.parse_time_env_var("INDEXER_REALTIME_FETCHER_POLLING_PERIOD")

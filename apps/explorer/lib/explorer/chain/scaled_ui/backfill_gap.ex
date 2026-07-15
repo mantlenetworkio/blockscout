@@ -1,0 +1,190 @@
+defmodule Explorer.Chain.ScaledUi.BackfillGap do
+  @moduledoc """
+  Persistent retry queue for block ranges that prevent complete ERC-8056 backfill.
+
+  Claims use a short lease so RPC or database work never runs while row locks are
+  held. Completion and failure updates match the lease timestamp, preventing a
+  stale worker from modifying a row that has already been reclaimed.
+  """
+
+  use Explorer.Schema
+
+  import Ecto.Query
+
+  alias Explorer.Chain.{Address, Hash}
+  alias Explorer.Repo
+
+  @lease_seconds 300
+  @max_backoff_seconds 86_400
+
+  @primary_key false
+  typed_schema "scaled_ui_backfill_gaps" do
+    field(:from_block, :integer, primary_key: true)
+    field(:to_block, :integer)
+    field(:retry_count, :integer, default: 0)
+    field(:next_retry_at, :utc_datetime_usec)
+    field(:last_error, :string)
+
+    belongs_to(:token_contract_address, Address,
+      foreign_key: :token_contract_address_hash,
+      primary_key: true,
+      references: :hash,
+      type: Hash.Address,
+      null: false
+    )
+
+    timestamps()
+  end
+
+  def changeset(gap \\ %__MODULE__{}, params) do
+    gap
+    |> cast(params, [
+      :token_contract_address_hash,
+      :from_block,
+      :to_block,
+      :retry_count,
+      :next_retry_at,
+      :last_error
+    ])
+    |> validate_required([:token_contract_address_hash, :from_block, :to_block])
+    |> validate_number(:from_block, greater_than_or_equal_to: 0)
+    |> validate_number(:to_block, greater_than_or_equal_to: 0)
+    |> validate_number(:retry_count, greater_than_or_equal_to: 0)
+    |> validate_range()
+    |> foreign_key_constraint(:token_contract_address_hash)
+  end
+
+  @doc "Upserts missing ranges for one token and makes new gaps immediately retryable."
+  def put_ranges(repo, token_hash, ranges, options \\ []) do
+    now = Keyword.get(options, :now, DateTime.utc_now())
+
+    rows =
+      ranges
+      |> Enum.map(fn %{from_block: from_block, to_block: to_block} ->
+        %{
+          token_contract_address_hash: token_hash,
+          from_block: from_block,
+          to_block: to_block,
+          retry_count: 0,
+          next_retry_at: now,
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+      |> Enum.uniq_by(& &1.from_block)
+
+    repo.insert_all(__MODULE__, rows,
+      conflict_target: [:token_contract_address_hash, :from_block],
+      on_conflict:
+        from(gap in __MODULE__,
+          update: [
+            set: [
+              to_block: fragment("GREATEST(?, EXCLUDED.to_block)", gap.to_block),
+              next_retry_at: fragment("EXCLUDED.next_retry_at"),
+              updated_at: fragment("EXCLUDED.updated_at")
+            ]
+          ]
+        ),
+      timeout: :infinity
+    )
+  end
+
+  @doc "Claims due gaps with SKIP LOCKED and returns their lease timestamp."
+  @spec claim_due(pos_integer(), keyword()) :: [map()]
+  def claim_due(limit \\ 10, options \\ []) do
+    lease_seconds = Keyword.get(options, :lease_seconds, @lease_seconds)
+
+    Repo.transaction(
+      fn ->
+        Repo.query!(
+          """
+          WITH due AS (
+            SELECT token_contract_address_hash, from_block
+            FROM scaled_ui_backfill_gaps
+            WHERE next_retry_at <= NOW()
+            ORDER BY next_retry_at, token_contract_address_hash, from_block
+            FOR UPDATE SKIP LOCKED
+            LIMIT $1
+          )
+          UPDATE scaled_ui_backfill_gaps AS gap
+          SET next_retry_at = NOW() + ($2 * INTERVAL '1 second'),
+              updated_at = NOW()
+          FROM due
+          WHERE gap.token_contract_address_hash = due.token_contract_address_hash
+            AND gap.from_block = due.from_block
+          RETURNING gap.token_contract_address_hash, gap.from_block, gap.to_block,
+                    gap.retry_count, gap.next_retry_at
+          """,
+          [limit, lease_seconds]
+        ).rows
+      end,
+      timeout: :infinity
+    )
+    |> case do
+      {:ok, rows} -> Enum.map(rows, &row_to_claim/1)
+      {:error, reason} -> raise reason
+    end
+  end
+
+  @doc "Deletes a gap only if the caller still owns its lease."
+  def complete_claim(claim) do
+    from(gap in __MODULE__,
+      where: gap.token_contract_address_hash == ^claim.token_contract_address_hash,
+      where: gap.from_block == ^claim.from_block,
+      where: gap.next_retry_at == ^claim.lease_until
+    )
+    |> Repo.delete_all(timeout: :infinity)
+  end
+
+  @doc "Releases a claimed gap with capped exponential backoff."
+  def fail_claim(claim, error, options \\ []) do
+    now = Keyword.get(options, :now, DateTime.utc_now())
+    backoff_seconds = min(round(:math.pow(2, claim.retry_count)) * 60, @max_backoff_seconds)
+
+    from(gap in __MODULE__,
+      where: gap.token_contract_address_hash == ^claim.token_contract_address_hash,
+      where: gap.from_block == ^claim.from_block,
+      where: gap.next_retry_at == ^claim.lease_until,
+      update: [
+        set: [
+          retry_count: gap.retry_count + 1,
+          next_retry_at: ^DateTime.add(now, backoff_seconds, :second),
+          last_error: ^error_message(error),
+          updated_at: ^now
+        ]
+      ]
+    )
+    |> Repo.update_all([], timeout: :infinity)
+  end
+
+  def count, do: Repo.aggregate(__MODULE__, :count, timeout: :infinity)
+
+  defp row_to_claim([token_hash, from_block, to_block, retry_count, lease_until]) do
+    {:ok, token_hash} = Hash.Address.load(token_hash)
+
+    %{
+      token_contract_address_hash: token_hash,
+      from_block: from_block,
+      to_block: to_block,
+      retry_count: retry_count,
+      lease_until: normalize_timestamp(lease_until)
+    }
+  end
+
+  defp error_message(%{__exception__: true} = error), do: error |> Exception.message() |> String.slice(0, 255)
+  defp error_message(error), do: error |> inspect() |> String.slice(0, 255)
+
+  defp normalize_timestamp(%NaiveDateTime{} = timestamp), do: DateTime.from_naive!(timestamp, "Etc/UTC")
+  defp normalize_timestamp(%DateTime{} = timestamp), do: timestamp
+
+  defp validate_range(changeset) do
+    from_block = get_field(changeset, :from_block)
+    to_block = get_field(changeset, :to_block)
+
+    if is_integer(from_block) and is_integer(to_block) and from_block > to_block do
+      add_error(changeset, :to_block, "must be greater than or equal to from_block")
+    else
+      changeset
+    end
+  end
+end

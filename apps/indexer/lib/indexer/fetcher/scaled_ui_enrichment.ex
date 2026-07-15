@@ -11,7 +11,8 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
 
   alias Explorer.Chain.{Block, Hash, ScaledUiMultiplierUpdate, TokenTransfer}
   alias Explorer.Chain.Cache.BackgroundMigrations
-  alias Explorer.Chain.ScaledUi.{Status, Timeline, TokenState}
+  alias Explorer.Chain.ScaledUi.{BackfillGap, Status, Timeline, TokenState}
+  alias Explorer.Migrator.ScaledUiBackfill
   alias Explorer.Repo
 
   @batch_size 500
@@ -43,7 +44,10 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
 
   @impl GenServer
   def handle_info(:enrich, state) do
-    case enrich_batch() do
+    enrichment_result = enrich_batch()
+    retry_backfill_gaps()
+
+    case enrichment_result do
       {:ok, count} when count > 0 ->
         send(self(), :enrich)
 
@@ -52,6 +56,16 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
     end
 
     {:noreply, state}
+  end
+
+  @doc false
+  def retry_backfill_gaps(options \\ []) do
+    options
+    |> Keyword.get(:batch_size, 10)
+    |> BackfillGap.claim_due()
+    |> Enum.each(&retry_backfill_gap/1)
+
+    :ok
   end
 
   @doc "Re-evaluates one batch after the supporting partial index is available."
@@ -195,5 +209,24 @@ defmodule Indexer.Fetcher.ScaledUiEnrichment do
 
   defp interval do
     Application.get_env(:indexer, __MODULE__, [])[:interval] || @interval
+  end
+
+  defp retry_backfill_gap(claim) do
+    result =
+      if ScaledUiBackfill.range_missing?(claim.from_block, claim.to_block) do
+        {:error, :block_range_still_missing}
+      else
+        ScaledUiBackfill.backfill_token(
+          claim.token_contract_address_hash,
+          ScaledUiBackfill.canonical_head()
+        )
+      end
+
+    case result do
+      {:ok, _backfill_result} -> BackfillGap.complete_claim(claim)
+      {:error, reason} -> BackfillGap.fail_claim(claim, reason)
+    end
+  rescue
+    error -> BackfillGap.fail_claim(claim, error)
   end
 end
