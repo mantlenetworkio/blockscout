@@ -36,7 +36,7 @@ defmodule Explorer.Application do
 
   alias Explorer.Market.MarketHistoryCache
   alias Explorer.MicroserviceInterfaces.MultichainSearch
-  alias Explorer.Prometheus.Instrumenter
+  alias Explorer.Prometheus.{Instrumenter, ScaledUi}
   alias Explorer.Repo.PrometheusLogger
   alias Explorer.Utility.Hammer
   alias Oban.Telemetry, as: ObanTelemetry
@@ -46,6 +46,7 @@ defmodule Explorer.Application do
   def start(_type, _args) do
     PrometheusLogger.setup()
     Instrumenter.setup()
+    ScaledUi.setup()
 
     if Application.get_env(:explorer, Oban, [])[:enabled] && Explorer.mode() in [:api, :all] do
       ObanTelemetry.attach_default_logger()
@@ -235,6 +236,10 @@ defmodule Explorer.Application do
         ),
         configure_mode_dependent_process(
           Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressHashFirstTopicBlockNumberIndexIndex,
+          :indexer
+        ),
+        configure_mode_dependent_process(
+          Explorer.Migrator.HeavyDbIndexOperation.CreateTokenTransfersScaledUiInventoryIndex,
           :indexer
         ),
         configure_mode_dependent_process(

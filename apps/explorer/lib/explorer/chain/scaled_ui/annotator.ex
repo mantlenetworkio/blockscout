@@ -47,7 +47,10 @@ defmodule Explorer.Chain.ScaledUi.Annotator do
 
     block_timestamps = Map.get(batch_events, :block_timestamps, %{})
 
-    Enum.map(transfers, &annotate_transfer(&1, boundaries, events_by_token, block_timestamps))
+    annotated_transfers = Enum.map(transfers, &annotate_transfer(&1, boundaries, events_by_token, block_timestamps))
+
+    emit_event_missing_determinations(annotated_transfers)
+    annotated_transfers
   end
 
   defp load_states([]), do: %{}
@@ -144,6 +147,14 @@ defmodule Explorer.Chain.ScaledUi.Annotator do
 
   defp scaled_ui_candidate?(transfer) do
     transfer.token_type == "ERC-20" and match?(%Decimal{}, Map.get(transfer, :amount))
+  end
+
+  defp emit_event_missing_determinations(transfers) do
+    count = Enum.count(transfers, &(&1[:ui_amount_status] == "event_missing"))
+
+    if count > 0 do
+      :telemetry.execute([:explorer, :scaled_ui, :event_missing], %{count: count}, %{})
+    end
   end
 
   defp hash_key(hash), do: hash |> to_string() |> String.downcase()

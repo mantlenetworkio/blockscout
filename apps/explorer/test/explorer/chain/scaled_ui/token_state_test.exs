@@ -185,6 +185,19 @@ defmodule Explorer.Chain.ScaledUi.TokenStateTest do
 
     test "persists the first tainted block when timeline anchors break" do
       address = insert(:address)
+      handler_id = "scaled-ui-anchor-break-#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:explorer, :scaled_ui, :integrity_failure],
+          fn event, measurements, metadata, _config -> send(test_pid, {event, measurements, metadata}) end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
       insert_updated(address, 10, 1, 100, 0, 1_000, 100)
       insert_updated(address, 25, 1, 200, 999, 2_000, 200)
 
@@ -193,6 +206,10 @@ defmodule Explorer.Chain.ScaledUi.TokenStateTest do
       state = Repo.get!(TokenState, address.hash)
       assert state.timeline_status == "tainted"
       assert state.tainted_from_block == 25
+      assert_receive {[:explorer, :scaled_ui, :integrity_failure], %{count: 1}, %{source: :anchor_break}}
+
+      assert {:ok, [_]} = TokenState.rebuild(Repo, [%{token_contract_address_hash: address.hash, capability_block: 10}])
+      refute_receive {[:explorer, :scaled_ui, :integrity_failure], _, _}
     end
   end
 

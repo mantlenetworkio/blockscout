@@ -6,12 +6,14 @@ defmodule Indexer.Prometheus.Metrics do
   use GenServer
 
   alias Explorer.Chain.Metrics.Queries.IndexerMetrics, as: IndexerMetricsQueries
+  alias Explorer.Prometheus.ScaledUi
   alias Indexer.Prometheus.Instrumenter
 
   @interval :timer.hours(1)
   @default_metrics_list [
     :missing_blocks_count,
     :missing_internal_transactions_count,
+    :scaled_ui_inventory,
     :multichain_search_db_main_export_queue_count,
     :multichain_search_db_export_balances_queue_count,
     :multichain_search_db_export_counters_queue_count,
@@ -71,6 +73,11 @@ defmodule Indexer.Prometheus.Metrics do
   end
 
   # sobelow_skip ["DOS.StringToAtom"]
+  defp set_handler_metric(:scaled_ui_inventory) do
+    IndexerMetricsQueries.scaled_ui_inventory()
+    |> ScaledUi.set_inventory()
+  end
+
   defp set_handler_metric(metric) do
     func = String.to_atom(to_string(metric))
 

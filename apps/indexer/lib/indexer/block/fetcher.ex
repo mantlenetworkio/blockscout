@@ -535,11 +535,11 @@ defmodule Indexer.Block.Fetcher do
 
     options_with_broadcast =
       import_options
+      |> keep_scaled_ui_addresses()
       |> Map.merge(%{
         address_hash_to_fetched_balance_block_number: address_hash_to_fetched_balance_block_number,
         broadcast: broadcast
       })
-      |> Map.delete(:addresses)
 
     {import_time, result} = :timer.tc(fn -> callback_module.import(state, options_with_broadcast) end)
 
@@ -551,6 +551,23 @@ defmodule Indexer.Block.Fetcher do
 
     result
   end
+
+  defp keep_scaled_ui_addresses(
+         %{
+           addresses: %{params: addresses},
+           scaled_ui_token_states: %{params: capability_rows}
+         } = options
+       ) do
+    capability_hashes = MapSet.new(capability_rows, & &1.token_contract_address_hash)
+    scaled_ui_addresses = Enum.filter(addresses, &MapSet.member?(capability_hashes, &1.hash))
+
+    case scaled_ui_addresses do
+      [] -> Map.delete(options, :addresses)
+      [_ | _] -> put_in(options, [:addresses, :params], scaled_ui_addresses)
+    end
+  end
+
+  defp keep_scaled_ui_addresses(options), do: Map.delete(options, :addresses)
 
   def async_import_token_instances(%{token_transfers: token_transfers}) do
     TokenInstanceRealtime.async_fetch(token_transfers)

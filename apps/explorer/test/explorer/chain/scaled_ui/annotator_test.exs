@@ -36,6 +36,18 @@ defmodule Explorer.Chain.ScaledUi.AnnotatorTest do
 
     test "marks a missing UI event and preserves counter invalidation addresses" do
       address = insert(:address)
+      handler_id = "scaled-ui-event-missing-#{System.unique_integer([:positive])}"
+      test_pid = self()
+
+      :ok =
+        :telemetry.attach(
+          handler_id,
+          [:explorer, :scaled_ui, :event_missing],
+          fn event, measurements, metadata, _config -> send(test_pid, {event, measurements, metadata}) end,
+          nil
+        )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
 
       events = %{
         updates: [updated(address, 100, 1, 100, 0, @scale, 100)],
@@ -50,6 +62,7 @@ defmodule Explorer.Chain.ScaledUi.AnnotatorTest do
       assert Decimal.equal?(annotated.ui_multiplier, d(@scale))
       assert annotated.from_address_hash == transfer.from_address_hash
       assert annotated.to_address_hash == transfer.to_address_hash
+      assert_receive {[:explorer, :scaled_ui, :event_missing], %{count: 1}, %{}}
     end
 
     test "uses an in-batch multiplier update for a later transfer" do

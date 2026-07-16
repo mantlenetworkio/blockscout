@@ -11,10 +11,39 @@ defmodule Explorer.Chain.Metrics.Queries.IndexerMetrics do
   alias Explorer.Chain.MultichainSearchDb.CountersExportQueue, as: MultichainSearchDbCountersExportQueue
   alias Explorer.Chain.MultichainSearchDb.MainExportQueue, as: MultichainSearchDbMainExportQueue
   alias Explorer.Chain.MultichainSearchDb.TokenInfoExportQueue, as: MultichainSearchDbTokenInfoExportQueue
-  alias Explorer.Chain.{PendingBlockOperation, PendingOperationsHelper, PendingTransactionOperation}
+  alias Explorer.Chain.{PendingBlockOperation, PendingOperationsHelper, PendingTransactionOperation, TokenTransfer}
+  alias Explorer.Chain.ScaledUi.TokenState
   alias Explorer.Chain.Token.Instance
   alias Explorer.MicroserviceInterfaces.MultichainSearch
   alias Explorer.Repo
+
+  @scaled_ui_inventory_statuses ~w(unknown mismatch event_missing)
+
+  @doc "Returns the current canonical ERC-8056 transfer anomalies and tainted token count."
+  @spec scaled_ui_inventory() :: %{
+          token_transfers: %{String.t() => non_neg_integer()},
+          tainted_tokens: non_neg_integer()
+        }
+  def scaled_ui_inventory do
+    status_counts =
+      from(transfer in TokenTransfer,
+        where:
+          transfer.block_consensus == true and
+            fragment("? IN ('unknown', 'mismatch', 'event_missing')", transfer.ui_amount_status),
+        group_by: transfer.ui_amount_status,
+        select: {transfer.ui_amount_status, count()}
+      )
+      |> Repo.all(timeout: :infinity)
+      |> Map.new()
+
+    token_transfers = Map.new(@scaled_ui_inventory_statuses, &{&1, Map.get(status_counts, &1, 0)})
+
+    tainted_tokens =
+      from(state in TokenState, where: state.timeline_status == "tainted")
+      |> Repo.aggregate(:count, :token_contract_address_hash, timeout: :infinity)
+
+    %{token_transfers: token_transfers, tainted_tokens: tainted_tokens}
+  end
 
   @doc """
   Query to get the number of missing block numbers in the DB

@@ -132,16 +132,25 @@ defmodule Explorer.Chain.ScaledUi.TokenState do
       summary = Timeline.replay(Map.get(events_by_token, state.token_contract_address_hash, []))
       incoming_capability_block = capability_blocks[state.token_contract_address_hash]
 
-      state
-      |> changeset(%{
-        base_multiplier: summary.base_multiplier,
-        pending_multiplier: summary.pending_multiplier,
-        pending_effective_at: summary.pending_effective_at,
-        capability_block: capability_block(capability_mode, state.capability_block, incoming_capability_block),
-        timeline_status: summary.timeline_status,
-        tainted_from_block: summary.tainted_from_block
-      })
-      |> repo.update!(timeout: timeout)
+      updated_state =
+        state
+        |> changeset(%{
+          base_multiplier: summary.base_multiplier,
+          pending_multiplier: summary.pending_multiplier,
+          pending_effective_at: summary.pending_effective_at,
+          capability_block: capability_block(capability_mode, state.capability_block, incoming_capability_block),
+          timeline_status: summary.timeline_status,
+          tainted_from_block: summary.tainted_from_block
+        })
+        |> repo.update!(timeout: timeout)
+
+      if state.timeline_status != "tainted" and updated_state.timeline_status == "tainted" do
+        :telemetry.execute(
+          [:explorer, :scaled_ui, :integrity_failure],
+          %{count: 1},
+          %{source: :anchor_break}
+        )
+      end
     end)
   end
 

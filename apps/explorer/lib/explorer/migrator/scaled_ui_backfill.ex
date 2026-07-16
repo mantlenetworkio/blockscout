@@ -165,7 +165,7 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
         scan_start = creation_block(token_hash) || capability_block
         gaps = coverage_gaps(scan_start, target_head)
 
-        BackfillGap.put_ranges(Repo, token_hash, gaps)
+        persist_coverage_gaps(token_hash, gaps)
 
         if gaps == [] do
           import_multiplier_updates(canonical_multiplier_log_rows(token_hash, target_head))
@@ -324,7 +324,7 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
           {:batch, List.last(transaction_keys), result}
       end
     else
-      BackfillGap.put_ranges(Repo, prepared.token_contract_address_hash, gaps)
+      persist_coverage_gaps(prepared.token_contract_address_hash, gaps)
       :deferred
     end
   end
@@ -380,6 +380,8 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
         transfer_rows,
         &transfer_update(&1, matches, multiplier_updates)
       )
+
+    emit_event_missing_determinations(updates)
 
     update_keys = MapSet.new(updates, & &1.key)
 
@@ -643,6 +645,26 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
 
   defp pending_work?(target_head) do
     BackfillGap.count() > 0 or incomplete_transfers?(target_head)
+  end
+
+  defp persist_coverage_gaps(token_hash, gaps) do
+    BackfillGap.put_ranges(Repo, token_hash, gaps)
+
+    if gaps != [] do
+      :telemetry.execute(
+        [:explorer, :scaled_ui, :integrity_failure],
+        %{count: length(gaps)},
+        %{source: :coverage_gap}
+      )
+    end
+  end
+
+  defp emit_event_missing_determinations(updates) do
+    count = Enum.count(updates, &(&1.status == "event_missing"))
+
+    if count > 0 do
+      :telemetry.execute([:explorer, :scaled_ui, :event_missing], %{count: count}, %{})
+    end
   end
 
   defp incomplete_transfers?(target_head) do

@@ -14,6 +14,68 @@ defmodule Indexer.Transform.ScaledUiTokenTransfersTest do
   @zero "0x0000000000000000000000000000000000000000"
 
   describe "parse/2 ERC-8056 pairing" do
+    test "parses Mantle Hoodi 2x and zero-multiplier receipts" do
+      two_x_logs = [
+        hoodi_transfer_log(
+          "0xe916f4d7a32054ea2fbcf06ba52a6b864776b4f4",
+          "0xd9849232998b908f6cccd1c12c4e039ec553181937ed4ce7fd53627d8a903356",
+          "0x881df500f44db1f097281dec31c3d1badfd76f622d03cd0b336370ae859f0af7",
+          0x2064B9,
+          0,
+          "0x0000000000000000000000002595be55daad0c73b02755539d73283e8b0d7e37",
+          "0x000000000000000000000000ed3ce153d4bb5994b09595b20b2315f549081c1e",
+          "0x000000000000000000000000000000000000000000000001a055690d9db80000",
+          TokenTransfer.constant()
+        ),
+        hoodi_transfer_log(
+          "0xe916f4d7a32054ea2fbcf06ba52a6b864776b4f4",
+          "0xd9849232998b908f6cccd1c12c4e039ec553181937ed4ce7fd53627d8a903356",
+          "0x881df500f44db1f097281dec31c3d1badfd76f622d03cd0b336370ae859f0af7",
+          0x2064B9,
+          1,
+          "0x0000000000000000000000002595be55daad0c73b02755539d73283e8b0d7e37",
+          "0x000000000000000000000000ed3ce153d4bb5994b09595b20b2315f549081c1e",
+          "0x000000000000000000000000000000000000000000000001a055690d9db80000" <>
+            "00000000000000000000000000000000000000000000000340aad21b3b700000",
+          Events.transfer_with_ui_amount_topic()
+        )
+      ]
+
+      zero_multiplier_logs = [
+        hoodi_transfer_log(
+          "0x8f542fd88031dc30c2014213632e4f975f34dcd9",
+          "0xdd144513a75010becc3abd30fdbed860d856eebffbd69dce7fea6449f100d966",
+          "0x8fcf56d20d53a6a39e7e24880242f5e2f959c542ece6187f7183e5f1bf5aa04c",
+          0x2064F0,
+          0,
+          "0x000000000000000000000000ed3ce153d4bb5994b09595b20b2315f549081c1e",
+          "0x0000000000000000000000002595be55daad0c73b02755539d73283e8b0d7e37",
+          "0x0000000000000000000000000000000000000000000000008ac7230489e80000",
+          TokenTransfer.constant()
+        ),
+        hoodi_transfer_log(
+          "0x8f542fd88031dc30c2014213632e4f975f34dcd9",
+          "0xdd144513a75010becc3abd30fdbed860d856eebffbd69dce7fea6449f100d966",
+          "0x8fcf56d20d53a6a39e7e24880242f5e2f959c542ece6187f7183e5f1bf5aa04c",
+          0x2064F0,
+          1,
+          "0x000000000000000000000000ed3ce153d4bb5994b09595b20b2315f549081c1e",
+          "0x0000000000000000000000002595be55daad0c73b02755539d73283e8b0d7e37",
+          "0x0000000000000000000000000000000000000000000000008ac7230489e80000" <>
+            "0000000000000000000000000000000000000000000000000000000000000000",
+          Events.transfer_with_ui_amount_topic()
+        )
+      ]
+
+      two_x = TokenTransfers.parse(two_x_logs, true) |> transfer(0)
+      zero_multiplier = TokenTransfers.parse(zero_multiplier_logs, true) |> transfer(0)
+
+      assert Decimal.equal?(two_x.amount, Decimal.new("30000000000000000000"))
+      assert Decimal.equal?(two_x.ui_value, Decimal.new("60000000000000000000"))
+      assert Decimal.equal?(zero_multiplier.amount, Decimal.new("10000000000000000000"))
+      assert Decimal.equal?(zero_multiplier.ui_value, Decimal.new(0))
+    end
+
     test "pairs an adjacent UI event emitted after Transfer" do
       result = TokenTransfers.parse([transfer_log(1), ui_log(2, 10, 15)], true)
 
@@ -134,6 +196,21 @@ defmodule Indexer.Transform.ScaledUiTokenTransfersTest do
       fourth_topic: nil,
       index: index,
       transaction_hash: @transaction_hash
+    }
+  end
+
+  defp hoodi_transfer_log(token, transaction_hash, block_hash, block_number, index, from, to, data, topic) do
+    %{
+      address_hash: token,
+      block_hash: block_hash,
+      block_number: block_number,
+      data: data,
+      first_topic: topic,
+      fourth_topic: nil,
+      index: index,
+      second_topic: from,
+      third_topic: to,
+      transaction_hash: transaction_hash
     }
   end
 

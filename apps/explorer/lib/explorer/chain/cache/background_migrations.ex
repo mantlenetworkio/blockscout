@@ -37,6 +37,7 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
     key: :heavy_indexes_drop_logs_address_hash_transaction_hash_index_finished,
     key: :heavy_indexes_drop_logs_index_index_finished,
     key: :heavy_indexes_create_logs_address_hash_first_topic_block_number_index_index_finished,
+    key: :heavy_indexes_create_token_transfers_scaled_ui_inventory_index_finished,
     key: :heavy_indexes_create_token_transfers_ui_amount_status_unknown_index_finished,
     key: :heavy_indexes_drop_token_transfers_block_number_asc_log_index_asc_index_finished,
     key: :heavy_indexes_drop_token_transfers_from_address_hash_transaction_hash_index_finished,
@@ -101,11 +102,12 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
     CreateLogsBlockHashIndex,
     CreateLogsDepositsWithdrawalsIndex,
     CreateSmartContractsLanguageIndex,
-    CreateTokenTransfersUiAmountStatusUnknownIndex,
     CreateTokensNamePartialFtsIndex,
     CreateTokensOrdFiatHolderNameIndex,
     CreateTokensOrdHolderNameIndex,
     CreateTokensOrdMcapFiatHolderNameIndex,
+    CreateTokenTransfersScaledUiInventoryIndex,
+    CreateTokenTransfersUiAmountStatusUnknownIndex,
     CreateTransactionsCreatedContractAddressHashWPendingIndex,
     DropInternalTransactionsCreatedContractAddressHashPartialIndex,
     DropInternalTransactionsFromAddressHashIndex,
@@ -214,6 +216,13 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
     set_and_return_migration_status(
       CreateLogsAddressHashFirstTopicBlockNumberIndexIndex,
       &set_heavy_indexes_create_logs_address_hash_first_topic_block_number_index_index_finished/1
+    )
+  end
+
+  defp handle_fallback(:heavy_indexes_create_token_transfers_scaled_ui_inventory_index_finished) do
+    set_and_return_migration_status(
+      CreateTokenTransfersScaledUiInventoryIndex,
+      &set_heavy_indexes_create_token_transfers_scaled_ui_inventory_index_finished/1
     )
   end
 

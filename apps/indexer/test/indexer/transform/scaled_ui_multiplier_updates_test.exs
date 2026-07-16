@@ -7,6 +7,56 @@ defmodule Indexer.Transform.ScaledUiMultiplierUpdatesTest do
   alias Indexer.Transform.ScaledUiMultiplierUpdates
 
   describe "parse/2" do
+    test "parses the Mantle Hoodi pending overwrite receipt in emitted order" do
+      token = "0xe916f4d7a32054ea2fbcf06ba52a6b864776b4f4"
+      transaction_hash = "0x702468a5bfcddc65a03b603734d67137064d1ef752fb567caaa48429c9c6deb1"
+      block_number = 0x2064BE
+      block_timestamp = DateTime.from_unix!(0x6A588754)
+
+      overwritten = %{
+        log(
+          Events.ui_multiplier_change_overwritten_topic(),
+          block_number,
+          0,
+          "0x00000000000000000000000000000000000000000000000029a2241af62c0000" <>
+            "000000000000000000000000000000000000000000000000000000006a80144a" <>
+            "00000000000000000000000000000000000000000000000022b1c8c1227a0000" <>
+            "000000000000000000000000000000000000000000000000000000006aa7a14a",
+          token
+        )
+        | block_hash: "0xd7d98a5916a99d0b154a898696366d5aac9572927689db9b55498a4ba582ee37",
+          transaction_hash: transaction_hash
+      }
+
+      updated = %{
+        log(
+          Events.ui_multiplier_updated_topic(),
+          block_number,
+          1,
+          "0x0000000000000000000000000000000000000000000000001bc16d674ec80000" <>
+            "00000000000000000000000000000000000000000000000022b1c8c1227a0000" <>
+            "000000000000000000000000000000000000000000000000000000006aa7a14a",
+          token
+        )
+        | block_hash: "0xd7d98a5916a99d0b154a898696366d5aac9572927689db9b55498a4ba582ee37",
+          transaction_hash: transaction_hash
+      }
+
+      assert [parsed_overwritten, parsed_updated] =
+               ScaledUiMultiplierUpdates.parse(
+                 [overwritten, updated],
+                 %{block_number => block_timestamp}
+               )
+
+      assert parsed_overwritten.event_type == "overwritten"
+      assert Decimal.equal?(parsed_overwritten.overwritten_multiplier, Decimal.new("3000000000000000000"))
+      assert Decimal.equal?(parsed_overwritten.new_multiplier, Decimal.new("2500000000000000000"))
+      assert Decimal.equal?(parsed_overwritten.effective_at, Decimal.new(1_789_370_698))
+      assert parsed_updated.event_type == "updated"
+      assert Decimal.equal?(parsed_updated.old_multiplier, Decimal.new("2000000000000000000"))
+      assert Decimal.equal?(parsed_updated.new_multiplier, Decimal.new("2500000000000000000"))
+    end
+
     test "parses updated and overwritten events with block timestamps" do
       updated_log =
         log(

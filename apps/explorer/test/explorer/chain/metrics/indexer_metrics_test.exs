@@ -4,6 +4,70 @@ defmodule Explorer.Chain.Metrics.Queries.IndexerMetricsTest do
   import Explorer.Factory
 
   alias Explorer.Chain.Metrics.Queries.IndexerMetrics
+  alias Explorer.Chain.ScaledUi.TokenState
+  alias Explorer.Repo
+
+  describe "scaled_ui_inventory/0" do
+    test "counts only canonical unresolved transfers and tainted token states" do
+      token = insert(:token)
+      block = insert(:block)
+      from_address = insert(:address)
+      to_address = insert(:address)
+
+      Enum.each(Enum.with_index(["unknown", "mismatch", "event_missing", "ok"]), fn {status, log_index} ->
+        transaction = insert(:transaction) |> with_block(block)
+
+        insert(:token_transfer,
+          block: block,
+          block_consensus: true,
+          block_number: block.number,
+          from_address: from_address,
+          log_index: log_index,
+          to_address: to_address,
+          token_contract_address: token.contract_address,
+          transaction: transaction,
+          ui_amount_status: status
+        )
+      end)
+
+      orphan_transaction = insert(:transaction) |> with_block(block)
+
+      insert(:token_transfer,
+        block: block,
+        block_consensus: false,
+        block_number: block.number,
+        from_address: from_address,
+        log_index: 10,
+        to_address: to_address,
+        token_contract_address: token.contract_address,
+        transaction: orphan_transaction,
+        ui_amount_status: "mismatch"
+      )
+
+      tainted_address = insert(:address)
+      ok_address = insert(:address)
+
+      %TokenState{}
+      |> TokenState.changeset(%{
+        token_contract_address_hash: tainted_address.hash,
+        timeline_status: "tainted",
+        tainted_from_block: 10
+      })
+      |> Repo.insert!()
+
+      %TokenState{}
+      |> TokenState.changeset(%{
+        token_contract_address_hash: ok_address.hash,
+        timeline_status: "ok"
+      })
+      |> Repo.insert!()
+
+      assert IndexerMetrics.scaled_ui_inventory() == %{
+               token_transfers: %{"event_missing" => 1, "mismatch" => 1, "unknown" => 1},
+               tainted_tokens: 1
+             }
+    end
+  end
 
   describe "missing_blocks_count/0" do
     test "counts only within configured ranges and latest tail" do

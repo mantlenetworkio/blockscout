@@ -69,6 +69,19 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
 
   test "defers transfer replay and registers a retry while block coverage is missing" do
     token = insert(:token)
+    handler_id = "scaled-ui-coverage-gap-#{System.unique_integer([:positive])}"
+    test_pid = self()
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        [:explorer, :scaled_ui, :integrity_failure],
+        fn event, measurements, metadata, _config -> send(test_pid, {event, measurements, metadata}) end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
     block = insert(:block, consensus: true)
     transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
     from_address = insert(:address)
@@ -93,6 +106,7 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     gap = Repo.one!(BackfillGap)
     assert gap.from_block == block.number
     assert gap.to_block == block.number
+    assert_receive {[:explorer, :scaled_ui, :integrity_failure], %{count: 1}, %{source: :coverage_gap}}
 
     Repo.delete_all(MissingBlockRange)
     assert {:ok, _result} = ScaledUiBackfill.backfill_token(token.contract_address_hash, block.number)

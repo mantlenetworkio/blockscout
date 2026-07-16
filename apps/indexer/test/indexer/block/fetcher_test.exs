@@ -53,6 +53,39 @@ defmodule Indexer.Block.FetcherTest do
 
   setup :verify_on_exit!
 
+  describe "import/2" do
+    test "keeps capability addresses in the synchronous import" do
+      capability_address_hash = "0xe916f4d7a32054ea2fbcf06ba52a6b864776b4f4"
+      unrelated_address_hash = "0x8f542fd88031dc30c2014213632e4f975f34dcd9"
+
+      options = %{
+        addresses: %{
+          params: [
+            %{hash: capability_address_hash, fetched_coin_balance_block_number: 2_122_896},
+            %{hash: unrelated_address_hash, fetched_coin_balance_block_number: 2_122_896}
+          ]
+        },
+        blocks: %{params: []},
+        scaled_ui_token_states: %{
+          params: [%{token_contract_address_hash: capability_address_hash, capability_block: 2_122_896}]
+        }
+      }
+
+      assert {:ok, _} =
+               Fetcher.import(
+                 %Fetcher{
+                   callback_module: ImportRecorder,
+                   json_rpc_named_arguments: [],
+                   task_supervisor: nil
+                 },
+                 options
+               )
+
+      assert_received {:block_fetcher_import_options, import_options}
+      assert [%{hash: ^capability_address_hash}] = import_options.addresses.params
+    end
+  end
+
   # First block with all schemas to import
   # 37 is determined using the following query:
   # SELECT MIN(blocks.number) FROM
