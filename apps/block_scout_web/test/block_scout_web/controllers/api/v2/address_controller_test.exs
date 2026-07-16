@@ -25,6 +25,7 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
   alias Explorer.Account.{Identity, WatchlistAddress}
   alias Explorer.Chain.Address.CurrentTokenBalance
   alias Explorer.Chain.Beacon.Deposit, as: BeaconDeposit
+  alias Explorer.Chain.ScaledUi.TokenState
   alias Indexer.Fetcher.OnDemand.ContractCode, as: ContractCodeOnDemand
   alias Plug.Conn
 
@@ -2499,6 +2500,31 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
   end
 
   describe "/addresses/{address_hash}/token-balances" do
+    test "returns scaled ERC-8056 balances while preserving raw values", %{conn: conn} do
+      insert(:block, number: 10, consensus: true, timestamp: ~U[2026-07-16 00:00:00Z])
+      address = insert(:address)
+      token = insert(:token, extensions: ["ERC-8056"])
+
+      %TokenState{}
+      |> TokenState.changeset(%{
+        base_multiplier: Decimal.new("2000000000000000000"),
+        capability_block: 5,
+        timeline_status: "ok",
+        token_contract_address_hash: token.contract_address_hash
+      })
+      |> Repo.insert!()
+
+      insert(:address_current_token_balance,
+        address: address,
+        token_contract_address_hash: token.contract_address_hash,
+        value: 100
+      )
+
+      response = conn |> get("/api/v2/addresses/#{address.hash}/token-balances") |> json_response(200)
+
+      assert [%{"value" => "100", "scaled_value" => "200"}] = response
+    end
+
     test "get token balances with ok reputation", %{conn: conn} do
       init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
       Application.put_env(:block_scout_web, :hide_scam_addresses, true)

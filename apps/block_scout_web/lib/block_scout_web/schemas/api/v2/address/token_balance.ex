@@ -10,6 +10,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Address.TokenBalance do
   OpenApiSpex.schema(%{
     type: :object,
     properties: %{
+      scaled_value: General.IntegerStringNullable,
       value: General.IntegerString,
       token: %Schema{allOf: [Token], nullable: true},
       token_id: General.IntegerStringNullable,

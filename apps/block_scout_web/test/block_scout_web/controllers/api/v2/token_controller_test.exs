@@ -12,6 +12,7 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
   alias Explorer.Chain.{Address, Token, Token.Instance, TokenTransfer}
   alias Explorer.Chain.Address.CurrentTokenBalance
   alias Explorer.Chain.Events.Subscriber
+  alias Explorer.Chain.ScaledUi.TokenState
 
   alias Indexer.Fetcher.OnDemand.TokenInstanceMetadataRefetch, as: TokenInstanceMetadataRefetchOnDemand
   alias Indexer.Fetcher.OnDemand.NFTCollectionMetadataRefetch, as: NFTCollectionMetadataRefetchOnDemand
@@ -47,6 +48,81 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
       assert response = json_response(request, 200)
 
       compare_item(token, response)
+      refute Map.has_key?(response, "extensions")
+      refute Map.has_key?(response, "scaled_ui")
+    end
+
+    test "returns trusted scaled UI supply without changing external market cap", %{conn: conn} do
+      market_fetcher_enabled = :persistent_term.get(:market_token_fetcher_enabled, false)
+      :persistent_term.put(:market_token_fetcher_enabled, true)
+      on_exit(fn -> :persistent_term.put(:market_token_fetcher_enabled, market_fetcher_enabled) end)
+
+      insert(:block, number: 10, consensus: true, timestamp: ~U[2026-07-16 00:00:00Z])
+
+      token =
+        insert(:token,
+          circulating_market_cap: Decimal.new("123.45"),
+          extensions: ["ERC-8056"],
+          total_supply: Decimal.new(100)
+        )
+
+      insert_scaled_ui_state(token,
+        base_multiplier: Decimal.new("2000000000000000000"),
+        capability_block: 5,
+        timeline_status: "ok"
+      )
+
+      response = conn |> get("/api/v2/tokens/#{token.contract_address.hash}") |> json_response(200)
+
+      assert response["extensions"] == ["ERC-8056"]
+      assert response["circulating_market_cap"] == "123.45"
+
+      assert response["scaled_ui"] == %{
+               "capability_block" => 5,
+               "multiplier" => "2000000000000000000",
+               "pending_effective_at" => nil,
+               "pending_multiplier" => nil,
+               "scaled_total_supply" => "200",
+               "timeline_status" => "ok"
+             }
+    end
+
+    test "keeps a future multiplier pending at the canonical head", %{conn: conn} do
+      head_timestamp = ~U[2026-07-16 00:00:00Z]
+      insert(:block, number: 10, consensus: true, timestamp: head_timestamp)
+      token = insert(:token, extensions: ["ERC-8056"], total_supply: Decimal.new(100))
+      pending_effective_at = head_timestamp |> DateTime.to_unix() |> Kernel.+(60) |> Decimal.new()
+
+      insert_scaled_ui_state(token,
+        base_multiplier: Decimal.new("2000000000000000000"),
+        capability_block: 5,
+        pending_effective_at: pending_effective_at,
+        pending_multiplier: Decimal.new("3000000000000000000"),
+        timeline_status: "ok"
+      )
+
+      response = conn |> get("/api/v2/tokens/#{token.contract_address.hash}") |> json_response(200)
+
+      assert response["scaled_ui"]["multiplier"] == "2000000000000000000"
+      assert response["scaled_ui"]["pending_multiplier"] == "3000000000000000000"
+      assert response["scaled_ui"]["pending_effective_at"] == Decimal.to_string(pending_effective_at)
+    end
+
+    test "returns capability diagnostics but no scaled amount for a tainted timeline", %{conn: conn} do
+      insert(:block, number: 10, consensus: true, timestamp: ~U[2026-07-16 00:00:00Z])
+      token = insert(:token, extensions: ["ERC-8056"], total_supply: Decimal.new(100))
+
+      insert_scaled_ui_state(token,
+        capability_block: 5,
+        tainted_from_block: 8,
+        timeline_status: "tainted"
+      )
+
+      response = conn |> get("/api/v2/tokens/#{token.contract_address.hash}") |> json_response(200)
+
+      assert response["scaled_ui"]["timeline_status"] == "tainted"
+      assert response["scaled_ui"]["multiplier"] == nil
+      assert response["scaled_ui"]["scaled_total_supply"] == nil
     end
   end
 
@@ -420,6 +496,26 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
       assert %{"items" => [], "next_page_params" => nil} = json_response(request, 200)
     end
 
+    test "returns scaled holder values while preserving raw values", %{conn: conn} do
+      insert(:block, number: 10, consensus: true, timestamp: ~U[2026-07-16 00:00:00Z])
+      token = insert(:token, extensions: ["ERC-8056"])
+
+      insert_scaled_ui_state(token,
+        base_multiplier: Decimal.new("2000000000000000000"),
+        capability_block: 5,
+        timeline_status: "ok"
+      )
+
+      insert(:address_current_token_balance,
+        token_contract_address_hash: token.contract_address_hash,
+        value: 100
+      )
+
+      response = conn |> get("/api/v2/tokens/#{token.contract_address.hash}/holders") |> json_response(200)
+
+      assert [%{"value" => "100", "scaled_value" => "200"}] = response["items"]
+    end
+
     test "check pagination", %{conn: conn} do
       token = insert(:token)
 
@@ -466,6 +562,16 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
 
       check_holders_paginated_response(response, response_2nd_page, token_balances)
     end
+  end
+
+  defp insert_scaled_ui_state(token, attrs) do
+    %TokenState{}
+    |> TokenState.changeset(
+      attrs
+      |> Enum.into(%{})
+      |> Map.put(:token_contract_address_hash, token.contract_address_hash)
+    )
+    |> Repo.insert!()
   end
 
   describe "/tokens" do

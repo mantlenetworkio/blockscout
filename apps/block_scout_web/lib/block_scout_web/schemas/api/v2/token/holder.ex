@@ -19,6 +19,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Token.Holder do
     type: :object,
     properties: %{
       address: Address.schema(),
+      scaled_value: General.IntegerStringNullable,
       token_id: General.IntegerStringNullable,
       value: General.IntegerStringNullable
     },

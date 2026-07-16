@@ -75,6 +75,7 @@ defmodule Explorer.Chain do
 
   alias Explorer.Chain.Cache.Counters.Helper, as: CacheCountersHelper
   alias Explorer.Chain.Health.Helper, as: HealthHelper
+  alias Explorer.Chain.ScaledUi.Reader, as: ScaledUiReader
   alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
   alias Explorer.Helper, as: ExplorerHelper
 
@@ -1572,6 +1573,13 @@ defmodule Explorer.Chain do
     token_balance.fiat_value
   end
 
+  def balance_in_fiat(%{scaled_value: scaled_value, token: %{fiat_value: fiat_value, decimals: decimals}})
+      when nil not in [scaled_value, fiat_value, decimals] do
+    scaled_value
+    |> CurrencyHelper.divide_decimals(decimals)
+    |> Decimal.mult(fiat_value)
+  end
+
   def balance_in_fiat(%{token: %{fiat_value: fiat_value, decimals: decimals}}) when nil in [fiat_value, decimals] do
     nil
   end
@@ -2509,17 +2517,26 @@ defmodule Explorer.Chain do
     )
   end
 
-  def page_current_token_balances(query, keyword) when is_list(keyword),
-    do: page_current_token_balances(query, Keyword.get(keyword, :paging_options))
+  def page_current_token_balances(query, keyword) when is_list(keyword) do
+    page_current_token_balances(
+      query,
+      Keyword.get(keyword, :paging_options),
+      Keyword.get(keyword, :head_timestamp, Decimal.new(0))
+    )
+  end
 
-  def page_current_token_balances(query, %PagingOptions{key: nil}), do: query
+  def page_current_token_balances(query, paging_options) do
+    page_current_token_balances(query, paging_options, Decimal.new(0))
+  end
 
-  def page_current_token_balances(query, %PagingOptions{key: {nil, value, id}}) do
-    fiat_balance = CurrentTokenBalance.fiat_value_query()
+  def page_current_token_balances(query, %PagingOptions{key: nil}, _head_timestamp), do: query
+
+  def page_current_token_balances(query, %PagingOptions{key: {nil, value, id}}, head_timestamp) do
+    fiat_balance = CurrentTokenBalance.fiat_value_query(head_timestamp)
 
     condition =
       dynamic(
-        [ctb, t],
+        [ctb, _token, _state],
         is_nil(^fiat_balance) and
           (ctb.value < ^value or
              (ctb.value == ^value and ctb.id < ^id))
@@ -2527,17 +2544,17 @@ defmodule Explorer.Chain do
 
     where(
       query,
-      [ctb, t],
+      [ctb, _token, _state],
       ^condition
     )
   end
 
-  def page_current_token_balances(query, %PagingOptions{key: {fiat_value, value, id}}) do
-    fiat_balance = CurrentTokenBalance.fiat_value_query()
+  def page_current_token_balances(query, %PagingOptions{key: {fiat_value, value, id}}, head_timestamp) do
+    fiat_balance = CurrentTokenBalance.fiat_value_query(head_timestamp)
 
     condition =
       dynamic(
-        [ctb, t],
+        [ctb, _token, _state],
         ^fiat_balance < ^fiat_value or is_nil(^fiat_balance) or
           (^fiat_balance == ^fiat_value and
              (ctb.value < ^value or
@@ -2546,7 +2563,7 @@ defmodule Explorer.Chain do
 
     where(
       query,
-      [ctb, t],
+      [ctb, _token, _state],
       ^condition
     )
   end
@@ -2662,20 +2679,25 @@ defmodule Explorer.Chain do
 
   @spec fetch_last_token_balances_include_unfetched([Hash.Address.t()], [api?]) :: []
   def fetch_last_token_balances_include_unfetched(address_hashes, options \\ []) when is_list(address_hashes) do
+    repo = select_repo(options)
+    head_timestamp = ScaledUiReader.canonical_head_timestamp(repo)
+
     address_hashes
-    |> CurrentTokenBalance.last_token_balances_include_unfetched()
-    |> select_repo(options).all()
+    |> CurrentTokenBalance.last_token_balances_include_unfetched(head_timestamp)
+    |> repo.all()
   end
 
   @spec fetch_last_token_balances(Hash.Address.t(), [api? | necessity_by_association_option]) :: []
   def fetch_last_token_balances(address_hash, options \\ []) do
     necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+    repo = select_repo(options)
+    head_timestamp = ScaledUiReader.canonical_head_timestamp(repo)
 
     address_hash
-    |> CurrentTokenBalance.last_token_balances()
+    |> CurrentTokenBalance.last_token_balances_at_head(nil, head_timestamp)
     |> ExplorerHelper.maybe_hide_scam_addresses(:token_contract_address_hash, options)
     |> join_associations(necessity_by_association)
-    |> select_repo(options).all()
+    |> repo.all()
   end
 
   @spec fetch_paginated_last_token_balances(Hash.Address.t(), [paging_options]) :: []
@@ -2684,6 +2706,9 @@ defmodule Explorer.Chain do
     options = Keyword.delete(options, :token_type)
     paging_options = Keyword.get(options, :paging_options)
     necessity_by_association = Keyword.get(options, :necessity_by_association, %{})
+    repo = select_repo(options)
+    head_timestamp = ScaledUiReader.canonical_head_timestamp(repo)
+    options = Keyword.put(options, :head_timestamp, head_timestamp)
 
     case paging_options do
       %PagingOptions{key: {nil, 0, _id}} ->
@@ -2693,9 +2718,9 @@ defmodule Explorer.Chain do
         address_hash
         |> CurrentTokenBalance.last_token_balances(options, filter)
         |> ExplorerHelper.maybe_hide_scam_addresses(:token_contract_address_hash, options)
-        |> page_current_token_balances(paging_options)
+        |> page_current_token_balances(paging_options, head_timestamp)
         |> join_associations(necessity_by_association)
-        |> select_repo(options).all()
+        |> repo.all()
     end
   end
 
@@ -2752,12 +2777,15 @@ defmodule Explorer.Chain do
 
   @spec fetch_token_holders_from_token_hash(Hash.Address.t(), [paging_options | api?]) :: [TokenBalance.t()]
   def fetch_token_holders_from_token_hash(contract_address_hash, options \\ []) do
+    repo = select_repo(options)
+    options = Keyword.put(options, :head_timestamp, ScaledUiReader.canonical_head_timestamp(repo))
+
     query =
       contract_address_hash
       |> CurrentTokenBalance.token_holders_ordered_by_value(options)
 
     query
-    |> select_repo(options).all()
+    |> repo.all()
   end
 
   @spec fetch_token_holders_from_token_hash_for_csv(Hash.Address.t(), [paging_options | api? | timeout_option]) :: [

@@ -33,6 +33,35 @@ defmodule BlockScoutWeb.Schemas.API.V2.Token.ChainTypeCustomizations do
   end
 end
 
+defmodule BlockScoutWeb.Schemas.API.V2.Token.ScaledUi do
+  @moduledoc false
+  require OpenApiSpex
+
+  alias BlockScoutWeb.Schemas.API.V2.General
+  alias OpenApiSpex.Schema
+
+  OpenApiSpex.schema(%Schema{
+    type: :object,
+    properties: %{
+      capability_block: %Schema{type: :integer},
+      multiplier: General.IntegerStringNullable,
+      pending_effective_at: General.IntegerStringNullable,
+      pending_multiplier: General.IntegerStringNullable,
+      scaled_total_supply: General.IntegerStringNullable,
+      timeline_status: %Schema{type: :string, enum: ["ok", "tainted"], nullable: true}
+    },
+    required: [
+      :capability_block,
+      :multiplier,
+      :pending_effective_at,
+      :pending_multiplier,
+      :scaled_total_supply,
+      :timeline_status
+    ],
+    additionalProperties: false
+  })
+end
+
 defmodule BlockScoutWeb.Schemas.API.V2.Token do
   @moduledoc """
   This module defines the schema for the Token struct.
@@ -40,7 +69,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Token do
   require OpenApiSpex
 
   alias BlockScoutWeb.Schemas.API.V2.General
-  alias BlockScoutWeb.Schemas.API.V2.Token.{ChainTypeCustomizations, Type}
+  alias BlockScoutWeb.Schemas.API.V2.Token.{ChainTypeCustomizations, ScaledUi, Type}
   alias Explorer.Chain.Address.Reputation
   alias OpenApiSpex.Schema
 
@@ -60,6 +89,8 @@ defmodule BlockScoutWeb.Schemas.API.V2.Token do
         total_supply: General.IntegerStringNullable,
         icon_url: General.URLNullable,
         circulating_market_cap: General.FloatStringNullable,
+        extensions: %Schema{type: :array, items: %Schema{type: :string}},
+        scaled_ui: ScaledUi,
         reputation: %Schema{
           type: :string,
           enum: Reputation.enum_values(),

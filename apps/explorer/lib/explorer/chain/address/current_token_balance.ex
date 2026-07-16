@@ -17,6 +17,7 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   alias Explorer.Chain.{Address, Block, Hash, Token}
   alias Explorer.Chain.Address.TokenBalance
   alias Explorer.Chain.Cache.BackgroundMigrations
+  alias Explorer.Chain.ScaledUi.TokenState
 
   @default_paging_options %PagingOptions{page_size: 50}
 
@@ -40,6 +41,7 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
     field(:token_id, :decimal)
     field(:token_type, :string, null: false)
     field(:fiat_value, :decimal, virtual: true)
+    field(:scaled_value, :decimal, virtual: true)
     field(:distinct_token_instances_count, :integer, virtual: true)
     field(:token_ids, {:array, :decimal}, virtual: true)
     field(:preloaded_token_instances, {:array, :any}, virtual: true)
@@ -99,6 +101,7 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   """
   def token_holders_ordered_by_value_query_without_address_preload(token_contract_address_hash, options \\ []) do
     paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+    head_timestamp = Keyword.get(options, :head_timestamp, Decimal.new(0))
 
     case paging_options do
       %PagingOptions{key: {0, _}} ->
@@ -109,6 +112,7 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
 
         token_contract_address_hash
         |> token_holders_query()
+        |> with_scaled_value(head_timestamp)
         |> order_by([tb], desc: :value, desc: :address_hash)
         |> Chain.page_token_balances(paging_options)
         |> limit(^paging_options.page_size)
@@ -175,11 +179,42 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
     dynamic([ctb, t], ctb.value * t.fiat_value / fragment("10 ^ ?", t.decimals))
   end
 
+  def scaled_value_query(head_timestamp) do
+    effective_multiplier = effective_multiplier_query(head_timestamp)
+
+    dynamic(
+      [ctb, _token, state],
+      fragment(
+        "CASE WHEN ? IS NOT NULL AND ? = 'ok' AND ? IS NOT NULL THEN FLOOR(? * ? / 1000000000000000000) ELSE NULL END",
+        state.capability_block,
+        state.timeline_status,
+        state.base_multiplier,
+        ctb.value,
+        ^effective_multiplier
+      )
+    )
+  end
+
+  def fiat_value_query(head_timestamp) do
+    scaled_value = scaled_value_query(head_timestamp)
+    raw_fiat_value = dynamic([ctb, token, _state], ctb.value * token.fiat_value / fragment("10 ^ ?", token.decimals))
+
+    scaled_fiat_value =
+      dynamic([_ctb, token, _state], ^scaled_value * token.fiat_value / fragment("10 ^ ?", token.decimals))
+
+    dynamic(
+      [_ctb, _token, state],
+      fragment("CASE WHEN ? IS NULL THEN ? ELSE ? END", state.capability_block, ^raw_fiat_value, ^scaled_fiat_value)
+    )
+  end
+
   @doc """
   Builds an `t:Ecto.Query.t/0` to fetch the current token balances of the given addresses (include unfetched).
   """
-  def last_token_balances_include_unfetched(address_hashes) when is_list(address_hashes) do
-    fiat_balance = fiat_value_query()
+  def last_token_balances_include_unfetched(address_hashes, head_timestamp \\ Decimal.new(0))
+      when is_list(address_hashes) do
+    fiat_balance = fiat_value_query(head_timestamp)
+    scaled_value = scaled_value_query(head_timestamp)
 
     from(
       ctb in __MODULE__,
@@ -187,9 +222,11 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
       where: ctb.token_type != "ERC-7984",
       left_join: t in assoc(ctb, :token),
       on: ctb.token_contract_address_hash == t.contract_address_hash,
+      left_join: state in TokenState,
+      on: state.token_contract_address_hash == ctb.token_contract_address_hash,
       preload: [token: t],
       select: ctb,
-      select_merge: ^%{fiat_value: fiat_balance}
+      select_merge: ^%{fiat_value: fiat_balance, scaled_value: scaled_value}
     )
   end
 
@@ -199,38 +236,11 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   def last_token_balances(address_hash, type \\ [])
 
   def last_token_balances(address_hash, types) when is_list(types) and types != [] do
-    fiat_balance = fiat_value_query()
-
-    from(
-      ctb in __MODULE__,
-      where: ctb.address_hash == ^address_hash,
-      where: ctb.value > 0 or ctb.token_type == "ERC-7984",
-      left_join: t in assoc(ctb, :token),
-      on: ctb.token_contract_address_hash == t.contract_address_hash,
-      preload: [token: t],
-      where: t.type in ^types,
-      select: ctb,
-      select_merge: ^%{fiat_value: fiat_balance},
-      order_by: ^[desc_nulls_last: fiat_balance],
-      order_by: [desc: ctb.value, desc: ctb.id]
-    )
+    last_token_balances_query(address_hash, types, Decimal.new(0))
   end
 
   def last_token_balances(address_hash, _) do
-    fiat_balance = fiat_value_query()
-
-    from(
-      ctb in __MODULE__,
-      where: ctb.address_hash == ^address_hash,
-      where: ctb.value > 0 or ctb.token_type == "ERC-7984",
-      left_join: t in assoc(ctb, :token),
-      on: ctb.token_contract_address_hash == t.contract_address_hash,
-      preload: [token: t],
-      select: ctb,
-      select_merge: ^%{fiat_value: fiat_balance},
-      order_by: ^[desc_nulls_last: fiat_balance],
-      order_by: [desc: ctb.value, desc: ctb.id]
-    )
+    last_token_balances_query(address_hash, nil, Decimal.new(0))
   end
 
   @doc """
@@ -238,10 +248,97 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   """
   def last_token_balances(address_hash, options, type) do
     paging_options = Keyword.get(options, :paging_options, @default_paging_options)
+    head_timestamp = Keyword.get(options, :head_timestamp, Decimal.new(0))
 
     address_hash
-    |> last_token_balances(type)
+    |> last_token_balances_query(type, head_timestamp)
     |> limit(^paging_options.page_size)
+  end
+
+  @doc """
+  Builds an `t:Ecto.Query.t/0` to fetch all current token balances at a fixed head timestamp.
+  """
+  def last_token_balances_at_head(address_hash, type, head_timestamp) do
+    last_token_balances_query(address_hash, type, head_timestamp)
+  end
+
+  defp last_token_balances_query(address_hash, types, head_timestamp) do
+    fiat_balance = fiat_value_query(head_timestamp)
+    scaled_value = scaled_value_query(head_timestamp)
+
+    query =
+      from(
+        ctb in __MODULE__,
+        where: ctb.address_hash == ^address_hash,
+        where: ctb.value > 0 or ctb.token_type == "ERC-7984",
+        left_join: token in assoc(ctb, :token),
+        on: ctb.token_contract_address_hash == token.contract_address_hash,
+        left_join: state in TokenState,
+        on: state.token_contract_address_hash == ctb.token_contract_address_hash,
+        preload: [token: token],
+        select: ctb,
+        select_merge: ^%{fiat_value: fiat_balance, scaled_value: scaled_value},
+        order_by: ^[desc_nulls_last: fiat_balance],
+        order_by: [desc: ctb.value, desc: ctb.id]
+      )
+
+    if is_list(types) and types != [],
+      do: from([_ctb, token, _state] in query, where: token.type in ^types),
+      else: query
+  end
+
+  defp with_scaled_value(query, head_timestamp) do
+    effective_multiplier = holder_effective_multiplier_query(head_timestamp)
+
+    scaled_value =
+      dynamic(
+        [balance, state],
+        fragment(
+          "CASE WHEN ? IS NOT NULL AND ? = 'ok' AND ? IS NOT NULL THEN FLOOR(? * ? / 1000000000000000000) ELSE NULL END",
+          state.capability_block,
+          state.timeline_status,
+          state.base_multiplier,
+          balance.value,
+          ^effective_multiplier
+        )
+      )
+
+    from(
+      balance in query,
+      left_join: state in TokenState,
+      on: state.token_contract_address_hash == balance.token_contract_address_hash,
+      select_merge: ^%{scaled_value: scaled_value}
+    )
+  end
+
+  defp effective_multiplier_query(head_timestamp) do
+    dynamic(
+      [_balance, _token, state],
+      fragment(
+        "CASE WHEN ? IS NOT NULL AND ? IS NOT NULL AND ? <= ? THEN ? ELSE ? END",
+        state.pending_multiplier,
+        state.pending_effective_at,
+        state.pending_effective_at,
+        ^head_timestamp,
+        state.pending_multiplier,
+        state.base_multiplier
+      )
+    )
+  end
+
+  defp holder_effective_multiplier_query(head_timestamp) do
+    dynamic(
+      [_balance, state],
+      fragment(
+        "CASE WHEN ? IS NOT NULL AND ? IS NOT NULL AND ? <= ? THEN ? ELSE ? END",
+        state.pending_multiplier,
+        state.pending_effective_at,
+        state.pending_effective_at,
+        ^head_timestamp,
+        state.pending_multiplier,
+        state.base_multiplier
+      )
+    )
   end
 
   @doc """

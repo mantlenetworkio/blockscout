@@ -8,6 +8,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
   alias BlockScoutWeb.Schemas.API.V2.ErrorResponses.NotFoundResponse
   alias Explorer.{Chain, PagingOptions}
   alias Explorer.Chain.{Address, BridgedToken, Token, Token.Instance}
+  alias Explorer.Chain.ScaledUi.Reader, as: ScaledUiReader
   alias Explorer.Migrator.BackfillMetadataURL
   alias Indexer.Fetcher.OnDemand.NFTCollectionMetadataRefetch, as: NFTCollectionMetadataRefetchOnDemand
   alias Indexer.Fetcher.OnDemand.TokenInstanceMetadataRefetch, as: TokenInstanceMetadataRefetchOnDemand
@@ -48,7 +49,10 @@ defmodule BlockScoutWeb.API.V2.TokenController do
 
   @api_true [api?: true]
 
-  @token_options [api?: true, necessity_by_association: %{reputation_association() => :optional}]
+  @token_options [
+    api?: true,
+    necessity_by_association: Map.put(%{reputation_association() => :optional}, :scaled_ui_state, :optional)
+  ]
 
   operation :token,
     summary: "Retrieve detailed information about a specific token",
@@ -71,32 +75,33 @@ defmodule BlockScoutWeb.API.V2.TokenController do
          {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
          {:not_found, {:ok, token}} <- {:not_found, Chain.token_from_address_hash(address_hash, @token_options)} do
       TokenTotalSupplyOnDemand.trigger_fetch(ip, address_hash)
+      head_timestamp = ScaledUiReader.canonical_head_timestamp(Chain.select_repo(@api_true))
 
       conn
-      |> token_response(token, address_hash)
+      |> token_response(token, address_hash, head_timestamp)
     end
   end
 
   if @bridged_tokens_enabled do
-    defp token_response(conn, token, address_hash) do
+    defp token_response(conn, token, address_hash, head_timestamp) do
       if token.bridged do
         bridged_token =
           Chain.select_repo(@api_true).get_by(BridgedToken, home_token_contract_address_hash: address_hash)
 
         conn
         |> put_status(200)
-        |> render(:bridged_token, %{token: {token, bridged_token}})
+        |> render(:bridged_token, %{token: {token, bridged_token}, head_timestamp: head_timestamp})
       else
         conn
         |> put_status(200)
-        |> render(:token, %{token: token})
+        |> render(:token, %{token: token, head_timestamp: head_timestamp})
       end
     end
   else
-    defp token_response(conn, token, _address_hash) do
+    defp token_response(conn, token, _address_hash, head_timestamp) do
       conn
       |> put_status(200)
-      |> render(:token, %{token: token})
+      |> render(:token, %{token: token, head_timestamp: head_timestamp})
     end
   end
 

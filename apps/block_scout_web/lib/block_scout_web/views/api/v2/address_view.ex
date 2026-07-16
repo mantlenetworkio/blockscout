@@ -149,7 +149,11 @@ defmodule BlockScoutWeb.API.V2.AddressView do
             )
         )
     }
+    |> maybe_put("scaled_value", token_balance.scaled_value)
   end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   def prepare_coin_balance_history_entry(coin_balance) do
     %{

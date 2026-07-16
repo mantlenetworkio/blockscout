@@ -6,6 +6,7 @@ defmodule BlockScoutWeb.API.V2.TokenView do
   alias BlockScoutWeb.NFTHelper
   alias Ecto.Association.NotLoaded
   alias Explorer.Chain.{Address, BridgedToken}
+  alias Explorer.Chain.ScaledUi.Reader, as: ScaledUiReader
   alias Explorer.Chain.Token.Instance
 
   def render("token.json", %{token: nil = token, contract_address_hash: contract_address_hash}) do
@@ -30,7 +31,7 @@ defmodule BlockScoutWeb.API.V2.TokenView do
     nil
   end
 
-  def render("token.json", %{token: token}) do
+  def render("token.json", %{token: token} = assigns) do
     %{
       "address_hash" => Address.checksum(token.contract_address_hash),
       "symbol" => token.symbol,
@@ -45,6 +46,8 @@ defmodule BlockScoutWeb.API.V2.TokenView do
       "circulating_market_cap" => token.circulating_market_cap,
       "reputation" => token.reputation
     }
+    |> maybe_append_extensions(token)
+    |> maybe_append_scaled_ui(token, Map.get(assigns, :head_timestamp))
     |> maybe_append_bridged_info(token)
     |> chain_type_fields(%{address: token.contract_address, field_prefix: nil})
   end
@@ -82,9 +85,9 @@ defmodule BlockScoutWeb.API.V2.TokenView do
     %{"items" => Enum.map(tokens, &render("bridged_token.json", %{token: &1})), "next_page_params" => next_page_params}
   end
 
-  def render("bridged_token.json", %{token: {token, bridged_token}}) do
+  def render("bridged_token.json", %{token: {token, bridged_token}} = assigns) do
     "token.json"
-    |> render(%{token: token})
+    |> render(%{token: token, head_timestamp: Map.get(assigns, :head_timestamp)})
     |> Map.merge(%{
       foreign_address: Address.checksum(bridged_token.foreign_token_contract_address_hash),
       bridge_type: bridged_token.type,
@@ -101,6 +104,7 @@ defmodule BlockScoutWeb.API.V2.TokenView do
       "value" => token_balance.value,
       "token_id" => token_balance.token_id
     }
+    |> maybe_put("scaled_value", token_balance.scaled_value)
   end
 
   @doc """
@@ -145,6 +149,50 @@ defmodule BlockScoutWeb.API.V2.TokenView do
       map
     end
   end
+
+  defp maybe_append_extensions(map, %{extensions: extensions}) when is_list(extensions) and extensions != [],
+    do: Map.put(map, "extensions", extensions)
+
+  defp maybe_append_extensions(map, _token), do: map
+
+  defp maybe_append_scaled_ui(map, %{scaled_ui_state: %NotLoaded{}}, _head_timestamp), do: map
+  defp maybe_append_scaled_ui(map, _token, nil), do: map
+
+  defp maybe_append_scaled_ui(
+         map,
+         %{scaled_ui_state: %{capability_block: capability_block} = state} = token,
+         head_timestamp
+       )
+       when is_integer(capability_block) do
+    {multiplier, pending_multiplier, pending_effective_at} = scaled_ui_multipliers(state, head_timestamp)
+
+    Map.put(map, "scaled_ui", %{
+      "capability_block" => capability_block,
+      "multiplier" => multiplier,
+      "pending_effective_at" => pending_effective_at,
+      "pending_multiplier" => pending_multiplier,
+      "scaled_total_supply" => ScaledUiReader.scaled_amount(token.total_supply, state, head_timestamp),
+      "timeline_status" => state.timeline_status
+    })
+  end
+
+  defp maybe_append_scaled_ui(map, _token, _head_timestamp), do: map
+
+  defp scaled_ui_multipliers(state, head_timestamp) do
+    case ScaledUiReader.current_multiplier(state, head_timestamp) do
+      {:ok, multiplier} ->
+        case ScaledUiReader.pending_schedule(state, head_timestamp) do
+          {pending_multiplier, pending_effective_at} -> {multiplier, pending_multiplier, pending_effective_at}
+          nil -> {multiplier, nil, nil}
+        end
+
+      :unknown ->
+        {nil, nil, nil}
+    end
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   case @chain_type do
     :filecoin ->

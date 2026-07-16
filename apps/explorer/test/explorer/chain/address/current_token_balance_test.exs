@@ -4,6 +4,7 @@ defmodule Explorer.Chain.Address.CurrentTokenBalanceTest do
   alias Explorer.{Chain, PagingOptions, Repo}
   alias Explorer.Chain.Token
   alias Explorer.Chain.Address.CurrentTokenBalance
+  alias Explorer.Chain.ScaledUi.TokenState
 
   describe "token_holders_ordered_by_value/2" do
     test "returns the last value for each address" do
@@ -89,7 +90,8 @@ defmodule Explorer.Chain.Address.CurrentTokenBalanceTest do
     end
 
     test "ignores the burn address" do
-      {:ok, burn_address_hash} = Chain.string_to_address_hash("0x0000000000000000000000000000000000000000")
+      {:ok, burn_address_hash} =
+        Chain.string_to_address_hash("0x0000000000000000000000000000000000000000")
 
       burn_address = insert(:address, hash: burn_address_hash)
 
@@ -148,6 +150,96 @@ defmodule Explorer.Chain.Address.CurrentTokenBalanceTest do
   end
 
   describe "last_token_balances/1" do
+    test "sorts fiat balances by scaled value and keeps raw values as a stable tie-breaker" do
+      address = insert(:address)
+
+      scaled_token =
+        insert(:token, decimals: 0, extensions: ["ERC-8056"], fiat_value: Decimal.new(1))
+
+      standard_token = insert(:token, decimals: 0, fiat_value: Decimal.new(1))
+
+      %TokenState{}
+      |> TokenState.changeset(%{
+        base_multiplier: Decimal.new("2000000000000000000"),
+        capability_block: 1,
+        timeline_status: "ok",
+        token_contract_address_hash: scaled_token.contract_address_hash
+      })
+      |> Repo.insert!()
+
+      scaled_balance =
+        insert(:address_current_token_balance,
+          address: address,
+          token_contract_address_hash: scaled_token.contract_address_hash,
+          value: 100
+        )
+
+      standard_balance =
+        insert(:address_current_token_balance,
+          address: address,
+          token_contract_address_hash: standard_token.contract_address_hash,
+          value: 150
+        )
+
+      [first, second] =
+        address.hash
+        |> CurrentTokenBalance.last_token_balances([head_timestamp: Decimal.new(100)], nil)
+        |> Repo.all()
+
+      assert first.id == scaled_balance.id
+      assert Decimal.equal?(first.scaled_value, Decimal.new(200))
+      assert Decimal.equal?(first.fiat_value, Decimal.new(200))
+      assert second.id == standard_balance.id
+      assert second.scaled_value == nil
+      assert Decimal.equal?(second.fiat_value, Decimal.new(150))
+
+      paging_options = %PagingOptions{
+        key: {first.fiat_value, first.value, first.id},
+        page_size: 2
+      }
+
+      paginated =
+        address.hash
+        |> CurrentTokenBalance.last_token_balances(
+          [head_timestamp: Decimal.new(100), paging_options: paging_options],
+          nil
+        )
+        |> Chain.page_current_token_balances(paging_options, Decimal.new(100))
+        |> Repo.all()
+
+      assert Enum.map(paginated, & &1.id) == [standard_balance.id]
+    end
+
+    test "does not expose scaled or fiat values from a tainted timeline" do
+      address = insert(:address)
+      token = insert(:token, decimals: 0, extensions: ["ERC-8056"], fiat_value: Decimal.new(1))
+
+      %TokenState{}
+      |> TokenState.changeset(%{
+        capability_block: 1,
+        tainted_from_block: 2,
+        timeline_status: "tainted",
+        token_contract_address_hash: token.contract_address_hash
+      })
+      |> Repo.insert!()
+
+      balance =
+        insert(:address_current_token_balance,
+          address: address,
+          token_contract_address_hash: token.contract_address_hash,
+          value: 100
+        )
+
+      [result] =
+        address.hash
+        |> CurrentTokenBalance.last_token_balances([head_timestamp: Decimal.new(100)], nil)
+        |> Repo.all()
+
+      assert result.id == balance.id
+      assert result.scaled_value == nil
+      assert result.fiat_value == nil
+    end
+
     test "returns the current token balances of the given address" do
       address = insert(:address)
       current_token_balance = insert(:address_current_token_balance, address: address)
