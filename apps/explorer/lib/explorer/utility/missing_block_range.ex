@@ -7,9 +7,12 @@ defmodule Explorer.Utility.MissingBlockRange do
 
   alias EthereumJSONRPC.Utility.RangesHelper
   alias Explorer.Chain.{Block, BlockNumberHelper}
+  alias Explorer.Chain.Cache.Counters.LastFetchedCounter
   alias Explorer.Repo
 
   @default_returning_batch_size 10
+  @initial_scan_boundary_counter_type "missing_block_ranges_initial_scan_boundary"
+  @initial_scan_target_counter_type "missing_block_ranges_initial_scan_target"
 
   @typedoc """
   * `from_number`: The lower bound of the block range.
@@ -35,9 +38,50 @@ defmodule Explorer.Utility.MissingBlockRange do
     field(:priority, :integer)
   end
 
+  @doc "Returns the fixed upper boundary covered by the initial missing-range scan."
+  @spec initial_scan_boundary() :: non_neg_integer() | nil
+  def initial_scan_boundary do
+    scan_counter(@initial_scan_boundary_counter_type)
+  end
+
+  @doc "Records the fixed upper boundary covered by the initial missing-range scan."
+  @spec set_initial_scan_boundary(non_neg_integer()) :: :ok | {:error, Ecto.Changeset.t()}
+  def set_initial_scan_boundary(boundary) when is_integer(boundary) and boundary >= 0 do
+    set_scan_counter(@initial_scan_boundary_counter_type, boundary)
+  end
+
+  @doc "Returns the upper boundary selected when the initial missing-range scan started."
+  @spec initial_scan_target() :: non_neg_integer() | nil
+  def initial_scan_target do
+    scan_counter(@initial_scan_target_counter_type)
+  end
+
+  @doc "Records an upper boundary for the initial scan without lowering an existing target."
+  @spec set_initial_scan_target(non_neg_integer()) :: :ok | {:error, Ecto.Changeset.t()}
+  def set_initial_scan_target(target) when is_integer(target) and target >= 0 do
+    case LastFetchedCounter.upsert_max(%{counter_type: @initial_scan_target_counter_type, value: target}) do
+      {:ok, _counter} -> :ok
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
   @doc false
   def changeset(range \\ %__MODULE__{}, params) do
     cast(range, params, [:from_number, :to_number, :priority])
+  end
+
+  defp scan_counter(counter_type) do
+    case LastFetchedCounter.get(counter_type, nullable: true) do
+      %Decimal{} = value -> Decimal.to_integer(value)
+      _ -> nil
+    end
+  end
+
+  defp set_scan_counter(counter_type, value) do
+    case LastFetchedCounter.upsert_max(%{counter_type: counter_type, value: value}) do
+      {:ok, _counter} -> :ok
+      {:error, changeset} -> {:error, changeset}
+    end
   end
 
   @doc """

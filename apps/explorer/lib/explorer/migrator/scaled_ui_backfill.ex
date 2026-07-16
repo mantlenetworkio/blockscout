@@ -21,7 +21,7 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
   alias Explorer.Chain.ScaledUi.{BackfillGap, Events, MultiplierParser, Status, Timeline, TokenState, TransferPairing}
   alias Explorer.Migrator.{FillingMigration, MigrationStatus}
   alias Explorer.Repo
-  alias Explorer.Utility.MissingBlockRange
+  alias Explorer.Utility.{MassiveBlock, MissingBlockRange}
 
   @default_transfer_batch_size 500
   @migration_name "scaled_ui_backfill"
@@ -32,24 +32,12 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
 
   @impl FillingMigration
   def last_unprocessed_identifiers(state) do
-    {target_head, state} = ensure_target_head(state)
-    cursor = Map.get(state, "last_token_hash")
-    limit = batch_size() * concurrency()
+    case ensure_target_head(state) do
+      {:wait, state} ->
+        {[:wait], state}
 
-    token_hashes = discover_token_hashes(target_head, cursor, limit)
-
-    case token_hashes do
-      [] ->
-        if pending_work?(target_head) do
-          {[:wait], state}
-        else
-          {[], state}
-        end
-
-      _ ->
-        last_token_hash = token_hashes |> List.last() |> to_string()
-        identifiers = Enum.map(token_hashes, &{&1, target_head})
-        {identifiers, Map.put(state, "last_token_hash", last_token_hash)}
+      {:ready, target_head, state} ->
+        next_identifiers(target_head, state)
     end
   end
 
@@ -138,22 +126,54 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
   end
 
   defp ensure_target_head(%{"target_head" => target_head} = state) when is_integer(target_head),
-    do: {target_head, state}
+    do: {:ready, target_head, state}
 
   defp ensure_target_head(state) do
-    target_head =
-      case migration_target_head() do
-        {:ok, persisted_target_head} -> persisted_target_head
-        :error -> canonical_head()
+    case migration_target_head() do
+      {:ok, target_head} -> {:ready, target_head, Map.put(state, "target_head", target_head)}
+      :error -> ensure_initial_target_head(state)
+    end
+  end
+
+  defp next_identifiers(target_head, state) do
+    cursor = Map.get(state, "last_token_hash")
+    limit = batch_size() * concurrency()
+
+    case discover_token_hashes(target_head, cursor, limit) do
+      [] ->
+        if pending_work?(target_head), do: {[:wait], state}, else: {[], state}
+
+      token_hashes ->
+        last_token_hash = token_hashes |> List.last() |> to_string()
+        identifiers = Enum.map(token_hashes, &{&1, target_head})
+        {identifiers, Map.put(state, "last_token_hash", last_token_hash)}
+    end
+  end
+
+  defp ensure_initial_target_head(state) do
+    with target_head when is_integer(target_head) <- MissingBlockRange.initial_scan_target(),
+         ^target_head <- MissingBlockRange.initial_scan_boundary(),
+         true <- initial_catchup_complete?(target_head) do
+      case MigrationStatus.update_meta(@migration_name, %{"target_head" => target_head}) do
+        :ok -> :ok
+        {:ok, _migration_status} -> :ok
+        {:error, changeset} -> raise "failed to persist scaled UI backfill target head: #{inspect(changeset.errors)}"
       end
 
-    case MigrationStatus.update_meta(@migration_name, %{"target_head" => target_head}) do
-      :ok -> :ok
-      {:ok, _migration_status} -> :ok
-      {:error, changeset} -> raise "failed to persist scaled UI backfill target head: #{inspect(changeset.errors)}"
+      {:ready, target_head, Map.put(state, "target_head", target_head)}
+    else
+      _ -> {:wait, state}
     end
+  end
 
-    {target_head, Map.put(state, "target_head", target_head)}
+  defp initial_catchup_complete?(target_head) do
+    first_block = Application.get_env(:indexer, :first_block, 0)
+
+    target_head >= first_block and
+      configured_range_gaps(first_block, target_head) == [] and
+      MissingBlockRange.intersections(first_block, target_head) == [] and
+      not MassiveBlock.exists_in_range?(first_block, target_head) and
+      not is_nil(canonical_block_hash(target_head))
   end
 
   defp prepare_token(token_hash, target_head) do

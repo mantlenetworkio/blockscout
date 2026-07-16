@@ -10,9 +10,10 @@ defmodule Explorer.Chain.ScaledUi.Reader do
 
   @spec canonical_head_timestamp(module()) :: Decimal.t()
   def canonical_head_timestamp(repo) do
-    canonical_head_query()
-    |> repo.one()
-    |> decimal_timestamp()
+    case repo.one(canonical_head_query()) do
+      %{timestamp: timestamp} -> decimal_timestamp(timestamp)
+      _no_canonical_head -> Decimal.new(0)
+    end
   end
 
   @doc "Returns canonical multiplier events and their canonical head from one database snapshot."

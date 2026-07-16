@@ -82,7 +82,7 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
 
   @impl true
   def handle_continue(:ok, _state) do
-    {:noreply, define_init()}
+    {:noreply, define_init() |> maybe_complete_initial_scan()}
   end
 
   # Determines and initializes the appropriate missing block range collection state.
@@ -104,10 +104,14 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
   # A map containing:
   # - `max_fetched_block_number`: The highest block number to collect up to
   # - `first_check_completed?`: Set to `false` to indicate initial check is pending
+  # - `initial_scan_completed?`: Whether the initial target has been fully scanned
+  # - `initial_target_block`: The persisted upper boundary of the initial scan
   # - `min_fetched_block_number`: Optional lowest block number to start from
   @spec define_init() :: %{
           :max_fetched_block_number => non_neg_integer(),
           :first_check_completed? => boolean(),
+          :initial_scan_completed? => boolean(),
+          :initial_target_block => non_neg_integer(),
           optional(:min_fetched_block_number) => non_neg_integer()
         }
   defp define_init do
@@ -143,21 +147,33 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
   # A map containing:
   # - `min_fetched_block_number`: The lowest block number to start collecting from
   # - `max_fetched_block_number`: The highest block number to collect up to
-  # - `first_check_completed?: boolean()
+  # - `first_check_completed?`: Whether the initial backward scan has completed
+  # - `initial_scan_completed?`: Whether the fixed initial target has been fully scanned
+  # - `initial_target_block`: The persisted upper boundary of the initial scan
   @spec default_init() :: %{
           min_fetched_block_number: non_neg_integer(),
           max_fetched_block_number: non_neg_integer(),
-          first_check_completed?: boolean()
+          first_check_completed?: boolean(),
+          initial_scan_completed?: boolean(),
+          initial_target_block: non_neg_integer()
         }
   defp default_init do
     {min_number, max_number} = get_initial_min_max()
+    initial_target_block = max(max_number - 1, first_block())
+    {initial_target_block, initial_scan_completed?} = initialize_initial_scan(initial_target_block)
 
     clear_to_bounds(min_number, max_number)
 
     schedule_future_check()
     schedule_past_check(false)
 
-    %{min_fetched_block_number: min_number, max_fetched_block_number: max_number, first_check_completed?: false}
+    %{
+      min_fetched_block_number: min_number,
+      max_fetched_block_number: max_number,
+      first_check_completed?: false,
+      initial_scan_completed?: initial_scan_completed?,
+      initial_target_block: initial_target_block
+    }
   end
 
   # Initializes the missing block ranges system with a predefined set of ranges.
@@ -175,11 +191,15 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
   #
   # ## Returns
   # A map containing:
-  # - `max_fetched_block_number`: The provided max block number or nil
-  # - `first_check_completed?`: Set to `false` to indicate initial check is pending
+  # - `max_fetched_block_number`: The highest block number already scanned
+  # - `first_check_completed?`: Set because configured finite ranges are scanned synchronously
+  # - `initial_scan_completed?`: Whether scanning has reached the fixed initial target
+  # - `initial_target_block`: The persisted upper boundary of the initial scan
   @spec ranges_init(list(Range.t()), non_neg_integer() | nil) :: %{
           max_fetched_block_number: non_neg_integer(),
-          first_check_completed?: boolean()
+          first_check_completed?: boolean(),
+          initial_scan_completed?: boolean(),
+          initial_target_block: non_neg_integer()
         }
   defp ranges_init(ranges, max_fetched_block_number \\ nil) do
     Repo.delete_all(MissingBlockRange)
@@ -189,11 +209,26 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
     |> Enum.flat_map(fn f..l//_ -> Chain.missing_block_number_ranges(l..f) end)
     |> MissingBlockRange.save_batch()
 
-    if not is_nil(max_fetched_block_number) do
+    {max_fetched_block_number, initial_target_block} =
+      if is_nil(max_fetched_block_number) do
+        target_block = Enum.reduce(ranges, 0, fn range, target -> max(target, max(range.first, range.last)) end)
+        {target_block, target_block}
+      else
+        {max_fetched_block_number, max(max_fetched_block_number, last_block() - 1)}
+      end
+
+    {initial_target_block, initial_scan_completed?} = initialize_initial_scan(initial_target_block)
+
+    if max_fetched_block_number < initial_target_block do
       schedule_future_check()
     end
 
-    %{max_fetched_block_number: max_fetched_block_number, first_check_completed?: false}
+    %{
+      max_fetched_block_number: max_fetched_block_number,
+      first_check_completed?: true,
+      initial_scan_completed?: initial_scan_completed?,
+      initial_target_block: initial_target_block
+    }
   end
 
   # Adjusts the missing block ranges to respect the given boundary constraints.
@@ -299,9 +334,9 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
       {new_max_number, batch} = fetch_missing_ranges_batch(max_number, true)
       MissingBlockRange.save_batch(batch)
       schedule_future_check()
-      {:noreply, %{state | max_fetched_block_number: new_max_number}}
+      {:noreply, %{state | max_fetched_block_number: new_max_number} |> maybe_complete_initial_scan()}
     else
-      {:noreply, state}
+      {:noreply, maybe_complete_initial_scan(state)}
     end
   end
 
@@ -326,7 +361,45 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
       {:noreply, %{state | min_fetched_block_number: new_min_number}}
     else
       schedule_past_check(true)
-      {:noreply, %{state | min_fetched_block_number: state.max_fetched_block_number, first_check_completed?: true}}
+
+      new_state = %{
+        state
+        | min_fetched_block_number: state.max_fetched_block_number,
+          first_check_completed?: true
+      }
+
+      {:noreply, maybe_complete_initial_scan(new_state)}
+    end
+  end
+
+  defp maybe_complete_initial_scan(%{initial_scan_completed?: true} = state), do: state
+
+  defp maybe_complete_initial_scan(
+         %{
+           first_check_completed?: true,
+           initial_target_block: target_block,
+           max_fetched_block_number: max_fetched_block_number
+         } = state
+       )
+       when max_fetched_block_number >= target_block do
+    case MissingBlockRange.set_initial_scan_boundary(target_block) do
+      :ok -> %{state | initial_scan_completed?: true}
+      {:error, _changeset} -> state
+    end
+  end
+
+  defp maybe_complete_initial_scan(state), do: state
+
+  defp initialize_initial_scan(candidate_target) do
+    candidate_target = max(candidate_target, MissingBlockRange.initial_scan_boundary() || 0)
+
+    case MissingBlockRange.set_initial_scan_target(candidate_target) do
+      :ok ->
+        target = MissingBlockRange.initial_scan_target()
+        {target, MissingBlockRange.initial_scan_boundary() == target}
+
+      {:error, changeset} ->
+        raise "failed to persist initial missing-range scan target: #{inspect(changeset.errors)}"
     end
   end
 

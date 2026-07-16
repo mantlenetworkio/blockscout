@@ -5,6 +5,14 @@ defmodule Explorer.Chain.ScaledUi.ReaderTest do
   alias Explorer.Chain.ScaledUiMultiplierUpdate
   alias Explorer.Repo
 
+  test "returns the canonical head timestamp as Unix seconds" do
+    insert(:block, number: 100, consensus: true, timestamp: ~U[2026-07-16 00:00:00Z])
+    head = insert(:block, number: 101, consensus: true, timestamp: ~U[2026-07-16 00:01:00Z])
+    insert(:block, number: 102, consensus: false, timestamp: ~U[2026-07-16 00:02:00Z])
+
+    assert Reader.canonical_head_timestamp(Repo) == Decimal.new(DateTime.to_unix(head.timestamp))
+  end
+
   test "reads canonical multiplier events and the canonical head in one query" do
     token = insert(:token, extensions: ["ERC-8056"])
     block = insert(:block, number: 100, timestamp: ~U[2026-07-16 00:00:00Z])

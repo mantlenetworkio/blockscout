@@ -5,7 +5,7 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
   alias Explorer.Chain.ScaledUi.{BackfillGap, Events, TokenState}
   alias Explorer.Migrator.{MigrationStatus, ScaledUiBackfill}
   alias Explorer.Repo
-  alias Explorer.Utility.MissingBlockRange
+  alias Explorer.Utility.{MassiveBlock, MissingBlockRange}
 
   setup do
     first_block = Application.get_env(:indexer, :first_block)
@@ -400,6 +400,7 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     block = insert(:block, consensus: true)
     transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
     insert_multiplier_log(token, block, transaction, 1, "3000000000000000000")
+    mark_initial_scan_complete(block.number)
 
     assert {[{token_hash, target_head}], state} = ScaledUiBackfill.last_unprocessed_identifiers(%{})
     assert token_hash == token.contract_address_hash
@@ -410,12 +411,26 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
   test "persists the target head before returning the first migration batch" do
     assert {:ok, _status} = MigrationStatus.set_status(ScaledUiBackfill.migration_name(), "started")
     block = insert(:block, consensus: true)
+    mark_initial_scan_complete(block.number)
 
     assert {_identifiers, %{"target_head" => target_head}} =
              ScaledUiBackfill.last_unprocessed_identifiers(%{})
 
     assert target_head == block.number
     assert MigrationStatus.fetch(ScaledUiBackfill.migration_name()).meta["target_head"] == block.number
+  end
+
+  test "restores a persisted migration target before consulting a newer catchup target" do
+    old_target = insert(:block, number: 10, consensus: true)
+    insert(:block, number: 20, consensus: true)
+    assert {:ok, _status} = MigrationStatus.set_status(ScaledUiBackfill.migration_name(), "started")
+
+    assert {:ok, _status} =
+             MigrationStatus.update_meta(ScaledUiBackfill.migration_name(), %{"target_head" => old_target.number})
+
+    mark_initial_scan_complete(20)
+
+    assert {[], %{"target_head" => 10}} = ScaledUiBackfill.last_unprocessed_identifiers(%{})
   end
 
   test "resumes token discovery after the persisted hash cursor" do
@@ -429,6 +444,8 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
       insert_multiplier_log(token, block, transaction, index, "3000000000000000000")
     end)
 
+    mark_initial_scan_complete(block.number)
+
     sorted_hashes = tokens |> Enum.map(& &1.contract_address_hash) |> Enum.sort_by(&to_string/1)
 
     assert {[first_identifier], first_state} = ScaledUiBackfill.last_unprocessed_identifiers(%{})
@@ -439,6 +456,40 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
 
     assert {List.last(sorted_hashes), block.number} == second_identifier
     assert {[], ^second_state} = ScaledUiBackfill.last_unprocessed_identifiers(second_state)
+  end
+
+  test "waits for initial catchup discovery before fixing the target head" do
+    token = insert(:token)
+    block = insert(:block, consensus: true)
+    transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+    insert_multiplier_log(token, block, transaction, 1, "3000000000000000000")
+
+    assert {[:wait], %{}} = ScaledUiBackfill.last_unprocessed_identifiers(%{})
+    assert ScaledUiBackfill.migration_target_head() == :error
+  end
+
+  test "waits until the initial catchup scan reaches its fixed target" do
+    block = insert(:block, consensus: true)
+    assert :ok = MissingBlockRange.set_initial_scan_target(block.number)
+
+    assert {[:wait], %{}} = ScaledUiBackfill.last_unprocessed_identifiers(%{})
+    assert ScaledUiBackfill.migration_target_head() == :error
+  end
+
+  test "waits for massive blocks inside the initial catchup window" do
+    token = insert(:token)
+    block = insert(:block, consensus: true)
+    transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+    insert_multiplier_log(token, block, transaction, 1, "3000000000000000000")
+    mark_initial_scan_complete(block.number)
+    MassiveBlock.insert_block_numbers([block.number])
+
+    assert {[:wait], %{}} = ScaledUiBackfill.last_unprocessed_identifiers(%{})
+
+    MassiveBlock.delete_block_number(block.number)
+    assert {[{token_hash, target_head}], _state} = ScaledUiBackfill.last_unprocessed_identifiers(%{})
+    assert token_hash == token.contract_address_hash
+    assert target_head == block.number
   end
 
   test "keeps the migration pending until registered gaps are cleared" do
@@ -479,6 +530,11 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
       ui_multiplier: nil,
       ui_value: nil
     )
+  end
+
+  defp mark_initial_scan_complete(target_head) do
+    assert :ok = MissingBlockRange.set_initial_scan_target(target_head)
+    assert :ok = MissingBlockRange.set_initial_scan_boundary(target_head)
   end
 
   defp insert_multiplier_log(token, block, transaction, index, multiplier) do

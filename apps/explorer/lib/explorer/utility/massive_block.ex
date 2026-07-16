@@ -39,4 +39,13 @@ defmodule Explorer.Utility.MassiveBlock do
     |> where([mb], mb.number == ^number)
     |> Repo.delete_all()
   end
+
+  @doc "Returns whether a deferred massive block falls within an ascending range."
+  @spec exists_in_range?(non_neg_integer(), non_neg_integer()) :: boolean()
+  def exists_in_range?(from_block, to_block)
+      when is_integer(from_block) and is_integer(to_block) and from_block <= to_block do
+    __MODULE__
+    |> where([block], block.number >= ^from_block and block.number <= ^to_block)
+    |> Repo.exists?()
+  end
 end

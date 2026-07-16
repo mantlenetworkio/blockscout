@@ -108,6 +108,28 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
       assert response["scaled_ui"]["pending_effective_at"] == Decimal.to_string(pending_effective_at)
     end
 
+    test "applies an elapsed pending multiplier at the canonical head", %{conn: conn} do
+      head_timestamp = ~U[2026-07-16 00:00:00Z]
+      insert(:block, number: 10, consensus: true, timestamp: head_timestamp)
+      token = insert(:token, extensions: ["ERC-8056"], total_supply: Decimal.new(100))
+      pending_effective_at = head_timestamp |> DateTime.to_unix() |> Kernel.-(60) |> Decimal.new()
+
+      insert_scaled_ui_state(token,
+        base_multiplier: Decimal.new("2000000000000000000"),
+        capability_block: 5,
+        pending_effective_at: pending_effective_at,
+        pending_multiplier: Decimal.new("3000000000000000000"),
+        timeline_status: "ok"
+      )
+
+      response = conn |> get("/api/v2/tokens/#{token.contract_address.hash}") |> json_response(200)
+
+      assert response["scaled_ui"]["multiplier"] == "3000000000000000000"
+      assert response["scaled_ui"]["scaled_total_supply"] == "300"
+      assert response["scaled_ui"]["pending_multiplier"] == nil
+      assert response["scaled_ui"]["pending_effective_at"] == nil
+    end
+
     test "returns capability diagnostics but no scaled amount for a tainted timeline", %{conn: conn} do
       insert(:block, number: 10, consensus: true, timestamp: ~U[2026-07-16 00:00:00Z])
       token = insert(:token, extensions: ["ERC-8056"], total_supply: Decimal.new(100))

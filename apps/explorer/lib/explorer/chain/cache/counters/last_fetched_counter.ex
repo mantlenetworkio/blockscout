@@ -76,6 +76,25 @@ defmodule Explorer.Chain.Cache.Counters.LastFetchedCounter do
     )
   end
 
+  @doc "Inserts a counter or atomically keeps the greatest value already stored for its type."
+  @spec upsert_max(map()) :: {:ok, __MODULE__.t()} | {:error, Ecto.Changeset.t()}
+  def upsert_max(params) do
+    changeset = changeset(%__MODULE__{}, params)
+
+    Repo.insert(changeset,
+      conflict_target: [:counter_type],
+      on_conflict:
+        from(counter in __MODULE__,
+          update: [
+            set: [
+              value: fragment("GREATEST(?, EXCLUDED.value)", counter.value),
+              updated_at: fragment("EXCLUDED.updated_at")
+            ]
+          ]
+        )
+    )
+  end
+
   @doc """
   Deletes a record of the given type.
 

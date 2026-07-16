@@ -25,6 +25,7 @@ defmodule Indexer.Block.Catchup.MissingRangesCollectorTest do
       MissingRangesCollector.start_link([])
       Process.sleep(1500)
 
+      assert MissingBlockRange.initial_scan_target() == 999_999
       assert [999_999..999_900//-1] = batch = MissingBlockRange.get_latest_batch(100)
       MissingBlockRange.clear_batch(batch)
       assert [999_899..999_800//-1] = batch = MissingBlockRange.get_latest_batch(100)
@@ -114,6 +115,34 @@ defmodule Indexer.Block.Catchup.MissingRangesCollectorTest do
 
     assert MissingRangesCollector.parse_block_ranges("10..20,5..15,18..25,35..40,30..50,150..200") ==
              {:finite_ranges, [5..25, 30..50, 150..200]}
+  end
+
+  test "records the initial scan boundary after the past scan reaches the configured start" do
+    initial_env = Application.get_all_env(:indexer)
+    Application.put_env(:indexer, :first_block, 0)
+    Application.put_env(:indexer, :block_ranges, "0..latest")
+    on_exit(fn -> Application.put_all_env([{:indexer, initial_env}]) end)
+    assert :ok = MissingBlockRange.set_initial_scan_target(10)
+
+    state = %{
+      first_check_completed?: false,
+      initial_scan_completed?: false,
+      initial_target_block: 10,
+      max_fetched_block_number: 10,
+      min_fetched_block_number: 0
+    }
+
+    assert {:noreply, %{initial_scan_completed?: true}} =
+             MissingRangesCollector.handle_info(:update_past, state)
+
+    assert MissingBlockRange.initial_scan_boundary() == 10
+  end
+
+  test "does not lower the initial scan target after a collector restart" do
+    assert :ok = MissingBlockRange.set_initial_scan_target(100)
+    assert :ok = MissingBlockRange.set_initial_scan_target(50)
+
+    assert MissingBlockRange.initial_scan_target() == 100
   end
 
   defp block_response(id, block_number) do
