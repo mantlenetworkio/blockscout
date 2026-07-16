@@ -163,10 +163,10 @@ defmodule Explorer.Chain.Address.Counters do
   end
 
   def address_to_token_transfer_count_query(address_hash) do
-    from(
-      token_transfer in TokenTransfer,
-      where: token_transfer.to_address_hash == ^address_hash,
-      or_where: token_transfer.from_address_hash == ^address_hash
+    TokenTransfer.only_consensus_transfers_query()
+    |> where(
+      [token_transfer],
+      token_transfer.to_address_hash == ^address_hash or token_transfer.from_address_hash == ^address_hash
     )
   end
 

@@ -134,6 +134,15 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
              ]
     end
 
+    test "returns 422 for an unsupported token extension", %{conn: conn} do
+      response =
+        conn
+        |> get("/api/v2/advanced-filters", %{"token_extension" => "ERC-9999"})
+        |> json_response(422)
+
+      assert response == %{"message" => "Invalid parameter(s)"}
+    end
+
     test "get and paginate advanced filter (transactions split between pages)", %{conn: conn} do
       first_transaction = :transaction |> insert() |> with_block()
       insert_list(3, :token_transfer, transaction: first_transaction)

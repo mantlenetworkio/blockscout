@@ -58,7 +58,9 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   @doc """
   Function responsible for `api/v2/advanced-filters/` endpoint.
   """
-  @spec list(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  @spec list(Plug.Conn.t(), map()) :: Plug.Conn.t() | {:format, term()}
+  def list(_conn, %{"token_extension" => extension}) when extension != "ERC-8056", do: {:format, extension}
+
   def list(conn, params) do
     full_options =
       params

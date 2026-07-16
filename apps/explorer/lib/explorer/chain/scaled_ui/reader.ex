@@ -3,24 +3,40 @@ defmodule Explorer.Chain.ScaledUi.Reader do
 
   import Ecto.Query, only: [from: 2]
 
-  alias Explorer.Chain.Block
+  alias Explorer.Chain.{Block, Hash, ScaledUiMultiplierUpdate}
   alias Explorer.Chain.ScaledUi.{Timeline, TokenState}
 
   @multiplier_scale Decimal.new("1000000000000000000")
 
   @spec canonical_head_timestamp(module()) :: Decimal.t()
   def canonical_head_timestamp(repo) do
+    canonical_head_query()
+    |> repo.one()
+    |> decimal_timestamp()
+  end
+
+  @doc "Returns canonical multiplier events and their canonical head from one database snapshot."
+  @spec canonical_multiplier_updates_snapshot(module(), Hash.Address.t()) ::
+          {[ScaledUiMultiplierUpdate.t()], Decimal.t()}
+  def canonical_multiplier_updates_snapshot(repo, token_contract_address_hash) do
+    events_query =
+      token_contract_address_hash
+      |> ScaledUiMultiplierUpdate.canonical_by_token_query()
+      |> Ecto.Query.exclude(:preload)
+
     query =
-      from(block in Block,
-        where: block.consensus == true,
-        order_by: [desc: block.number],
-        limit: 1,
-        select: block.timestamp
+      from([update, block] in events_query,
+        cross_join: head in subquery(canonical_head_query()),
+        select: {update, block, head.timestamp}
       )
 
-    case repo.one(query) do
-      %DateTime{} = timestamp -> timestamp |> DateTime.to_unix() |> Decimal.new()
-      _ -> Decimal.new(0)
+    case repo.all(query) do
+      [] ->
+        {[], Decimal.new(0)}
+
+      [{_, _, head_timestamp} | _] = rows ->
+        events = Enum.map(rows, fn {event, block, _head_timestamp} -> %{event | block: block} end)
+        {events, decimal_timestamp(head_timestamp)}
     end
   end
 
@@ -53,4 +69,16 @@ defmodule Explorer.Chain.ScaledUi.Reader do
         nil
     end
   end
+
+  defp canonical_head_query do
+    from(block in Block,
+      where: block.consensus == true,
+      order_by: [desc: block.number],
+      limit: 1,
+      select: %{timestamp: block.timestamp}
+    )
+  end
+
+  defp decimal_timestamp(%DateTime{} = timestamp), do: timestamp |> DateTime.to_unix() |> Decimal.new()
+  defp decimal_timestamp(_timestamp), do: Decimal.new(0)
 end

@@ -4056,6 +4056,8 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
       annotated_transaction = insert(:transaction) |> with_block()
       historical_transaction = insert(:transaction) |> with_block()
       plain_transaction = insert(:transaction) |> with_block()
+      orphan_block = insert(:block, consensus: false)
+      orphan_transaction = insert(:transaction) |> with_block()
 
       insert(:token_transfer,
         from_address: address,
@@ -4074,6 +4076,16 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
         from_address: address,
         transaction: plain_transaction,
         token_contract_address: plain_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        block: orphan_block,
+        block_consensus: false,
+        block_number: orphan_block.number,
+        from_address: address,
+        transaction: orphan_transaction,
+        token_contract_address: scaled_token.contract_address,
         ui_amount_status: "ok"
       )
 

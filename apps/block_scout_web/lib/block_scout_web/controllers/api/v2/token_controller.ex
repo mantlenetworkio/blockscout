@@ -7,7 +7,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
   alias BlockScoutWeb.API.V2.{AddressView, TransactionView}
   alias BlockScoutWeb.Schemas.API.V2.ErrorResponses.NotFoundResponse
   alias Explorer.{Chain, PagingOptions}
-  alias Explorer.Chain.{Address, BridgedToken, ScaledUiMultiplierUpdate, Token, Token.Instance}
+  alias Explorer.Chain.{Address, BridgedToken, Token, Token.Instance}
   alias Explorer.Chain.ScaledUi.Reader, as: ScaledUiReader
   alias Explorer.Chain.ScaledUi.Timeline
   alias Explorer.Migrator.BackfillMetadataURL
@@ -199,13 +199,10 @@ defmodule BlockScoutWeb.API.V2.TokenController do
          {:not_found, true} <- {:not_found, Token.by_contract_address_hash_exists?(address_hash, @api_true)} do
       repo = Chain.select_repo(@api_true)
 
-      events =
-        address_hash
-        |> ScaledUiMultiplierUpdate.canonical_by_token_query()
-        |> repo.all()
+      {events, head_timestamp} = ScaledUiReader.canonical_multiplier_updates_snapshot(repo, address_hash)
 
       {summary, statuses} =
-        Timeline.classify_events(events, ScaledUiReader.canonical_head_timestamp(repo))
+        Timeline.classify_events(events, head_timestamp)
 
       results = page_multiplier_updates(events, multiplier_updates_cursor(params))
       {page, next_page} = split_list_by_page(results)
