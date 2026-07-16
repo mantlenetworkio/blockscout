@@ -15,15 +15,19 @@ defmodule Explorer.Chain.ScaledUi.Timeline do
 
     @type t :: %__MODULE__{
             base_multiplier: Decimal.t() | nil,
+            base_source: {integer(), integer()} | nil,
             pending_multiplier: Decimal.t() | nil,
             pending_effective_at: Decimal.t() | nil,
+            pending_source: {integer(), integer()} | nil,
             timeline_status: String.t() | nil,
             tainted_from_block: integer() | nil
           }
 
     defstruct base_multiplier: nil,
+              base_source: nil,
               pending_multiplier: nil,
               pending_effective_at: nil,
+              pending_source: nil,
               timeline_status: nil,
               tainted_from_block: nil
   end
@@ -36,6 +40,21 @@ defmodule Explorer.Chain.ScaledUi.Timeline do
     events
     |> Enum.sort_by(&event_position/1)
     |> replay_events(%Summary{})
+  end
+
+  @doc "Returns the replayed summary and display status for each event position."
+  @spec classify_events([event()], Decimal.t()) :: {Summary.t(), map()}
+  def classify_events(events, head_timestamp) when is_list(events) do
+    sorted_events = Enum.sort_by(events, &event_position/1)
+
+    summary =
+      sorted_events
+      |> replay_events(%Summary{})
+      |> settle(head_timestamp)
+
+    statuses = Map.new(sorted_events, &{event_position(&1), event_status(&1, summary)})
+
+    {summary, statuses}
   end
 
   @doc "Returns the trusted multiplier immediately before a block and log position."
@@ -104,7 +123,12 @@ defmodule Explorer.Chain.ScaledUi.Timeline do
       true ->
         summary
         |> mark_ok()
-        |> schedule(Map.get(event, :new_multiplier), Map.get(event, :effective_at), event_timestamp(event))
+        |> schedule(
+          Map.get(event, :new_multiplier),
+          Map.get(event, :effective_at),
+          event_timestamp(event),
+          event
+        )
     end
   end
 
@@ -116,7 +140,12 @@ defmodule Explorer.Chain.ScaledUi.Timeline do
          same_schedule?(updated, overwritten) do
       summary
       |> mark_ok()
-      |> schedule(Map.get(updated, :new_multiplier), Map.get(updated, :effective_at), event_timestamp(updated))
+      |> schedule(
+        Map.get(updated, :new_multiplier),
+        Map.get(updated, :effective_at),
+        event_timestamp(updated),
+        second
+      )
     else
       taint(summary, first)
     end
@@ -153,11 +182,25 @@ defmodule Explorer.Chain.ScaledUi.Timeline do
       decimal_equal?(Map.get(updated, :effective_at), Map.get(overwritten, :effective_at))
   end
 
-  defp schedule(summary, new_multiplier, effective_at, block_timestamp) do
+  defp schedule(summary, new_multiplier, effective_at, block_timestamp, source_event) do
+    source = event_position(source_event)
+
     if decimal_lte?(effective_at, block_timestamp) do
-      %{summary | base_multiplier: new_multiplier, pending_multiplier: nil, pending_effective_at: nil}
+      %{
+        summary
+        | base_multiplier: new_multiplier,
+          base_source: source,
+          pending_multiplier: nil,
+          pending_effective_at: nil,
+          pending_source: nil
+      }
     else
-      %{summary | pending_multiplier: new_multiplier, pending_effective_at: effective_at}
+      %{
+        summary
+        | pending_multiplier: new_multiplier,
+          pending_effective_at: effective_at,
+          pending_source: source
+      }
     end
   end
 
@@ -168,8 +211,10 @@ defmodule Explorer.Chain.ScaledUi.Timeline do
       %{
         summary
         | base_multiplier: summary.pending_multiplier,
+          base_source: summary.pending_source,
           pending_multiplier: nil,
-          pending_effective_at: nil
+          pending_effective_at: nil,
+          pending_source: nil
       }
     else
       summary
@@ -194,6 +239,18 @@ defmodule Explorer.Chain.ScaledUi.Timeline do
 
       _ ->
         :unknown
+    end
+  end
+
+  defp event_status(_event, %Summary{timeline_status: status}) when status != "ok", do: "superseded"
+
+  defp event_status(event, summary) do
+    position = event_position(event)
+
+    cond do
+      position == summary.pending_source -> "pending"
+      position == summary.base_source -> "active"
+      true -> "superseded"
     end
   end
 

@@ -7,12 +7,14 @@ defmodule BlockScoutWeb.API.V2.TokenController do
   alias BlockScoutWeb.API.V2.{AddressView, TransactionView}
   alias BlockScoutWeb.Schemas.API.V2.ErrorResponses.NotFoundResponse
   alias Explorer.{Chain, PagingOptions}
-  alias Explorer.Chain.{Address, BridgedToken, Token, Token.Instance}
+  alias Explorer.Chain.{Address, BridgedToken, ScaledUiMultiplierUpdate, Token, Token.Instance}
   alias Explorer.Chain.ScaledUi.Reader, as: ScaledUiReader
+  alias Explorer.Chain.ScaledUi.Timeline
   alias Explorer.Migrator.BackfillMetadataURL
   alias Indexer.Fetcher.OnDemand.NFTCollectionMetadataRefetch, as: NFTCollectionMetadataRefetchOnDemand
   alias Indexer.Fetcher.OnDemand.TokenInstanceMetadataRefetch, as: TokenInstanceMetadataRefetchOnDemand
   alias Indexer.Fetcher.OnDemand.TokenTotalSupply, as: TokenTotalSupplyOnDemand
+  alias OpenApiSpex.{Parameter, Schema}
   alias Plug.Conn
 
   import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
@@ -161,6 +163,88 @@ defmodule BlockScoutWeb.API.V2.TokenController do
       unprocessable_entity: JsonErrorResponse.response(),
       not_found: NotFoundResponse.response()
     ]
+
+  operation :scaled_ui_multiplier_updates,
+    summary: "List scaled UI multiplier updates for a token",
+    description: "Returns the canonical ERC-8056 multiplier event timeline with replay-derived statuses.",
+    parameters:
+      base_params() ++
+        [
+          address_hash_param(),
+          %Parameter{
+            name: :block_number,
+            in: :query,
+            required: false,
+            schema: %Schema{type: :integer, minimum: 0}
+          },
+          %Parameter{
+            name: :log_index,
+            in: :query,
+            required: false,
+            schema: %Schema{type: :integer, minimum: 0}
+          }
+        ],
+    responses: [
+      ok:
+        {"Canonical scaled UI multiplier updates with pagination.", "application/json",
+         Schemas.Token.ScaledUiMultiplierUpdatesResponse},
+      unprocessable_entity: JsonErrorResponse.response(),
+      not_found: NotFoundResponse.response()
+    ]
+
+  @spec scaled_ui_multiplier_updates(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  def scaled_ui_multiplier_updates(conn, %{address_hash_param: address_hash_string} = params) do
+    with {:format, {:ok, address_hash}} <- {:format, Chain.string_to_address_hash(address_hash_string)},
+         {:ok, false} <- AccessHelper.restricted_access?(address_hash_string, params),
+         {:not_found, true} <- {:not_found, Token.by_contract_address_hash_exists?(address_hash, @api_true)} do
+      repo = Chain.select_repo(@api_true)
+
+      events =
+        address_hash
+        |> ScaledUiMultiplierUpdate.canonical_by_token_query()
+        |> repo.all()
+
+      {summary, statuses} =
+        Timeline.classify_events(events, ScaledUiReader.canonical_head_timestamp(repo))
+
+      results = page_multiplier_updates(events, multiplier_updates_cursor(params))
+      {page, next_page} = split_list_by_page(results)
+
+      conn
+      |> put_status(200)
+      |> render(:scaled_ui_multiplier_updates, %{
+        events: Enum.map(page, &{&1, Map.fetch!(statuses, multiplier_update_position(&1))}),
+        next_page_params: multiplier_updates_next_page_params(page, next_page),
+        timeline_status: summary.timeline_status
+      })
+    end
+  end
+
+  defp page_multiplier_updates(events, cursor) do
+    events
+    |> Enum.reverse()
+    |> Enum.filter(&before_multiplier_updates_cursor?(&1, cursor))
+    |> Enum.take(default_paging_options().page_size + 1)
+  end
+
+  defp multiplier_updates_cursor(%{block_number: block_number, log_index: log_index}),
+    do: {block_number, log_index}
+
+  defp multiplier_updates_cursor(_params), do: nil
+
+  defp before_multiplier_updates_cursor?(_event, nil), do: true
+
+  defp before_multiplier_updates_cursor?(event, cursor),
+    do: multiplier_update_position(event) < cursor
+
+  defp multiplier_updates_next_page_params(_page, []), do: nil
+
+  defp multiplier_updates_next_page_params(page, _next_page) do
+    event = List.last(page)
+    %{"block_number" => event.block_number, "log_index" => event.log_index}
+  end
+
+  defp multiplier_update_position(event), do: {event.block_number, event.log_index}
 
   @doc """
   Handles GET requests to `/api/v2/tokens/:address_hash_param/transfers` endpoint.

@@ -9,7 +9,7 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
 
   alias Explorer.{Repo, TestHelper}
 
-  alias Explorer.Chain.{Address, Token, Token.Instance, TokenTransfer}
+  alias Explorer.Chain.{Address, ScaledUiMultiplierUpdate, Token, Token.Instance, TokenTransfer}
   alias Explorer.Chain.Address.CurrentTokenBalance
   alias Explorer.Chain.Events.Subscriber
   alias Explorer.Chain.ScaledUi.TokenState
@@ -195,6 +195,160 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
 
       assert response["transfers_count"] == "3"
       assert response["token_holders_count"] == "5"
+    end
+  end
+
+  describe "/tokens/{address_hash}/scaled-ui-multiplier-updates" do
+    test "returns a stable descending keyset page with replay-derived statuses", %{conn: conn} do
+      token = insert(:token, extensions: ["ERC-8056"])
+      block = insert(:block, number: 100, timestamp: ~U[2026-07-16 00:00:00Z])
+      transaction = insert(:transaction) |> with_block(block)
+      timestamp = DateTime.to_unix(block.timestamp)
+
+      Enum.reduce(0..50, Decimal.new(0), fn log_index, old_multiplier ->
+        new_multiplier = Decimal.add(old_multiplier, 1)
+
+        insert_multiplier_update(token, transaction,
+          block_timestamp: timestamp,
+          effective_at: timestamp,
+          event_type: "updated",
+          log_index: log_index,
+          new_multiplier: new_multiplier,
+          old_multiplier: old_multiplier
+        )
+
+        new_multiplier
+      end)
+
+      first_page =
+        conn
+        |> get("/api/v2/tokens/#{token.contract_address.hash}/scaled-ui-multiplier-updates")
+        |> json_response(200)
+
+      assert first_page["timeline_status"] == "ok"
+      assert length(first_page["items"]) == 50
+      assert hd(first_page["items"])["log_index"] == 50
+      assert hd(first_page["items"])["status"] == "active"
+      assert Enum.all?(tl(first_page["items"]), &(&1["status"] == "superseded"))
+
+      assert first_page["next_page_params"] == %{
+               "block_number" => block.number,
+               "log_index" => 1
+             }
+
+      second_page =
+        conn
+        |> get(
+          "/api/v2/tokens/#{token.contract_address.hash}/scaled-ui-multiplier-updates",
+          first_page["next_page_params"]
+        )
+        |> json_response(200)
+
+      assert [%{"log_index" => 0, "status" => "superseded"}] = second_page["items"]
+      assert second_page["next_page_params"] == nil
+    end
+
+    test "moves the overwrite source from pending to active at canonical head", %{conn: conn} do
+      token = insert(:token, extensions: ["ERC-8056"])
+      block = insert(:block, number: 100, timestamp: DateTime.from_unix!(300))
+      transaction = insert(:transaction) |> with_block(block)
+
+      insert_multiplier_update(token, transaction,
+        block_timestamp: 300,
+        effective_at: 300,
+        event_type: "updated",
+        log_index: 0,
+        new_multiplier: 1_000,
+        old_multiplier: 0
+      )
+
+      insert_multiplier_update(token, transaction,
+        block_timestamp: 300,
+        effective_at: 400,
+        event_type: "updated",
+        log_index: 1,
+        new_multiplier: 2_000,
+        old_multiplier: 1_000
+      )
+
+      insert_multiplier_update(token, transaction,
+        block_timestamp: 300,
+        effective_at: 500,
+        event_type: "updated",
+        log_index: 2,
+        new_multiplier: 3_000,
+        old_multiplier: 1_000
+      )
+
+      insert_multiplier_update(token, transaction,
+        block_timestamp: 300,
+        effective_at: 500,
+        event_type: "overwritten",
+        log_index: 3,
+        new_multiplier: 3_000,
+        overwritten_effective_at: 400,
+        overwritten_multiplier: 2_000
+      )
+
+      pending_response =
+        conn
+        |> get("/api/v2/tokens/#{token.contract_address.hash}/scaled-ui-multiplier-updates")
+        |> json_response(200)
+
+      assert event_statuses(pending_response) == %{
+               0 => "active",
+               1 => "superseded",
+               2 => "superseded",
+               3 => "pending"
+             }
+
+      insert(:block, number: 101, timestamp: DateTime.from_unix!(500), consensus: true)
+
+      active_response =
+        conn
+        |> get("/api/v2/tokens/#{token.contract_address.hash}/scaled-ui-multiplier-updates")
+        |> json_response(200)
+
+      assert event_statuses(active_response) == %{
+               0 => "superseded",
+               1 => "superseded",
+               2 => "superseded",
+               3 => "active"
+             }
+    end
+
+    test "returns raw events when the timeline is tainted", %{conn: conn} do
+      token = insert(:token, extensions: ["ERC-8056"])
+      block = insert(:block, number: 100, timestamp: DateTime.from_unix!(300))
+      transaction = insert(:transaction) |> with_block(block)
+
+      insert_multiplier_update(token, transaction,
+        block_timestamp: 100,
+        effective_at: 100,
+        event_type: "updated",
+        log_index: 0,
+        new_multiplier: 1_000,
+        old_multiplier: 0
+      )
+
+      insert_multiplier_update(token, transaction,
+        block_timestamp: 200,
+        effective_at: 200,
+        event_type: "updated",
+        log_index: 1,
+        new_multiplier: 2_000,
+        old_multiplier: 999
+      )
+
+      response =
+        conn
+        |> get("/api/v2/tokens/#{token.contract_address.hash}/scaled-ui-multiplier-updates")
+        |> json_response(200)
+
+      assert response["timeline_status"] == "tainted"
+      assert Enum.map(response["items"], & &1["log_index"]) == [1, 0]
+      assert Enum.all?(response["items"], &(&1["status"] == "superseded"))
+      assert hd(response["items"])["old_multiplier"] == "999"
     end
   end
 
@@ -615,6 +769,26 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
       |> Map.put(:token_contract_address_hash, token.contract_address_hash)
     )
     |> Repo.insert!()
+  end
+
+  defp insert_multiplier_update(token, transaction, attrs) do
+    params =
+      attrs
+      |> Enum.into(%{})
+      |> Map.merge(%{
+        block_hash: transaction.block_hash,
+        block_number: transaction.block_number,
+        token_contract_address_hash: token.contract_address_hash,
+        transaction_hash: transaction.hash
+      })
+
+    %ScaledUiMultiplierUpdate{}
+    |> ScaledUiMultiplierUpdate.changeset(params)
+    |> Repo.insert!()
+  end
+
+  defp event_statuses(response) do
+    Map.new(response["items"], &{&1["log_index"], &1["status"]})
   end
 
   describe "/tokens" do

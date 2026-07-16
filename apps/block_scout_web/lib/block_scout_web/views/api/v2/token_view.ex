@@ -70,6 +70,18 @@ defmodule BlockScoutWeb.API.V2.TokenView do
     %{"items" => Enum.map(tokens, &render("token.json", %{token: &1})), "next_page_params" => next_page_params}
   end
 
+  def render("scaled_ui_multiplier_updates.json", %{
+        events: events,
+        next_page_params: next_page_params,
+        timeline_status: timeline_status
+      }) do
+    %{
+      "items" => Enum.map(events, &prepare_scaled_ui_multiplier_update/1),
+      "next_page_params" => next_page_params,
+      "timeline_status" => timeline_status
+    }
+  end
+
   def render("token_instances.json", %{
         token_instances: token_instances,
         next_page_params: next_page_params,
@@ -105,6 +117,23 @@ defmodule BlockScoutWeb.API.V2.TokenView do
       "token_id" => token_balance.token_id
     }
     |> maybe_put("scaled_value", token_balance.scaled_value)
+  end
+
+  defp prepare_scaled_ui_multiplier_update({event, status}) do
+    %{
+      "block_hash" => to_string(event.block_hash),
+      "block_number" => event.block_number,
+      "block_timestamp" => event.block.timestamp,
+      "effective_at" => decimal_string(event.effective_at),
+      "event_type" => event.event_type,
+      "log_index" => event.log_index,
+      "new_multiplier" => decimal_string(event.new_multiplier),
+      "old_multiplier" => decimal_string(event.old_multiplier),
+      "overwritten_effective_at" => decimal_string(event.overwritten_effective_at),
+      "overwritten_multiplier" => decimal_string(event.overwritten_multiplier),
+      "status" => status,
+      "transaction_hash" => to_string(event.transaction_hash)
+    }
   end
 
   @doc """
@@ -193,6 +222,9 @@ defmodule BlockScoutWeb.API.V2.TokenView do
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
+  defp decimal_string(nil), do: nil
+  defp decimal_string(value), do: Decimal.to_string(value, :normal)
 
   case @chain_type do
     :filecoin ->

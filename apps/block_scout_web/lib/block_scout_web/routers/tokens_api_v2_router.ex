@@ -67,6 +67,7 @@ defmodule BlockScoutWeb.Routers.TokensApiV2Router do
     get("/", V2.TokenController, :tokens_list)
     get("/:address_hash_param", V2.TokenController, :token)
     get("/:address_hash_param/counters", V2.TokenController, :counters)
+    get("/:address_hash_param/scaled-ui-multiplier-updates", V2.TokenController, :scaled_ui_multiplier_updates)
     get("/:address_hash_param/transfers", V2.TokenController, :transfers)
     get("/:address_hash_param/holders", V2.TokenController, :holders)
     get("/:address_hash_param/holders/csv", V2.CsvExportController, :export_token_holders)

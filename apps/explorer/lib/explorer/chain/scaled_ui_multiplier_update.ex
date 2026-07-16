@@ -16,6 +16,8 @@ defmodule Explorer.Chain.ScaledUiMultiplierUpdate do
 
   alias Explorer.Chain.{Address, Block, Hash, Transaction}
 
+  import Ecto.Query, only: [from: 2]
+
   @event_types ~w(updated overwritten)
 
   @base_required_attrs ~w(token_contract_address_hash transaction_hash block_hash log_index block_number block_timestamp event_type)a
@@ -69,6 +71,18 @@ defmodule Explorer.Chain.ScaledUiMultiplierUpdate do
     |> foreign_key_constraint(:token_contract_address_hash)
     |> foreign_key_constraint(:block_hash)
     |> foreign_key_constraint(:transaction_hash)
+  end
+
+  @doc "Returns canonical multiplier events for a token in replay order."
+  @spec canonical_by_token_query(Hash.Address.t()) :: Ecto.Query.t()
+  def canonical_by_token_query(token_contract_address_hash) do
+    from(update in __MODULE__,
+      join: block in assoc(update, :block),
+      where: update.token_contract_address_hash == ^token_contract_address_hash,
+      where: block.consensus == true,
+      order_by: [asc: update.block_number, asc: update.log_index],
+      preload: [block: block]
+    )
   end
 
   # Conditional required-fields by event_type (mirrors the DB CHECK constraints

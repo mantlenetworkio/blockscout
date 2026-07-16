@@ -189,6 +189,51 @@ defmodule Explorer.Chain.ScaledUi.TimelineTest do
     end
   end
 
+  describe "classify_events/2" do
+    test "assigns active and pending to the events that own the replayed state" do
+      events = [
+        updated(1, 1, 100, 0, 1_000, 100),
+        updated(2, 1, 200, 1_000, 2_000, 400),
+        updated(3, 5, 300, 1_000, 3_000, 500, "overwrite"),
+        overwritten(3, 6, 300, 2_000, 400, 3_000, 500, "overwrite")
+      ]
+
+      {pending_summary, pending_statuses} = Timeline.classify_events(events, d(499))
+
+      assert pending_summary.timeline_status == "ok"
+
+      assert pending_statuses == %{
+               {1, 1} => "active",
+               {2, 1} => "superseded",
+               {3, 5} => "superseded",
+               {3, 6} => "pending"
+             }
+
+      {active_summary, active_statuses} = Timeline.classify_events(events, d(500))
+
+      assert active_summary.timeline_status == "ok"
+
+      assert active_statuses == %{
+               {1, 1} => "superseded",
+               {2, 1} => "superseded",
+               {3, 5} => "superseded",
+               {3, 6} => "active"
+             }
+    end
+
+    test "does not claim an active or pending owner for a tainted timeline" do
+      events = [
+        updated(1, 1, 100, 0, 1_000, 100),
+        updated(2, 1, 200, 999, 2_000, 200)
+      ]
+
+      {summary, statuses} = Timeline.classify_events(events, d(300))
+
+      assert summary.timeline_status == "tainted"
+      assert statuses == %{{1, 1} => "superseded", {2, 1} => "superseded"}
+    end
+  end
+
   defp updated(block, log_index, timestamp, old, new, effective_at, transaction_hash \\ "tx") do
     %{
       block_number: block,
