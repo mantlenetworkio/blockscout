@@ -229,6 +229,25 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
       assert %{"items" => [], "next_page_params" => nil} = json_response(request, 200)
     end
 
+    test "returns scaled UI data", %{conn: conn} do
+      token = insert(:token, extensions: ["ERC-8056"])
+      transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        token_contract_address: token.contract_address,
+        transaction: transaction,
+        ui_amount_status: "ok",
+        ui_multiplier: Decimal.new("2000000000000000000"),
+        ui_value: Decimal.new(2000)
+      )
+
+      response = conn |> get("/api/v2/tokens/#{token.contract_address.hash}/transfers") |> json_response(200)
+
+      assert hd(response["items"])["total"]["scaled_ui"]["status"] == "ok"
+    end
+
     test "check pagination", %{conn: conn} do
       token = insert(:token)
 

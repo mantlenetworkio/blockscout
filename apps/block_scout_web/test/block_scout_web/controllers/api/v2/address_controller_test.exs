@@ -1278,6 +1278,27 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
   end
 
   describe "/addresses/{address_hash}/token-transfers" do
+    test "returns unknown scaled UI data", %{conn: conn} do
+      address = insert(:address)
+      transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        from_address: address,
+        transaction: transaction,
+        ui_amount_status: "unknown",
+        ui_value: Decimal.new(2000)
+      )
+
+      response = conn |> get("/api/v2/addresses/#{address.hash}/token-transfers") |> json_response(200)
+      scaled_ui = hd(response["items"])["total"]["scaled_ui"]
+
+      assert scaled_ui["value"] == "2000"
+      assert scaled_ui["multiplier"] == nil
+      assert scaled_ui["status"] == "unknown"
+    end
+
     test "get token transfers with ok reputation", %{conn: conn} do
       init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
       Application.put_env(:block_scout_web, :hide_scam_addresses, true)

@@ -122,12 +122,28 @@ defmodule BlockScoutWeb.Schemas.API.V2.TokenTransfer.Total do
   require OpenApiSpex
 
   alias BlockScoutWeb.Schemas.API.V2.General
+  alias OpenApiSpex.Schema
 
   OpenApiSpex.schema(%{
     type: :object,
     properties: %{
       value: General.IntegerStringNullable,
-      decimals: General.IntegerStringNullable
+      decimals: General.IntegerStringNullable,
+      scaled_ui: %Schema{
+        type: :object,
+        properties: %{
+          multiplier: General.IntegerStringNullable,
+          multiplier_decimals: %Schema{type: :integer, enum: [18]},
+          status: %Schema{
+            type: :string,
+            enum: ["ok", "overflow", "unknown", "mismatch", "event_missing"],
+            nullable: true
+          },
+          value: General.IntegerStringNullable
+        },
+        required: [:multiplier, :multiplier_decimals, :status, :value],
+        additionalProperties: false
+      }
     },
     required: [:value, :decimals],
     additionalProperties: false

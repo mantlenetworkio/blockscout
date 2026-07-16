@@ -72,7 +72,9 @@ defmodule BlockScoutWeb.API.V2.TokenTransferView do
   @spec prepare_token_transfer_total(TokenTransfer.t()) :: map()
   # credo:disable-for-next-line /Complexity/
   def prepare_token_transfer_total(token_transfer) do
-    case TokenTransfer.token_transfer_amount_for_api(token_transfer) do
+    token_transfer
+    |> TokenTransfer.token_transfer_amount_for_api()
+    |> case do
       {:ok, :erc721_instance} ->
         %{
           "token_id" => token_transfer.token_ids && List.first(token_transfer.token_ids),
@@ -107,5 +109,24 @@ defmodule BlockScoutWeb.API.V2.TokenTransferView do
       _ ->
         nil
     end
+    |> maybe_append_scaled_ui(token_transfer)
   end
+
+  defp maybe_append_scaled_ui(total, token_transfer) when is_map(total) do
+    if Enum.any?(
+         [token_transfer.ui_value, token_transfer.ui_multiplier, token_transfer.ui_amount_status],
+         &(!is_nil(&1))
+       ) do
+      Map.put(total, "scaled_ui", %{
+        "multiplier" => token_transfer.ui_multiplier,
+        "multiplier_decimals" => 18,
+        "status" => token_transfer.ui_amount_status,
+        "value" => token_transfer.ui_value
+      })
+    else
+      total
+    end
+  end
+
+  defp maybe_append_scaled_ui(total, _token_transfer), do: total
 end

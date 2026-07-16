@@ -93,6 +93,26 @@ defmodule BlockScoutWeb.API.V2.TokenTransferControllerTest do
       assert response["next_page_params"] == nil
     end
 
+    test "returns scaled UI data", %{conn: conn} do
+      transaction = :transaction |> insert() |> with_block()
+
+      insert(:token_transfer,
+        transaction: transaction,
+        ui_amount_status: "ok",
+        ui_multiplier: Decimal.new("2000000000000000000"),
+        ui_value: Decimal.new(2000)
+      )
+
+      response = conn |> get("/api/v2/token-transfers") |> json_response(200)
+
+      assert hd(response["items"])["total"]["scaled_ui"] == %{
+               "multiplier" => "2000000000000000000",
+               "multiplier_decimals" => 18,
+               "status" => "ok",
+               "value" => "2000"
+             }
+    end
+
     test "non empty list", %{conn: conn} do
       transaction =
         :transaction

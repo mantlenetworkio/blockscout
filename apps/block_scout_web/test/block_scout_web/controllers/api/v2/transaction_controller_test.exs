@@ -783,6 +783,25 @@ defmodule BlockScoutWeb.API.V2.TransactionControllerTest do
   end
 
   describe "/transactions/{transaction_hash}/token-transfers" do
+    test "returns the multiplier when the UI amount event is missing", %{conn: conn} do
+      transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        transaction: transaction,
+        ui_amount_status: "event_missing",
+        ui_multiplier: Decimal.new("2000000000000000000")
+      )
+
+      response = conn |> get("/api/v2/transactions/#{transaction.hash}/token-transfers") |> json_response(200)
+      scaled_ui = hd(response["items"])["total"]["scaled_ui"]
+
+      assert scaled_ui["value"] == nil
+      assert scaled_ui["multiplier"] == "2000000000000000000"
+      assert scaled_ui["status"] == "event_missing"
+    end
+
     test "get token-transfers with ok reputation", %{conn: conn} do
       init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
       Application.put_env(:block_scout_web, :hide_scam_addresses, true)
