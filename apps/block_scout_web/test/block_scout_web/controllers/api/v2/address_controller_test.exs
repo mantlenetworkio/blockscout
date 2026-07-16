@@ -1299,6 +1299,33 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
       assert scaled_ui["status"] == "unknown"
     end
 
+    test "filters ERC-8056 transfers without including pre-capability rows", %{conn: conn} do
+      address = insert(:address)
+      token = insert(:token, extensions: ["ERC-8056"])
+      annotated_transaction = insert(:transaction) |> with_block()
+      historical_transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        from_address: address,
+        transaction: annotated_transaction,
+        token_contract_address: token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        from_address: address,
+        transaction: historical_transaction,
+        token_contract_address: token.contract_address
+      )
+
+      response =
+        conn
+        |> get("/api/v2/addresses/#{address.hash}/token-transfers", %{token_extension: "ERC-8056"})
+        |> json_response(200)
+
+      assert Enum.map(response["items"], & &1["transaction_hash"]) == [to_string(annotated_transaction.hash)]
+    end
+
     test "get token transfers with ok reputation", %{conn: conn} do
       init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
       Application.put_env(:block_scout_web, :hide_scam_addresses, true)
@@ -4021,6 +4048,41 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
   end
 
   describe "/addresses/{address_hash}/tabs-counters" do
+    test "returns an independent ERC-8056 transfer counter", %{conn: conn} do
+      address = insert(:address)
+      scaled_token = insert(:token, extensions: ["ERC-8056"])
+      plain_token = insert(:token)
+
+      annotated_transaction = insert(:transaction) |> with_block()
+      historical_transaction = insert(:transaction) |> with_block()
+      plain_transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        from_address: address,
+        transaction: annotated_transaction,
+        token_contract_address: scaled_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        from_address: address,
+        transaction: historical_transaction,
+        token_contract_address: scaled_token.contract_address
+      )
+
+      insert(:token_transfer,
+        from_address: address,
+        transaction: plain_transaction,
+        token_contract_address: plain_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      response = conn |> get("/api/v2/addresses/#{address.hash}/tabs-counters") |> json_response(200)
+
+      assert response["token_transfers_count"] == 3
+      assert response["token_transfers_erc8056_count"] == 1
+    end
+
     test "get 200 on non existing address", %{conn: conn} do
       address = build(:address)
 

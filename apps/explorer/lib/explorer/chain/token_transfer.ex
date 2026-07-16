@@ -157,6 +157,7 @@ defmodule Explorer.Chain.TokenTransfer do
 
   @typep paging_options :: {:paging_options, PagingOptions.t()}
   @typep api? :: {:api?, true | false}
+  @typep token_extension :: {:token_extension, String.t() | nil}
 
   @constant "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
   @weth_deposit_signature "0xe1fffcc4923d04b559f4d29a8bfc6cda04eb5b0d3c460751c2402c5c5cc9109c"
@@ -257,7 +258,7 @@ defmodule Explorer.Chain.TokenTransfer do
   """
   def transfer_function_signature, do: @transfer_function_signature
 
-  @spec fetch_token_transfers_from_token_hash(Hash.t(), [paging_options | api?]) :: []
+  @spec fetch_token_transfers_from_token_hash(Hash.t(), [paging_options | api? | token_extension]) :: []
   def fetch_token_transfers_from_token_hash(token_address_hash, options) do
     paging_options = Keyword.get(options, :paging_options, @default_paging_options)
 
@@ -276,6 +277,7 @@ defmodule Explorer.Chain.TokenTransfer do
 
         only_consensus_transfers_query()
         |> where([tt], tt.token_contract_address_hash == ^token_address_hash and not is_nil(tt.block_number))
+        |> filter_by_token_extension(Keyword.get(options, :token_extension))
         |> preload(^preloads)
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
         |> page_token_transfer(paging_options)
@@ -316,7 +318,7 @@ defmodule Explorer.Chain.TokenTransfer do
   @doc """
   Returns the ordered paginated list of consensus token transfers (consensus blocks only) from the DB with address, token, transaction preloads
   """
-  @spec fetch([paging_options | api?]) :: []
+  @spec fetch([paging_options | api? | token_extension]) :: []
   def fetch(options) do
     paging_options = Keyword.get(options, :paging_options, @default_paging_options)
     token_type = Keyword.get(options, :token_type)
@@ -338,6 +340,7 @@ defmodule Explorer.Chain.TokenTransfer do
         |> preload(^preloads)
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
         |> maybe_filter_by_token_type(token_type)
+        |> filter_by_token_extension(Keyword.get(options, :token_extension))
         |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> page_token_transfer(paging_options)
         |> limit(^paging_options.page_size)
@@ -600,6 +603,7 @@ defmodule Explorer.Chain.TokenTransfer do
       |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
       |> preload([token: token], [{:token, token}])
       |> filter_by_type(token_types)
+      |> filter_by_token_extension(Keyword.get(options, :token_extension))
       |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
       |> handle_paging_options(paging_options)
     else
@@ -609,6 +613,7 @@ defmodule Explorer.Chain.TokenTransfer do
         |> filter_by_direction(:to, address_hash)
         |> filter_by_token_address_hash(token_address_hash)
         |> filter_by_type(token_types)
+        |> filter_by_token_extension(Keyword.get(options, :token_extension))
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
         |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> handle_paging_options(paging_options)
@@ -620,6 +625,7 @@ defmodule Explorer.Chain.TokenTransfer do
         |> filter_by_direction(:from, address_hash)
         |> filter_by_token_address_hash(token_address_hash)
         |> filter_by_type(token_types)
+        |> filter_by_token_extension(Keyword.get(options, :token_extension))
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
         |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> handle_paging_options(paging_options)
@@ -659,6 +665,19 @@ defmodule Explorer.Chain.TokenTransfer do
 
   def filter_by_token_address_hash(query, token_address_hash) do
     where(query, [tt], tt.token_contract_address_hash == ^token_address_hash)
+  end
+
+  @spec filter_by_token_extension(Ecto.Queryable.t(), String.t() | nil) :: Ecto.Query.t()
+  def filter_by_token_extension(query, nil), do: query
+
+  def filter_by_token_extension(query, extension) do
+    extension_token_hashes = Token.hashes_by_extension_query(extension)
+
+    where(
+      query,
+      [tt],
+      not is_nil(tt.ui_amount_status) and tt.token_contract_address_hash in subquery(extension_token_hashes)
+    )
   end
 
   @doc """

@@ -477,11 +477,13 @@ defmodule Explorer.Chain.Token do
           Chain.paging_options()
           | {:sorting, SortingHelper.sorting_params()}
           | {:token_type, [String.t()]}
+          | {:token_extension, String.t() | nil}
           | {:necessity_by_association, map()}
           | Chain.show_scam_tokens?()
         ]) :: [__MODULE__.t()]
   def list_top(filter, options \\ []) do
     paging_options = Keyword.get(options, :paging_options, Chain.default_paging_options())
+    token_extension = Keyword.get(options, :token_extension)
     token_type = Keyword.get(options, :token_type, nil)
     sorting = Keyword.get(options, :sorting, [])
 
@@ -495,6 +497,7 @@ defmodule Explorer.Chain.Token do
       |> Chain.join_associations(necessity_by_association)
       |> ExplorerHelper.maybe_hide_scam_addresses_with_select(:contract_address_hash, options)
       |> apply_filter(token_type)
+      |> filter_by_extension(token_extension)
       |> SortingHelper.apply_sorting(sorting, @default_sorting)
       |> SortingHelper.page_with_sorting(paging_options, sorting, @default_sorting)
 
@@ -561,6 +564,20 @@ defmodule Explorer.Chain.Token do
 
   defp apply_filter(query, token_types) when is_list(token_types) do
     from(t in query, where: t.type in ^token_types)
+  end
+
+  @spec filter_by_extension(Ecto.Queryable.t(), String.t() | nil) :: Ecto.Query.t()
+  def filter_by_extension(query, nil), do: query
+
+  def filter_by_extension(query, extension) do
+    where(query, [token], fragment("? @> ARRAY[?]::varchar[]", token.extensions, ^extension))
+  end
+
+  @spec hashes_by_extension_query(String.t()) :: Ecto.Query.t()
+  def hashes_by_extension_query(extension) do
+    Token
+    |> filter_by_extension(extension)
+    |> select([token], token.contract_address_hash)
   end
 
   def get_by_contract_address_hash(hash, options) do

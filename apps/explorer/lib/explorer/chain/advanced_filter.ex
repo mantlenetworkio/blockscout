@@ -85,6 +85,7 @@ defmodule Explorer.Chain.AdvancedFilter do
   @typep to_address_hashes :: {:to_address_hashes, [Hash.Address.t()] | nil}
   @typep address_relation :: {:address_relation, :or | :and | nil}
   @typep amount :: {:amount, [{:from, Decimal.t()} | {:to, Decimal.t()}] | nil}
+  @typep token_extension :: {:token_extension, String.t() | nil}
   @typep token_contract_address_hashes ::
            {:token_contract_address_hashes, [{:include, [Hash.Address.t()]} | {:include, [Hash.Address.t()]}] | nil}
   @type options :: [
@@ -95,6 +96,7 @@ defmodule Explorer.Chain.AdvancedFilter do
           | to_address_hashes()
           | address_relation()
           | amount()
+          | token_extension()
           | token_contract_address_hashes()
           | Chain.paging_options()
           | Chain.api?()
@@ -174,9 +176,7 @@ defmodule Explorer.Chain.AdvancedFilter do
     tokens_to_include = options[:token_contract_address_hashes][:include] || []
     tokens_to_exclude = options[:token_contract_address_hashes][:exclude] || []
 
-    if (transaction_types == [] or Enum.any?(@transaction_types, &Enum.member?(transaction_types, &1))) and
-         (tokens_to_include == [] or "native" in tokens_to_include) and
-         "native" not in tokens_to_exclude do
+    if include_transactions?(options[:token_extension], transaction_types, tokens_to_include, tokens_to_exclude) do
       [
         transactions_query_function(paging_options, options),
         internal_transactions_query_function(paging_options, options) | query_functions
@@ -184,6 +184,16 @@ defmodule Explorer.Chain.AdvancedFilter do
     else
       query_functions
     end
+  end
+
+  defp include_transactions?(extension, _transaction_types, _tokens_to_include, _tokens_to_exclude)
+       when not is_nil(extension),
+       do: false
+
+  defp include_transactions?(_extension, transaction_types, tokens_to_include, tokens_to_exclude) do
+    (transaction_types == [] or Enum.any?(@transaction_types, &Enum.member?(transaction_types, &1))) and
+      (tokens_to_include == [] or "native" in tokens_to_include) and
+      "native" not in tokens_to_exclude
   end
 
   defp maybe_add_token_transfers_queries(query_functions, options, paging_options) do
@@ -801,6 +811,7 @@ defmodule Explorer.Chain.AdvancedFilter do
     )
     |> filter_token_transfers_by_age(options)
     |> filter_by_token(options[:token_contract_address_hashes])
+    |> filter_token_transfers_by_extension(options[:token_extension])
     |> filter_token_transfers_by_addresses(
       options[:from_address_hashes],
       options[:to_address_hashes],
@@ -938,6 +949,16 @@ defmodule Explorer.Chain.AdvancedFilter do
   end
 
   defp filter_token_transfer_by_types(query_function, _), do: query_function
+
+  defp filter_token_transfers_by_extension(query_function, nil), do: query_function
+
+  defp filter_token_transfers_by_extension(query_function, extension) do
+    fn query, unnested? ->
+      query
+      |> TokenTransfer.filter_by_token_extension(extension)
+      |> query_function.(unnested?)
+    end
+  end
 
   defp filter_transactions_by_methods(query, [_ | _] = methods) do
     prepared_methods = prepare_methods(methods)

@@ -113,6 +113,50 @@ defmodule BlockScoutWeb.API.V2.TokenTransferControllerTest do
              }
     end
 
+    test "filters by ERC-8056 extension and annotated rows", %{conn: conn} do
+      scaled_token = insert(:token, extensions: ["ERC-8056"])
+      plain_token = insert(:token)
+
+      eligible_transaction = insert(:transaction) |> with_block()
+      unannotated_transaction = insert(:transaction) |> with_block()
+      plain_transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        transaction: eligible_transaction,
+        token_contract_address: scaled_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        transaction: unannotated_transaction,
+        token_contract_address: scaled_token.contract_address
+      )
+
+      insert(:token_transfer,
+        transaction: plain_transaction,
+        token_contract_address: plain_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      response =
+        conn
+        |> get("/api/v2/token-transfers", %{token_extension: "ERC-8056"})
+        |> json_response(200)
+
+      assert Enum.map(response["items"], & &1["transaction_hash"]) == [
+               to_string(eligible_transaction.hash)
+             ]
+    end
+
+    test "rejects unsupported token extensions", %{conn: conn} do
+      response =
+        conn
+        |> get("/api/v2/token-transfers", %{token_extension: "ERC-9999"})
+        |> json_response(422)
+
+      assert hd(response["errors"])["source"] == %{"pointer" => "/token_extension"}
+    end
+
     test "non empty list", %{conn: conn} do
       transaction =
         :transaction
@@ -292,6 +336,7 @@ defmodule BlockScoutWeb.API.V2.TokenTransferControllerTest do
     assert Address.checksum(token_transfer.from_address_hash) == json["from"]["hash"]
     assert Address.checksum(token_transfer.to_address_hash) == json["to"]["hash"]
     assert to_string(token_transfer.transaction_hash) == json["transaction_hash"]
+
     assert token_transfer.transaction.block_timestamp == Timex.parse!(json["timestamp"], "{ISO:Extended:Z}")
     assert json["method"] == nil
     assert token_transfer.block_number == json["block_number"]

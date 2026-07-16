@@ -107,6 +107,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   defp build_csv_export_options(params) do
     []
     |> Keyword.merge(extract_filters(params))
+    |> Keyword.delete(:token_extension)
     |> Keyword.merge(paging_options(params))
     |> Keyword.update(:paging_options, %PagingOptions{page_size: CsvHelper.limit()}, fn
       %PagingOptions{} = paging_options ->
@@ -250,6 +251,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
         ),
       address_relation: prepare_address_relation(params["address_relation"]),
       amount: prepare_amount(params["amount_from"], params["amount_to"]),
+      token_extension: prepare_token_extension(params["token_extension"]),
       token_contract_address_hashes:
         params["token_contract_address_hashes_to_include"]
         |> prepare_include_exclude_address_hashes(
@@ -262,6 +264,9 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
         end)
     ]
   end
+
+  defp prepare_token_extension("ERC-8056"), do: "ERC-8056"
+  defp prepare_token_extension(_), do: nil
 
   @default_allowed_transaction_types ~w(COIN_TRANSFER CONTRACT_INTERACTION CONTRACT_CREATION ERC-20 ERC-404 ERC-721 ERC-1155 ERC-7984)
 

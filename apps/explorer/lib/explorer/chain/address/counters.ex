@@ -43,6 +43,7 @@ defmodule Explorer.Chain.Address.Counters do
     :validations,
     :transactions,
     :token_transfers,
+    :token_transfers_erc8056,
     :token_balances,
     :logs,
     :withdrawals,
@@ -167,6 +168,12 @@ defmodule Explorer.Chain.Address.Counters do
       where: token_transfer.to_address_hash == ^address_hash,
       or_where: token_transfer.from_address_hash == ^address_hash
     )
+  end
+
+  def address_to_token_transfer_count_query(address_hash, token_extension) do
+    address_hash
+    |> address_to_token_transfer_count_query()
+    |> TokenTransfer.filter_by_token_extension(token_extension)
   end
 
   @spec address_to_token_transfer_count(Address.t()) :: non_neg_integer()
@@ -410,6 +417,15 @@ defmodule Explorer.Chain.Address.Counters do
         options
       )
 
+    token_transfers_erc8056_count_task =
+      configure_task(
+        :token_transfers_erc8056,
+        cached_counters,
+        address_to_token_transfer_count_query(address_hash, "ERC-8056"),
+        address_hash,
+        options
+      )
+
     token_balances_count_task =
       configure_task(
         :token_balances,
@@ -477,6 +493,7 @@ defmodule Explorer.Chain.Address.Counters do
         transactions_to_count_task,
         transactions_created_contract_count_task,
         token_transfers_count_task,
+        token_transfers_erc8056_count_task,
         token_balances_count_task,
         logs_count_task,
         withdrawals_count_task,

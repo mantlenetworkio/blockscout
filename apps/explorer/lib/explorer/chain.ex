@@ -1241,6 +1241,7 @@ defmodule Explorer.Chain do
 
     invalidate_tab_counter(:validations, imported[:blocks] || [], &block_address_hashes/1)
     invalidate_tab_counter(:token_transfers, imported[:token_transfers] || [], &token_transfer_address_hashes/1)
+    invalidate_scaled_ui_import_counters(imported[:token_transfers])
     invalidate_tab_counter(:logs, imported[:logs] || [], &log_address_hashes/1)
 
     invalidate_tab_counter(
@@ -1261,6 +1262,18 @@ defmodule Explorer.Chain do
       :celo_election_rewards,
       imported[:celo_election_rewards] || [],
       &celo_election_reward_address_hashes/1
+    )
+  end
+
+  defp invalidate_scaled_ui_import_counters(nil), do: :ok
+
+  defp invalidate_scaled_ui_import_counters(token_transfers) do
+    annotated_transfers = Enum.filter(token_transfers, &(not is_nil(&1.ui_amount_status)))
+
+    invalidate_tab_counter(
+      :token_transfers_erc8056,
+      annotated_transfers,
+      &token_transfer_address_hashes/1
     )
   end
 
@@ -2125,6 +2138,7 @@ defmodule Explorer.Chain do
         |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
         |> preload([token: token], [{:token, token}])
         |> TokenTransfer.filter_by_type(token_type)
+        |> TokenTransfer.filter_by_token_extension(Keyword.get(options, :token_extension))
         |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> TokenTransfer.page_token_transfer(paging_options)
         |> limit(^paging_options.page_size)

@@ -802,6 +802,39 @@ defmodule BlockScoutWeb.API.V2.TransactionControllerTest do
       assert scaled_ui["status"] == "event_missing"
     end
 
+    test "filters transfers by ERC-8056 extension", %{conn: conn} do
+      transaction = insert(:transaction) |> with_block()
+      scaled_token = insert(:token, extensions: ["ERC-8056"])
+      plain_token = insert(:token)
+
+      insert(:token_transfer,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        log_index: 0,
+        token_contract_address: scaled_token.contract_address,
+        transaction: transaction,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        log_index: 1,
+        token_contract_address: plain_token.contract_address,
+        transaction: transaction,
+        ui_amount_status: "ok"
+      )
+
+      response =
+        conn
+        |> get("/api/v2/transactions/#{transaction.hash}/token-transfers", %{token_extension: "ERC-8056"})
+        |> json_response(200)
+
+      assert Enum.map(response["items"], &String.downcase(&1["token"]["address_hash"])) == [
+               to_string(scaled_token.contract_address_hash)
+             ]
+    end
+
     test "get token-transfers with ok reputation", %{conn: conn} do
       init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
       Application.put_env(:block_scout_web, :hide_scam_addresses, true)

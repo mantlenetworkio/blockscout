@@ -26,6 +26,7 @@ defmodule BlockScoutWeb.PagingHelper do
 
   @allowed_token_transfer_type_labels @allowed_base_token_transfer_type_labels ++
                                         @allowed_chain_type_token_transfer_type_labels
+  @allowed_token_extensions ["ERC-8056"]
   @allowed_nft_type_labels ["ERC-721", "ERC-1155", "ERC-404"]
   @allowed_chain_id [1, 56, 99]
   @allowed_stability_validators_states ["active", "probation", "inactive"]
@@ -92,6 +93,13 @@ defmodule BlockScoutWeb.PagingHelper do
   end
 
   def token_transfers_types_options(_), do: [token_type: []]
+
+  @spec token_extension_options(map()) :: [{:token_extension, String.t() | nil}]
+  def token_extension_options(params) do
+    extension = params[:token_extension] || params["token_extension"]
+
+    [token_extension: if(extension in @allowed_token_extensions, do: extension)]
+  end
 
   @doc """
     Parse 'type' query parameter from request option map

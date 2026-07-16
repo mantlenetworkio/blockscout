@@ -88,6 +88,65 @@ defmodule Explorer.Chain.Cache.Counters.AddressTransactionsCountTest do
       assert AddressTabsElementsCount.get_counter(:token_transfers, from_address.hash) == nil
       assert AddressTabsElementsCount.get_counter(:token_transfers, to_address.hash) == nil
     end
+
+    test "invalidates the ERC-8056 counter only for newly annotated imported transfers" do
+      from_address = insert(:address)
+      to_address = insert(:address)
+      token = insert(:token, extensions: ["ERC-8056"])
+      transaction = insert(:transaction) |> with_block()
+
+      AddressTabsElementsCount.set_counter(:token_transfers_erc8056, from_address.hash, 1)
+      AddressTabsElementsCount.set_counter(:token_transfers_erc8056, to_address.hash, 1)
+
+      assert {:ok, %{token_transfers: [_token_transfer]}} =
+               Chain.import(%{
+                 token_transfers: %{
+                   params: [
+                     params_for(:token_transfer,
+                       transaction_hash: transaction.hash,
+                       block_hash: transaction.block_hash,
+                       block_number: transaction.block_number,
+                       from_address_hash: from_address.hash,
+                       to_address_hash: to_address.hash,
+                       token_contract_address_hash: token.contract_address_hash,
+                       ui_amount_status: "ok"
+                     )
+                   ]
+                 }
+               })
+
+      refute AddressTabsElementsCount.get_counter(:token_transfers_erc8056, from_address.hash)
+      refute AddressTabsElementsCount.get_counter(:token_transfers_erc8056, to_address.hash)
+    end
+
+    test "keeps the ERC-8056 counter for unannotated imported transfers" do
+      from_address = insert(:address)
+      to_address = insert(:address)
+      token = insert(:token, extensions: ["ERC-8056"])
+      transaction = insert(:transaction) |> with_block()
+
+      AddressTabsElementsCount.set_counter(:token_transfers_erc8056, from_address.hash, 1)
+      AddressTabsElementsCount.set_counter(:token_transfers_erc8056, to_address.hash, 1)
+
+      assert {:ok, %{token_transfers: [_token_transfer]}} =
+               Chain.import(%{
+                 token_transfers: %{
+                   params: [
+                     params_for(:token_transfer,
+                       transaction_hash: transaction.hash,
+                       block_hash: transaction.block_hash,
+                       block_number: transaction.block_number,
+                       from_address_hash: from_address.hash,
+                       to_address_hash: to_address.hash,
+                       token_contract_address_hash: token.contract_address_hash
+                     )
+                   ]
+                 }
+               })
+
+      assert AddressTabsElementsCount.get_counter(:token_transfers_erc8056, from_address.hash)
+      assert AddressTabsElementsCount.get_counter(:token_transfers_erc8056, to_address.hash)
+    end
   end
 
   describe "Counters.address_counters/2" do

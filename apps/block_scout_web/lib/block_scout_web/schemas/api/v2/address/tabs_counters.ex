@@ -13,6 +13,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Address.TabsCounters do
     properties: %{
       transactions_count: %Schema{type: :integer, nullable: false},
       token_transfers_count: %Schema{type: :integer, nullable: false},
+      token_transfers_erc8056_count: %Schema{type: :integer, nullable: false},
       token_balances_count: %Schema{type: :integer, nullable: false},
       logs_count: %Schema{type: :integer, nullable: false},
       withdrawals_count: %Schema{type: :integer, nullable: false},

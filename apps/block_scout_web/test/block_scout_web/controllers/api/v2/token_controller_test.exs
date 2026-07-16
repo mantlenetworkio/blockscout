@@ -248,6 +248,30 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
       assert hd(response["items"])["total"]["scaled_ui"]["status"] == "ok"
     end
 
+    test "filters out transfers before the ERC-8056 capability boundary", %{conn: conn} do
+      token = insert(:token, extensions: ["ERC-8056"])
+      annotated_transaction = insert(:transaction) |> with_block()
+      historical_transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        transaction: annotated_transaction,
+        token_contract_address: token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        transaction: historical_transaction,
+        token_contract_address: token.contract_address
+      )
+
+      response =
+        conn
+        |> get("/api/v2/tokens/#{token.contract_address.hash}/transfers", %{token_extension: "ERC-8056"})
+        |> json_response(200)
+
+      assert Enum.map(response["items"], & &1["transaction_hash"]) == [to_string(annotated_transaction.hash)]
+    end
+
     test "check pagination", %{conn: conn} do
       token = insert(:token)
 
@@ -601,6 +625,17 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
       on_exit(fn ->
         :persistent_term.put(:market_token_fetcher_enabled, initial_value)
       end)
+    end
+
+    test "filters tokens by ERC-8056 extension", %{conn: conn} do
+      scaled_token = insert(:token, extensions: ["ERC-8056"])
+      insert(:token)
+
+      response = conn |> get("/api/v2/tokens", %{token_extension: "ERC-8056"}) |> json_response(200)
+
+      assert Enum.map(response["items"], &String.downcase(&1["address_hash"])) == [
+               to_string(scaled_token.contract_address_hash)
+             ]
     end
 
     defp check_tokens_pagination(tokens, conn, additional_params \\ %{}) do

@@ -98,6 +98,42 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
       assert response["next_page_params"] == nil
     end
 
+    test "filters token transfers by ERC-8056 extension and row annotation", %{conn: conn} do
+      scaled_token = insert(:token, extensions: ["ERC-8056"])
+      plain_token = insert(:token)
+      annotated_transaction = insert(:transaction) |> with_block()
+      historical_transaction = insert(:transaction) |> with_block()
+      plain_transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        transaction: annotated_transaction,
+        token_contract_address: scaled_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        transaction: historical_transaction,
+        token_contract_address: scaled_token.contract_address
+      )
+
+      insert(:token_transfer,
+        transaction: plain_transaction,
+        token_contract_address: plain_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:transaction) |> with_block()
+
+      response =
+        conn
+        |> get("/api/v2/advanced-filters", %{"token_extension" => "ERC-8056"})
+        |> json_response(200)
+
+      assert Enum.map(response["items"], &String.downcase(&1["token"]["address_hash"])) == [
+               to_string(scaled_token.contract_address_hash)
+             ]
+    end
+
     test "get and paginate advanced filter (transactions split between pages)", %{conn: conn} do
       first_transaction = :transaction |> insert() |> with_block()
       insert_list(3, :token_transfer, transaction: first_transaction)

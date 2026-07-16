@@ -31,6 +31,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
   import BlockScoutWeb.PagingHelper,
     only: [
       chain_ids_filter_options: 1,
+      token_extension_options: 1,
       token_transfers_types_options: 1,
       tokens_sorting: 1
     ]
@@ -134,7 +135,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     description: "Retrieves transfer history for a specific NFT instance, showing ownership changes over time.",
     parameters:
       base_params() ++
-        [address_hash_param()] ++
+        [address_hash_param(), token_extension_param()] ++
         define_paging_params([
           "index",
           "block_number",
@@ -173,7 +174,11 @@ defmodule BlockScoutWeb.API.V2.TokenController do
 
       results =
         address_hash
-        |> Chain.fetch_token_transfers_from_token_hash(Keyword.merge(@api_true, paging_options))
+        |> Chain.fetch_token_transfers_from_token_hash(
+          @api_true
+          |> Keyword.merge(paging_options)
+          |> Keyword.merge(token_extension_options(params))
+        )
         |> Chain.flat_1155_batch_token_transfers()
         |> Chain.paginate_1155_batch_token_transfers(paging_options)
 
@@ -559,6 +564,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
       base_params() ++
         [
           token_type_param(),
+          token_extension_param(),
           q_param(),
           limit_param(),
           sort_param(["fiat_value", "holders_count", "circulating_market_cap"]),
@@ -608,6 +614,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
         %PagingOptions{paging_options | page_size: min(page_size, maybe_parsed_limit && abs(maybe_parsed_limit))}
       end)
       |> Keyword.merge(token_transfers_types_options(params))
+      |> Keyword.merge(token_extension_options(params))
       |> Keyword.merge(tokens_sorting(params))
       |> Keyword.merge(@api_true)
       |> fetch_scam_token_toggle(conn)

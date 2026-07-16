@@ -601,6 +601,20 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
+  Returns a parameter definition for filtering tokens and transfers by extension.
+  """
+  @spec token_extension_param() :: Parameter.t()
+  def token_extension_param do
+    %Parameter{
+      name: :token_extension,
+      in: :query,
+      schema: %Schema{type: :string, enum: ["ERC-8056"]},
+      required: false,
+      description: "Filter by token extension."
+    }
+  end
+
+  @doc """
   Returns a parameter definition for filtering by NFT token type.
   """
   @spec nft_token_type_param() :: Parameter.t()

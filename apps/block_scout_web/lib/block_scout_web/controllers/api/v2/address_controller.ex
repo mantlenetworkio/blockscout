@@ -20,6 +20,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
   import BlockScoutWeb.PagingHelper,
     only: [
       addresses_sorting: 1,
+      token_extension_options: 1,
       token_transfers_types_options: 1,
       address_transactions_sorting: 1,
       nft_types_options: 1
@@ -510,7 +511,13 @@ defmodule BlockScoutWeb.API.V2.AddressController do
       "Retrieves token transfers involving a specific address, with optional filtering by token type, direction, and specific token.",
     parameters:
       base_params() ++
-        [address_hash_param(), direction_filter_param(), token_type_param(), token_filter_param()] ++
+        [
+          address_hash_param(),
+          direction_filter_param(),
+          token_type_param(),
+          token_filter_param(),
+          token_extension_param()
+        ] ++
         define_paging_params([
           "block_number",
           "index",
@@ -568,6 +575,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
             |> Keyword.merge(paging_options)
             |> Keyword.merge(current_filter(params))
             |> Keyword.merge(token_transfers_types_options(params))
+            |> Keyword.merge(token_extension_options(params))
             |> Keyword.merge(token_address_hash: token_address_hash)
             |> fetch_scam_token_toggle(conn)
 
@@ -1202,6 +1210,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
         validations: :validations_count,
         transactions: :transactions_count,
         token_transfers: :token_transfers_count,
+        token_transfers_erc8056: :token_transfers_erc8056_count,
         token_balances: :token_balances_count,
         logs: :logs_count,
         withdrawals: :withdrawals_count,
