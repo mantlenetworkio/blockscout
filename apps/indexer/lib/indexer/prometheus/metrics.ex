@@ -5,6 +5,7 @@ defmodule Indexer.Prometheus.Metrics do
 
   use GenServer
 
+  alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.Metrics.Queries.IndexerMetrics, as: IndexerMetricsQueries
   alias Explorer.Prometheus.ScaledUi
   alias Indexer.Prometheus.Instrumenter
@@ -72,11 +73,19 @@ defmodule Indexer.Prometheus.Metrics do
     end)
   end
 
-  # sobelow_skip ["DOS.StringToAtom"]
-  defp set_handler_metric(:scaled_ui_inventory) do
-    IndexerMetricsQueries.scaled_ui_inventory()
-    |> ScaledUi.set_inventory()
+  @doc false
+  @spec set_scaled_ui_inventory() :: :ok
+  def set_scaled_ui_inventory do
+    if BackgroundMigrations.get_heavy_indexes_create_token_transfers_scaled_ui_inventory_index_finished() do
+      IndexerMetricsQueries.scaled_ui_inventory()
+      |> ScaledUi.set_inventory()
+    else
+      :ok
+    end
   end
+
+  # sobelow_skip ["DOS.StringToAtom"]
+  defp set_handler_metric(:scaled_ui_inventory), do: set_scaled_ui_inventory()
 
   defp set_handler_metric(metric) do
     func = String.to_atom(to_string(metric))
