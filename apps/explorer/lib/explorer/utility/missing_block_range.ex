@@ -45,6 +45,30 @@ defmodule Explorer.Utility.MissingBlockRange do
     scan_counter(@initial_scan_boundary_counter_type)
   end
 
+  @doc "Locks and returns the target and completed boundary of the initial scan."
+  @spec lock_initial_scan_snapshot() :: %{
+          boundary: non_neg_integer() | nil,
+          target: non_neg_integer() | nil
+        }
+  def lock_initial_scan_snapshot do
+    counters =
+      LastFetchedCounter
+      |> where(
+        [counter],
+        counter.counter_type in [@initial_scan_boundary_counter_type, @initial_scan_target_counter_type]
+      )
+      |> order_by([counter], asc: counter.counter_type)
+      |> select([counter], {counter.counter_type, counter.value})
+      |> lock("FOR UPDATE")
+      |> Repo.all()
+      |> Map.new()
+
+    %{
+      boundary: decimal_to_integer(counters[@initial_scan_boundary_counter_type]),
+      target: decimal_to_integer(counters[@initial_scan_target_counter_type])
+    }
+  end
+
   @doc "Records the fixed upper boundary covered by the initial missing-range scan."
   @spec set_initial_scan_boundary(non_neg_integer()) :: :ok | {:error, Ecto.Changeset.t()}
   def set_initial_scan_boundary(boundary) when is_integer(boundary) and boundary >= 0 do
@@ -79,10 +103,13 @@ defmodule Explorer.Utility.MissingBlockRange do
 
   defp scan_counter(counter_type) do
     case LastFetchedCounter.get(counter_type, nullable: true) do
-      %Decimal{} = value -> Decimal.to_integer(value)
+      %Decimal{} = value -> decimal_to_integer(value)
       _ -> nil
     end
   end
+
+  defp decimal_to_integer(%Decimal{} = value), do: Decimal.to_integer(value)
+  defp decimal_to_integer(_value), do: nil
 
   defp set_scan_counter(counter_type, value) do
     case LastFetchedCounter.upsert_max(%{counter_type: counter_type, value: value}) do

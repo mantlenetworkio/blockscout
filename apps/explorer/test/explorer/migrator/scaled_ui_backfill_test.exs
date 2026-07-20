@@ -14,6 +14,7 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     Application.put_env(:indexer, :first_block, 0)
     Application.put_env(:indexer, :block_ranges, "0..latest")
     Application.put_env(:explorer, ScaledUiBackfill, batch_size: 1, concurrency: 1, transfer_batch_size: 1)
+    assert {:ok, _status} = MigrationStatus.set_status(ScaledUiBackfill.migration_name(), "started")
 
     on_exit(fn ->
       Application.put_env(:indexer, :first_block, first_block)
@@ -476,6 +477,75 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     assert ScaledUiBackfill.migration_target_head() == :error
   end
 
+  test "locks the initial scan snapshot while fixing the migration target" do
+    assert {:ok, _status} = MigrationStatus.set_status(ScaledUiBackfill.migration_name(), "started")
+    insert(:block, number: 100, consensus: true)
+
+    counter_types = [
+      "missing_block_ranges_initial_scan_boundary",
+      "missing_block_ranges_initial_scan_target"
+    ]
+
+    {:ok, connection} = Postgrex.start_link(repo_connection_options())
+
+    Postgrex.query!(connection, "DELETE FROM last_fetched_counters WHERE counter_type = ANY($1)", [counter_types])
+
+    Postgrex.query!(
+      connection,
+      """
+      INSERT INTO last_fetched_counters (counter_type, value, inserted_at, updated_at)
+      SELECT counter_type, 100, NOW(), NOW()
+      FROM unnest($1::text[]) AS counter_type
+      """,
+      [counter_types]
+    )
+
+    on_exit(fn ->
+      {:ok, cleanup_connection} = Postgrex.start_link(repo_connection_options())
+
+      Postgrex.query!(cleanup_connection, "DELETE FROM last_fetched_counters WHERE counter_type = ANY($1)", [
+        counter_types
+      ])
+
+      GenServer.stop(cleanup_connection)
+    end)
+
+    try do
+      Postgrex.query!(connection, "BEGIN", [])
+
+      Postgrex.query!(
+        connection,
+        """
+        SELECT counter_type
+        FROM last_fetched_counters
+        WHERE counter_type = ANY($1)
+        ORDER BY counter_type
+        FOR UPDATE
+        """,
+        [counter_types]
+      )
+
+      backfill_task = Task.async(fn -> ScaledUiBackfill.last_unprocessed_identifiers(%{}) end)
+      assert Task.yield(backfill_task, 100) == nil
+
+      Postgrex.query!(
+        connection,
+        "UPDATE last_fetched_counters SET value = 200 WHERE counter_type = $1",
+        ["missing_block_ranges_initial_scan_target"]
+      )
+
+      Postgrex.query!(connection, "COMMIT", [])
+
+      assert {[:wait], %{}} = Task.await(backfill_task)
+      assert ScaledUiBackfill.migration_target_head() == :error
+    after
+      if Process.alive?(connection) do
+        Postgrex.query(connection, "ROLLBACK", [])
+        GenServer.stop(connection)
+      end
+    end
+  end
+
   test "waits for massive blocks inside the initial catchup window" do
     token = insert(:token)
     block = insert(:block, consensus: true)
@@ -512,6 +582,36 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     assert {[:wait], %{}} = ScaledUiBackfill.last_unprocessed_identifiers(%{})
   end
 
+  test "rechecks fixed-window coverage before discovering the next token batch" do
+    token = insert(:token)
+    block = insert(:block, consensus: true)
+    transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+    insert_multiplier_log(token, block, transaction, 1, "3000000000000000000")
+
+    assert {:ok, _status} = MigrationStatus.set_status(ScaledUiBackfill.migration_name(), "started")
+
+    assert {:ok, _status} =
+             MigrationStatus.update_meta(ScaledUiBackfill.migration_name(), %{"target_head" => block.number})
+
+    MassiveBlock.insert_block_numbers([block.number])
+
+    assert {[:wait], %{"target_head" => block_number}} =
+             ScaledUiBackfill.last_unprocessed_identifiers(%{"target_head" => block.number})
+
+    assert block_number == block.number
+  end
+
+  test "rechecks fixed-window coverage before reporting completion" do
+    block = insert(:block, consensus: true)
+    state = %{"target_head" => block.number, "last_token_hash" => "0x" <> String.duplicate("f", 40)}
+
+    MassiveBlock.insert_block_numbers([block.number])
+    assert {[:wait], ^state} = ScaledUiBackfill.last_unprocessed_identifiers(state)
+
+    MassiveBlock.delete_block_number(block.number)
+    assert {[], ^state} = ScaledUiBackfill.last_unprocessed_identifiers(state)
+  end
+
   test "keeps the migration pending until registered gaps are cleared" do
     token = insert(:token)
     block = insert(:block, consensus: true)
@@ -535,6 +635,22 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     refute ScaledUiBackfill.range_missing?(20, 25)
   end
 
+  test "defers token replay and registers a retry while a massive block is unresolved" do
+    token = insert(:token)
+    block = insert(:block, consensus: true)
+    transaction = insert(:transaction) |> with_block(block, cumulative_gas_used: 1, gas_used: 1)
+    insert_multiplier_log(token, block, transaction, 1, "3000000000000000000")
+    MassiveBlock.insert_block_numbers([block.number])
+
+    assert {:ok, %{updated_transfers: 0}} =
+             ScaledUiBackfill.backfill_token(token.contract_address_hash, block.number)
+
+    assert Repo.aggregate(ScaledUiMultiplierUpdate, :count) == 0
+    assert %{from_block: from_block, to_block: to_block} = Repo.one!(BackfillGap)
+    assert from_block == block.number
+    assert to_block == block.number
+  end
+
   defp insert_transfer(token, block, transaction, from_address, to_address, log_index) do
     insert(:token_transfer,
       amount: Decimal.new(2),
@@ -555,6 +671,10 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
   defp mark_initial_scan_complete(target_head) do
     assert :ok = MissingBlockRange.set_initial_scan_target(target_head)
     assert :ok = MissingBlockRange.set_initial_scan_boundary(target_head)
+  end
+
+  defp repo_connection_options do
+    Keyword.take(Repo.config(), [:database, :hostname, :password, :port, :socket_options, :ssl, :username])
   end
 
   defp insert_multiplier_log(token, block, transaction, index, multiplier) do

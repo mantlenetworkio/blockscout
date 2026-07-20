@@ -8,7 +8,7 @@ defmodule Indexer.Block.Catchup.FetcherTest do
   alias Explorer.Chain
   alias Explorer.Chain.Block.Reward
   alias Explorer.Chain.Hash
-  alias Explorer.Utility.MissingBlockRange
+  alias Explorer.Utility.{MassiveBlock, MissingBlockRange}
   alias Indexer.Block
   alias Indexer.Block.Catchup.Fetcher
   alias Indexer.Block.Catchup.MissingRangesCollector
@@ -147,6 +147,21 @@ defmodule Indexer.Block.Catchup.FetcherTest do
                )
 
       assert_receive {:uncles, [{^nephew_hash_bytes, ^nephew_index}]}
+    end
+  end
+
+  describe "add_range_to_massive_blocks/1" do
+    test "moves the full range out of missing coverage" do
+      Repo.insert!(%MissingBlockRange{from_number: 103, to_number: 101})
+
+      assert {3, nil} = Fetcher.add_range_to_massive_blocks(101..103)
+      assert MissingBlockRange.intersections(101, 103) == []
+
+      assert MassiveBlock.intersections(101, 103) == [
+               %{from_block: 101, to_block: 101},
+               %{from_block: 102, to_block: 102},
+               %{from_block: 103, to_block: 103}
+             ]
     end
   end
 

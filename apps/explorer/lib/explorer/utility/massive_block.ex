@@ -40,6 +40,20 @@ defmodule Explorer.Utility.MassiveBlock do
     |> Repo.delete_all()
   end
 
+  @doc "Returns deferred massive blocks that fall within an ascending range."
+  @spec intersections(non_neg_integer(), non_neg_integer()) :: [
+          %{from_block: non_neg_integer(), to_block: non_neg_integer()}
+        ]
+  def intersections(from_block, to_block)
+      when is_integer(from_block) and is_integer(to_block) and from_block <= to_block do
+    __MODULE__
+    |> where([block], block.number >= ^from_block and block.number <= ^to_block)
+    |> order_by([block], asc: block.number)
+    |> select([block], block.number)
+    |> Repo.all()
+    |> Enum.map(&%{from_block: &1, to_block: &1})
+  end
+
   @doc "Returns whether a deferred massive block falls within an ascending range."
   @spec exists_in_range?(non_neg_integer(), non_neg_integer()) :: boolean()
   def exists_in_range?(from_block, to_block)

@@ -31,6 +31,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
   alias EthereumJSONRPC.Utility.RangesHelper
   alias Explorer.Chain
   alias Explorer.Chain.NullRoundHeight
+  alias Explorer.Repo
   alias Explorer.Utility.{MassiveBlock, MissingBlockRange}
   alias Indexer.{Block, Tracer}
   alias Indexer.Block.Catchup.TaskSupervisor
@@ -278,11 +279,14 @@ defmodule Indexer.Block.Catchup.Fetcher do
   def add_range_to_massive_blocks([]), do: :ok
 
   def add_range_to_massive_blocks(range) do
-    clear_missing_ranges(range)
+    {:ok, result} =
+      Repo.transaction(fn ->
+        result = range |> Enum.to_list() |> MassiveBlock.insert_block_numbers()
+        clear_missing_ranges(range)
+        result
+      end)
 
-    range
-    |> Enum.to_list()
-    |> MassiveBlock.insert_block_numbers()
+    result
   end
 
   defp clear_missing_ranges(initial_range, errors \\ []) do
@@ -307,7 +311,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
           {:cont, number..number}
 
         number, first..last//_ when number == last - 1 ->
-          {:cont, first..number}
+          {:cont, first..number//-1}
 
         number, range ->
           {:cont, range, number..number}

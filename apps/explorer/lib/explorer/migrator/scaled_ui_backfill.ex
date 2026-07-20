@@ -136,12 +136,22 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
   end
 
   defp next_identifiers(target_head, state) do
+    if fixed_window_complete?(target_head) do
+      discover_next_identifiers(target_head, state)
+    else
+      {[:wait], state}
+    end
+  end
+
+  defp discover_next_identifiers(target_head, state) do
     cursor = Map.get(state, "last_token_hash")
     limit = batch_size() * concurrency()
 
     case discover_token_hashes(target_head, cursor, limit) do
       [] ->
-        if pending_work?(target_head), do: {[:wait], state}, else: {[], state}
+        if pending_work?(target_head) or not fixed_window_complete?(target_head),
+          do: {[:wait], state},
+          else: {[], state}
 
       token_hashes ->
         last_token_hash = token_hashes |> List.last() |> to_string()
@@ -151,22 +161,37 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
   end
 
   defp ensure_initial_target_head(state) do
-    with target_head when is_integer(target_head) <- MissingBlockRange.initial_scan_target(),
-         ^target_head <- MissingBlockRange.initial_scan_boundary(),
-         true <- initial_catchup_complete?(target_head) do
-      case MigrationStatus.update_meta(@migration_name, %{"target_head" => target_head}) do
-        :ok -> :ok
-        {:ok, _migration_status} -> :ok
-        {:error, changeset} -> raise "failed to persist scaled UI backfill target head: #{inspect(changeset.errors)}"
-      end
-
-      {:ready, target_head, Map.put(state, "target_head", target_head)}
-    else
-      _ -> {:wait, state}
+    case Repo.transaction(&lock_and_persist_initial_target_head/0, timeout: @timeout) do
+      {:ok, {:ready, target_head}} -> {:ready, target_head, Map.put(state, "target_head", target_head)}
+      {:ok, :wait} -> {:wait, state}
+      {:error, :migration_status_missing} -> {:wait, state}
+      {:error, reason} -> raise "failed to persist scaled UI backfill target head: #{inspect(reason)}"
     end
   end
 
-  defp initial_catchup_complete?(target_head) do
+  defp lock_and_persist_initial_target_head do
+    case MissingBlockRange.lock_initial_scan_snapshot() do
+      %{boundary: target_head, target: target_head} when is_integer(target_head) ->
+        if fixed_window_complete?(target_head) do
+          persist_initial_target_head(target_head)
+        else
+          :wait
+        end
+
+      _snapshot ->
+        :wait
+    end
+  end
+
+  defp persist_initial_target_head(target_head) do
+    case MigrationStatus.update_meta(@migration_name, %{"target_head" => target_head}) do
+      :ok -> Repo.rollback(:migration_status_missing)
+      {:ok, _migration_status} -> {:ready, target_head}
+      {:error, changeset} -> Repo.rollback(changeset.errors)
+    end
+  end
+
+  defp fixed_window_complete?(target_head) do
     collector_ranges = collector_coverage_ranges(target_head)
 
     collector_ranges != [] and
@@ -611,7 +636,8 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
   defp coverage_gaps(from_block, to_block) when from_block > to_block, do: []
 
   defp coverage_gaps(from_block, to_block) do
-    (configured_range_gaps(from_block, to_block) ++ MissingBlockRange.intersections(from_block, to_block))
+    (configured_range_gaps(from_block, to_block) ++
+       MissingBlockRange.intersections(from_block, to_block) ++ MassiveBlock.intersections(from_block, to_block))
     |> Enum.filter(&(&1.from_block <= &1.to_block))
     |> merge_ranges()
   end
