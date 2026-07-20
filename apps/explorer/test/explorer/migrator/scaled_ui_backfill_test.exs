@@ -492,6 +492,26 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
     assert target_head == block.number
   end
 
+  test "ignores missing and massive blocks outside configured collector ranges" do
+    Application.put_env(:indexer, :block_ranges, "100..200,300..400")
+    block = insert(:block, number: 400, consensus: true)
+    mark_initial_scan_complete(block.number)
+    Repo.insert!(%MissingBlockRange{from_number: 250, to_number: 250})
+    MassiveBlock.insert_block_numbers([250])
+
+    assert {[], %{"target_head" => 400}} = ScaledUiBackfill.last_unprocessed_identifiers(%{})
+  end
+
+  test "checks explicit collector ranges below FIRST_BLOCK" do
+    Application.put_env(:indexer, :first_block, 350)
+    Application.put_env(:indexer, :block_ranges, "100..200,300..400")
+    block = insert(:block, number: 400, consensus: true)
+    mark_initial_scan_complete(block.number)
+    Repo.insert!(%MissingBlockRange{from_number: 120, to_number: 120})
+
+    assert {[:wait], %{}} = ScaledUiBackfill.last_unprocessed_identifiers(%{})
+  end
+
   test "keeps the migration pending until registered gaps are cleared" do
     token = insert(:token)
     block = insert(:block, consensus: true)

@@ -3,6 +3,7 @@ defmodule Indexer.Block.Catchup.MissingRangesCollectorTest do
 
   import Mox
 
+  alias Explorer.Repo
   alias Explorer.Utility.MissingBlockRange
   alias Indexer.Block.Catchup.MissingRangesCollector
 
@@ -46,6 +47,21 @@ defmodule Indexer.Block.Catchup.MissingRangesCollectorTest do
       assert [1_000_099..1_000_001//-1, 999_699..999_699//-1] = batch = MissingBlockRange.get_latest_batch(100)
       MissingBlockRange.clear_batch(batch)
       assert [999_698..999_599//-1] = MissingBlockRange.get_latest_batch(100)
+    end
+
+    test "uses the startup chain head as target when a lower missing range already exists" do
+      stub(EthereumJSONRPC.Mox, :json_rpc, fn [%{id: id, method: "eth_getBlockByNumber", params: ["latest", false]}],
+                                              _options ->
+        block_response(id, 1_000_000)
+      end)
+
+      Repo.insert!(%MissingBlockRange{from_number: 500_100, to_number: 500_000})
+
+      {:ok, collector} = MissingRangesCollector.start_link([])
+      state = :sys.get_state(collector)
+
+      assert state.initial_target_block == 999_999
+      assert MissingBlockRange.initial_scan_target() == 999_999
     end
   end
 
@@ -143,6 +159,28 @@ defmodule Indexer.Block.Catchup.MissingRangesCollectorTest do
     assert :ok = MissingBlockRange.set_initial_scan_target(50)
 
     assert MissingBlockRange.initial_scan_target() == 100
+  end
+
+  test "adopts and completes a target raised by another collector" do
+    last_block = Application.get_env(:indexer, :last_block)
+    Application.put_env(:indexer, :last_block, 200)
+    on_exit(fn -> Application.put_env(:indexer, :last_block, last_block) end)
+
+    assert :ok = MissingBlockRange.set_initial_scan_target(100)
+    assert :ok = MissingBlockRange.set_initial_scan_boundary(100)
+    assert :ok = MissingBlockRange.set_initial_scan_target(200)
+
+    state = %{
+      first_check_completed?: true,
+      initial_scan_completed?: true,
+      initial_target_block: 100,
+      max_fetched_block_number: 200
+    }
+
+    assert {:noreply, completed_state} = MissingRangesCollector.handle_info(:update_future, state)
+    assert completed_state.initial_target_block == 200
+    assert completed_state.initial_scan_completed?
+    assert MissingBlockRange.initial_scan_boundary() == 200
   end
 
   defp block_response(id, block_number) do

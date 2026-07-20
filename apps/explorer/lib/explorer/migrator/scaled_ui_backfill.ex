@@ -167,13 +167,37 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
   end
 
   defp initial_catchup_complete?(target_head) do
+    collector_ranges = collector_coverage_ranges(target_head)
+
+    collector_ranges != [] and
+      Enum.all?(collector_ranges, &collector_range_complete?/1) and
+      not is_nil(canonical_block_hash(target_head))
+  end
+
+  defp collector_coverage_ranges(target_head) do
     first_block = Application.get_env(:indexer, :first_block, 0)
 
-    target_head >= first_block and
-      configured_range_gaps(first_block, target_head) == [] and
-      MissingBlockRange.intersections(first_block, target_head) == [] and
-      not MassiveBlock.exists_in_range?(first_block, target_head) and
-      not is_nil(canonical_block_hash(target_head))
+    case Application.get_env(:indexer, :block_ranges) do
+      nil ->
+        clipped_range(max(first_block, MissingBlockRange.min_missing_block_number()), target_head)
+
+      block_ranges ->
+        case RangesHelper.parse_block_ranges(block_ranges) do
+          [] ->
+            clipped_range(max(first_block, MissingBlockRange.min_missing_block_number()), target_head)
+
+          [open_range_start] when is_integer(open_range_start) ->
+            clipped_range(max(open_range_start, MissingBlockRange.min_missing_block_number()), target_head)
+
+          ranges ->
+            configured_coverage(ranges, 0, target_head)
+        end
+    end
+  end
+
+  defp collector_range_complete?(%{from_block: from_block, to_block: to_block}) do
+    MissingBlockRange.intersections(from_block, to_block) == [] and
+      not MassiveBlock.exists_in_range?(from_block, to_block)
   end
 
   defp prepare_token(token_hash, target_head) do
@@ -596,17 +620,7 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
     first_block = Application.get_env(:indexer, :first_block, 0)
     block_ranges = Application.get_env(:indexer, :block_ranges, "#{first_block}..latest")
 
-    coverage =
-      block_ranges
-      |> RangesHelper.parse_block_ranges()
-      |> Enum.flat_map(fn
-        %Range{first: first, last: last} ->
-          clipped_range(max(first, from_block), min(last, to_block))
-
-        first when is_integer(first) ->
-          clipped_range(max(first, from_block), to_block)
-      end)
-      |> Enum.sort_by(& &1.from_block)
+    coverage = block_ranges |> RangesHelper.parse_block_ranges() |> configured_coverage(from_block, to_block)
 
     {cursor, gaps} =
       Enum.reduce(coverage, {from_block, []}, fn range, {cursor, gaps} ->
@@ -618,6 +632,18 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
 
     gaps = if cursor <= to_block, do: [%{from_block: cursor, to_block: to_block} | gaps], else: gaps
     Enum.reverse(gaps)
+  end
+
+  defp configured_coverage(ranges, from_block, to_block) do
+    ranges
+    |> Enum.flat_map(fn
+      %Range{first: first, last: last} ->
+        clipped_range(max(first, from_block), min(last, to_block))
+
+      first when is_integer(first) ->
+        clipped_range(max(first, from_block), to_block)
+    end)
+    |> Enum.sort_by(& &1.from_block)
   end
 
   defp clipped_range(from_block, to_block) when from_block <= to_block,

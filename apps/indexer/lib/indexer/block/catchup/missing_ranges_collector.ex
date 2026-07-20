@@ -63,7 +63,6 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
 
   alias EthereumJSONRPC.Utility.RangesHelper
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.Cache.Counters.LastFetchedCounter
   alias Explorer.Utility.MissingBlockRange
 
   @default_missing_ranges_batch_size 100_000
@@ -158,8 +157,8 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
           initial_target_block: non_neg_integer()
         }
   defp default_init do
-    {min_number, max_number} = get_initial_min_max()
-    initial_target_block = max(max_number - 1, first_block())
+    initial_target_block = max(last_block() - 1, first_block())
+    {min_number, max_number} = get_initial_min_max(initial_target_block + 1)
     {initial_target_block, initial_scan_completed?} = initialize_initial_scan(initial_target_block)
 
     clear_to_bounds(min_number, max_number)
@@ -304,14 +303,13 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
   # A tuple `{min, max}` where:
   # - `min`: The lowest block number to start collecting from
   # - `max`: The highest block number to collect up to
-  @spec get_initial_min_max() :: {non_neg_integer(), non_neg_integer()}
-  defp get_initial_min_max do
+  @spec get_initial_min_max(non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
+  defp get_initial_min_max(initial_max_number) do
     case MissingBlockRange.fetch_min_max() do
       %{min: nil, max: nil} ->
-        max_number = last_block()
-        {min_number, first_batch} = fetch_missing_ranges_batch(max_number, false)
+        {min_number, first_batch} = fetch_missing_ranges_batch(initial_max_number, false)
         MissingBlockRange.save_batch(first_batch)
-        {min_number, max_number}
+        {min_number, initial_max_number}
 
       %{min: min, max: max} ->
         {min, max}
@@ -372,9 +370,15 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
     end
   end
 
-  defp maybe_complete_initial_scan(%{initial_scan_completed?: true} = state), do: state
+  defp maybe_complete_initial_scan(state) do
+    state
+    |> refresh_initial_scan_target()
+    |> complete_initial_scan()
+  end
 
-  defp maybe_complete_initial_scan(
+  defp complete_initial_scan(%{initial_scan_completed?: true} = state), do: state
+
+  defp complete_initial_scan(
          %{
            first_check_completed?: true,
            initial_target_block: target_block,
@@ -388,7 +392,17 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
     end
   end
 
-  defp maybe_complete_initial_scan(state), do: state
+  defp complete_initial_scan(state), do: state
+
+  defp refresh_initial_scan_target(%{initial_target_block: local_target} = state) do
+    case MissingBlockRange.initial_scan_target() do
+      persisted_target when is_integer(persisted_target) and persisted_target > local_target ->
+        %{state | initial_scan_completed?: false, initial_target_block: persisted_target}
+
+      _ ->
+        state
+    end
+  end
 
   defp initialize_initial_scan(candidate_target) do
     candidate_target = max(candidate_target, MissingBlockRange.initial_scan_boundary() || 0)
@@ -452,12 +466,7 @@ defmodule Indexer.Block.Catchup.MissingRangesCollector do
     first_block_from_config =
       RangesHelper.get_min_block_number_from_range_string(Application.get_env(:indexer, :block_ranges))
 
-    min_missing_block_number =
-      "min_missing_block_number"
-      |> LastFetchedCounter.get()
-      |> Decimal.to_integer()
-
-    max(first_block_from_config, min_missing_block_number)
+    max(first_block_from_config, MissingBlockRange.min_missing_block_number())
   end
 
   # Retrieves the last block number from configuration or fetches the maximum

@@ -13,6 +13,7 @@ defmodule Explorer.Utility.MissingBlockRange do
   @default_returning_batch_size 10
   @initial_scan_boundary_counter_type "missing_block_ranges_initial_scan_boundary"
   @initial_scan_target_counter_type "missing_block_ranges_initial_scan_target"
+  @min_missing_block_counter_type "min_missing_block_number"
 
   @typedoc """
   * `from_number`: The lower bound of the block range.
@@ -54,6 +55,12 @@ defmodule Explorer.Utility.MissingBlockRange do
   @spec initial_scan_target() :: non_neg_integer() | nil
   def initial_scan_target do
     scan_counter(@initial_scan_target_counter_type)
+  end
+
+  @doc "Returns the configured lower boundary for default missing-range scanning."
+  @spec min_missing_block_number() :: non_neg_integer()
+  def min_missing_block_number do
+    scan_counter(@min_missing_block_counter_type) || 0
   end
 
   @doc "Records an upper boundary for the initial scan without lowering an existing target."
