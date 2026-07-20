@@ -15,7 +15,7 @@ defmodule BlockScoutWeb.API.V2.TokenTransferController do
   import BlockScoutWeb.PagingHelper,
     only: [
       token_extension_options: 1,
-      token_transfers_types_options: 1
+      token_transfer_type_selectors_options: 1
     ]
 
   import Explorer.MicroserviceInterfaces.BENS,
@@ -39,7 +39,7 @@ defmodule BlockScoutWeb.API.V2.TokenTransferController do
     description: "Retrieves a paginated list of token transfers across all token types (ERC-20, ERC-721, ERC-1155).",
     parameters:
       base_params() ++
-        [token_type_param(), token_extension_param(), limit_param()] ++
+        [token_transfer_type_param(), token_extension_param(), limit_param()] ++
         define_paging_params([
           "index",
           "block_number",
@@ -76,7 +76,7 @@ defmodule BlockScoutWeb.API.V2.TokenTransferController do
         maybe_parsed_limit = params[:limit]
         %PagingOptions{paging_options | page_size: min(page_size, maybe_parsed_limit && abs(maybe_parsed_limit))}
       end)
-      |> Keyword.merge(token_transfers_types_options(params))
+      |> Keyword.merge(token_transfer_type_selectors_options(params))
       |> Keyword.merge(token_extension_options(params))
       |> Keyword.merge(@api_true)
       |> fetch_scam_token_toggle(conn)

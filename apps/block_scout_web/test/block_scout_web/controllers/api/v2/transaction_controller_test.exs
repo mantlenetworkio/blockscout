@@ -835,6 +835,74 @@ defmodule BlockScoutWeb.API.V2.TransactionControllerTest do
              ]
     end
 
+    test "combines token types and ERC-8056 with union semantics", %{conn: conn} do
+      transaction = insert(:transaction) |> with_block()
+      scaled_token = insert(:token, type: "ERC-20", extensions: ["ERC-8056"])
+      nft_token = insert(:token, type: "ERC-721")
+      plain_token = insert(:token, type: "ERC-20")
+
+      insert(:token_transfer,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        log_index: 0,
+        token_contract_address: scaled_token.contract_address,
+        token_type: "ERC-20",
+        transaction: transaction,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        log_index: 1,
+        token_contract_address: scaled_token.contract_address,
+        token_type: "ERC-20",
+        transaction: transaction
+      )
+
+      insert(:token_transfer,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        log_index: 2,
+        token_contract_address: nft_token.contract_address,
+        token_ids: [1],
+        token_type: "ERC-721",
+        transaction: transaction
+      )
+
+      insert(:token_transfer,
+        block: transaction.block,
+        block_number: transaction.block_number,
+        log_index: 3,
+        token_contract_address: plain_token.contract_address,
+        token_type: "ERC-20",
+        transaction: transaction
+      )
+
+      response =
+        conn
+        |> get("/api/v2/transactions/#{transaction.hash}/token-transfers", %{type: "ERC-721,ERC-8056"})
+        |> json_response(200)
+
+      assert MapSet.new(response["items"], &String.downcase(&1["token"]["address_hash"])) ==
+               MapSet.new([
+                 to_string(scaled_token.contract_address_hash),
+                 to_string(nft_token.contract_address_hash)
+               ])
+
+      intersection_response =
+        conn
+        |> get("/api/v2/transactions/#{transaction.hash}/token-transfers", %{
+          type: "ERC-721,ERC-8056",
+          token_extension: "ERC-8056"
+        })
+        |> json_response(200)
+
+      assert Enum.map(intersection_response["items"], &String.downcase(&1["token"]["address_hash"])) == [
+               to_string(scaled_token.contract_address_hash)
+             ]
+    end
+
     test "get token-transfers with ok reputation", %{conn: conn} do
       init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
       Application.put_env(:block_scout_web, :hide_scam_addresses, true)

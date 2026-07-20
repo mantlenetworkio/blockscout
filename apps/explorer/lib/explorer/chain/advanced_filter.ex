@@ -935,16 +935,12 @@ defmodule Explorer.Chain.AdvancedFilter do
     do: filter_transaction_by_type(type, dynamic_condition)
 
   defp filter_token_transfer_by_types(query_function, [_ | _] = types) do
-    types = types -- @transaction_types
+    token_transfer_selectors = types -- @transaction_types
 
-    if DenormalizationHelper.tt_denormalization_finished?() do
-      fn query, unnested? ->
-        query |> where([token_transfer], token_transfer.token_type in ^types) |> query_function.(unnested?)
-      end
-    else
-      fn query, unnested? ->
-        query |> where([token: token], token.type in ^types) |> query_function.(unnested?)
-      end
+    fn query, unnested? ->
+      query
+      |> TokenTransfer.filter_by_token_type_selectors(token_transfer_selectors)
+      |> query_function.(unnested?)
     end
   end
 

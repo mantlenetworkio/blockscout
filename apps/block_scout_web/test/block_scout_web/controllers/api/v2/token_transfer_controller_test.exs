@@ -148,6 +148,63 @@ defmodule BlockScoutWeb.API.V2.TokenTransferControllerTest do
              ]
     end
 
+    test "combines token types and ERC-8056 with union semantics", %{conn: conn} do
+      scaled_token = insert(:token, type: "ERC-20", extensions: ["ERC-8056"])
+      nft_token = insert(:token, type: "ERC-721")
+      plain_token = insert(:token, type: "ERC-20")
+
+      scaled_transaction = insert(:transaction) |> with_block()
+      historical_transaction = insert(:transaction) |> with_block()
+      nft_transaction = insert(:transaction) |> with_block()
+      plain_transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        transaction: scaled_transaction,
+        token_contract_address: scaled_token.contract_address,
+        token_type: "ERC-20",
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        transaction: historical_transaction,
+        token_contract_address: scaled_token.contract_address,
+        token_type: "ERC-20"
+      )
+
+      insert(:token_transfer,
+        transaction: nft_transaction,
+        token_contract_address: nft_token.contract_address,
+        token_type: "ERC-721",
+        token_ids: [1]
+      )
+
+      insert(:token_transfer,
+        transaction: plain_transaction,
+        token_contract_address: plain_token.contract_address,
+        token_type: "ERC-20"
+      )
+
+      response =
+        conn
+        |> get("/api/v2/token-transfers", %{type: "ERC-721,ERC-8056"})
+        |> json_response(200)
+
+      assert MapSet.new(response["items"], & &1["transaction_hash"]) ==
+               MapSet.new([to_string(scaled_transaction.hash), to_string(nft_transaction.hash)])
+
+      intersection_response =
+        conn
+        |> get("/api/v2/token-transfers", %{
+          type: "ERC-721,ERC-8056",
+          token_extension: "ERC-8056"
+        })
+        |> json_response(200)
+
+      assert Enum.map(intersection_response["items"], & &1["transaction_hash"]) == [
+               to_string(scaled_transaction.hash)
+             ]
+    end
+
     test "rejects unsupported token extensions", %{conn: conn} do
       response =
         conn

@@ -6,8 +6,9 @@ defmodule Explorer.Chain.TokenTransferTest do
 
   import Explorer.Factory
 
-  alias Explorer.PagingOptions
+  alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.TokenTransfer
+  alias Explorer.PagingOptions
 
   doctest Explorer.Chain.TokenTransfer
 
@@ -493,6 +494,86 @@ defmodule Explorer.Chain.TokenTransferTest do
                  "UPDATE token_transfers SET ui_amount_status = 'bogus' WHERE block_hash = $1 AND log_index = $2",
                  [transfer.block_hash.bytes, transfer.log_index]
                )
+    end
+  end
+
+  describe "filter_by_token_type_selectors/2" do
+    test "uses the same union semantics before and after token type denormalization" do
+      old_denormalization_status = BackgroundMigrations.get_tt_denormalization_finished()
+
+      on_exit(fn ->
+        BackgroundMigrations.set_tt_denormalization_finished(old_denormalization_status)
+      end)
+
+      scaled_token_address = insert(:contract_address)
+      nft_token_address = insert(:contract_address)
+      plain_token_address = insert(:contract_address)
+
+      insert(:token,
+        contract_address: scaled_token_address,
+        type: "ERC-20",
+        extensions: ["ERC-8056"]
+      )
+
+      insert(:token, contract_address: nft_token_address, type: "ERC-721")
+      insert(:token, contract_address: plain_token_address, type: "ERC-20")
+
+      scaled_transfer =
+        insert(:token_transfer,
+          transaction: insert(:transaction) |> with_block(),
+          token_contract_address: scaled_token_address,
+          token_type: "ERC-20",
+          ui_amount_status: "ok"
+        )
+
+      nft_transfer =
+        insert(:token_transfer,
+          transaction: insert(:transaction) |> with_block(),
+          token_contract_address: nft_token_address,
+          token_type: "ERC-721",
+          token_ids: [1]
+        )
+
+      insert(:token_transfer,
+        transaction: insert(:transaction) |> with_block(),
+        token_contract_address: scaled_token_address,
+        token_type: "ERC-20"
+      )
+
+      insert(:token_transfer,
+        transaction: insert(:transaction) |> with_block(),
+        token_contract_address: plain_token_address,
+        token_type: "ERC-20",
+        ui_amount_status: "ok"
+      )
+
+      expected_keys =
+        MapSet.new([
+          {scaled_transfer.transaction_hash, scaled_transfer.block_hash,
+           scaled_transfer.log_index},
+          {nft_transfer.transaction_hash, nft_transfer.block_hash, nft_transfer.log_index}
+        ])
+
+      for denormalization_finished? <- [false, true] do
+        BackgroundMigrations.set_tt_denormalization_finished(denormalization_finished?)
+
+        actual_keys =
+          TokenTransfer.only_consensus_transfers_query()
+          |> TokenTransfer.filter_by_token_type_selectors(["ERC-721", "ERC-8056"])
+          |> Repo.all()
+          |> MapSet.new(&{&1.transaction_hash, &1.block_hash, &1.log_index})
+
+        assert actual_keys == expected_keys
+      end
+
+      single_selector_keys =
+        TokenTransfer.only_consensus_transfers_query()
+        |> TokenTransfer.filter_by_token_type_selectors("ERC-721")
+        |> Repo.all()
+        |> MapSet.new(&{&1.transaction_hash, &1.block_hash, &1.log_index})
+
+      assert single_selector_keys ==
+               MapSet.new([{nft_transfer.transaction_hash, nft_transfer.block_hash, nft_transfer.log_index}])
     end
   end
 end

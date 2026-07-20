@@ -30,8 +30,10 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
 
   if @chain_type == :zilliqa do
     @token_type_pattern ~r/^\[?(ERC-20|ERC-721|ERC-1155|ERC-404|ZRC-2|ERC-7984)(,(ERC-20|ERC-721|ERC-1155|ERC-404|ZRC-2|ERC-7984))*\]?$/i
+    @token_transfer_type_pattern ~r/^\[?(ERC-20|ERC-721|ERC-1155|ERC-404|ZRC-2|ERC-7984|ERC-8056)(,(ERC-20|ERC-721|ERC-1155|ERC-404|ZRC-2|ERC-7984|ERC-8056))*\]?$/i
   else
     @token_type_pattern ~r/^\[?(ERC-20|ERC-721|ERC-1155|ERC-404|ERC-7984)(,(ERC-20|ERC-721|ERC-1155|ERC-404|ERC-7984))*\]?$/i
+    @token_transfer_type_pattern ~r/^\[?(ERC-20|ERC-721|ERC-1155|ERC-404|ERC-7984|ERC-8056)(,(ERC-20|ERC-721|ERC-1155|ERC-404|ERC-7984|ERC-8056))*\]?$/i
   end
 
   # Matches ISO-like datetime strings where separators between time fields can be ':' or percent-encoded '%3A'.
@@ -578,6 +580,25 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   Example: `ERC-20,ERC-721` to show both fungible and NFT transfers
   """
 
+  @token_transfer_type_param_description """
+  Filter transfers by token type or extension. Comma-separated list of:
+  * ERC-20 - Fungible tokens
+  * ERC-721 - Non-fungible tokens
+  * ERC-1155 - Multi-token standard
+  * ERC-404 - Hybrid fungible/non-fungible tokens
+  * ERC-7984 - Confidential fungible tokens
+  * ERC-8056 - Transfers with an indexed scaled UI snapshot
+  #{if @chain_type == :zilliqa do
+    """
+    * ZRC-2 - Fungible tokens on Zilliqa
+    """
+  else
+    ""
+  end}
+
+  Multiple values use union semantics. Example: `ERC-721,ERC-8056` returns ERC-721 transfers and ERC-8056 transfers.
+  """
+
   @doc """
   Returns a parameter definition for filtering by token type.
   """
@@ -597,6 +618,28 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       },
       required: false,
       description: @token_type_param_description
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for filtering transfers by token type or extension.
+  """
+  @spec token_transfer_type_param() :: Parameter.t()
+  def token_transfer_type_param do
+    %Parameter{
+      name: :type,
+      in: :query,
+      schema: %Schema{
+        anyOf: [
+          EmptyString,
+          %Schema{
+            type: :string,
+            pattern: @token_transfer_type_pattern
+          }
+        ]
+      },
+      required: false,
+      description: @token_transfer_type_param_description
     }
   end
 

@@ -21,6 +21,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
     only: [
       addresses_sorting: 1,
       token_extension_options: 1,
+      token_transfer_type_selectors_options: 1,
       token_transfers_types_options: 1,
       address_transactions_sorting: 1,
       nft_types_options: 1
@@ -514,7 +515,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
         [
           address_hash_param(),
           direction_filter_param(),
-          token_type_param(),
+          token_transfer_type_param(),
           token_filter_param(),
           token_extension_param()
         ] ++
@@ -574,7 +575,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
             @token_transfer_necessity_by_association
             |> Keyword.merge(paging_options)
             |> Keyword.merge(current_filter(params))
-            |> Keyword.merge(token_transfers_types_options(params))
+            |> Keyword.merge(token_transfer_type_selectors_options(params))
             |> Keyword.merge(token_extension_options(params))
             |> Keyword.merge(token_address_hash: token_address_hash)
             |> fetch_scam_token_toggle(conn)
