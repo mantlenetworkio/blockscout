@@ -20,6 +20,7 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   alias Explorer.Chain.ScaledUi.TokenState
 
   @default_paging_options %PagingOptions{page_size: 50}
+  @scaled_ui_extension "ERC-8056"
 
   @typedoc """
    *  `address` - The `t:Explorer.Chain.Address.t/0` that is the balance's owner.
@@ -282,10 +283,35 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
         order_by: [desc: ctb.value, desc: ctb.id]
       )
 
-    if is_list(types) and types != [],
-      do: from([_ctb, token, _state] in query, where: token.type in ^types),
-      else: query
+    filter_by_token_type_selectors(query, types)
   end
+
+  defp filter_by_token_type_selectors(query, types) when is_list(types) and types != [] do
+    token_types = Enum.reject(types, &(&1 == @scaled_ui_extension))
+    include_scaled_ui? = @scaled_ui_extension in types
+
+    type_condition =
+      if token_types != [], do: dynamic([_ctb, token, _state], token.type in ^token_types)
+
+    extension_condition =
+      if include_scaled_ui? do
+        dynamic(
+          [_ctb, token, _state],
+          fragment("? @> ARRAY[?]::varchar[]", token.extensions, ^@scaled_ui_extension)
+        )
+      end
+
+    condition =
+      case {type_condition, extension_condition} do
+        {nil, condition} -> condition
+        {condition, nil} -> condition
+        {type_condition, extension_condition} -> dynamic([], ^type_condition or ^extension_condition)
+      end
+
+    from(balance in query, where: ^condition)
+  end
+
+  defp filter_by_token_type_selectors(query, _types), do: query
 
   defp with_scaled_value(query, head_timestamp) do
     effective_multiplier = holder_effective_multiplier_query(head_timestamp)

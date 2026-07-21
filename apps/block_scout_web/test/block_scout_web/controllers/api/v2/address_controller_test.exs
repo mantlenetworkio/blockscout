@@ -3432,6 +3432,115 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
   end
 
   describe "/addresses/{address_hash}/tokens" do
+    test "combines token types and ERC-8056 with union semantics", %{conn: conn} do
+      address = insert(:address)
+      scaled_token = insert(:token, type: "ERC-20", extensions: ["ERC-8056"])
+      nft_token = insert(:token, type: "ERC-721")
+      plain_token = insert(:token, type: "ERC-20")
+
+      for token <- [scaled_token, plain_token] do
+        insert(:address_current_token_balance_with_token_id_and_fixed_token_type,
+          address: address,
+          token_contract_address_hash: token.contract_address_hash,
+          token_id: nil,
+          token_type: "ERC-20"
+        )
+      end
+
+      insert(:address_current_token_balance_with_token_id_and_fixed_token_type,
+        address: address,
+        token_contract_address_hash: nft_token.contract_address_hash,
+        token_id: nil,
+        token_type: "ERC-721"
+      )
+
+      response =
+        conn
+        |> get("/api/v2/addresses/#{address.hash}/tokens", %{type: "ERC-721,ERC-8056"})
+        |> json_response(200)
+
+      assert MapSet.new(response["items"], &String.downcase(&1["token"]["address_hash"])) ==
+               MapSet.new([
+                 to_string(scaled_token.contract_address_hash),
+                 to_string(nft_token.contract_address_hash)
+               ])
+
+      scaled_response =
+        conn
+        |> get("/api/v2/addresses/#{address.hash}/tokens", %{type: "ERC-8056"})
+        |> json_response(200)
+
+      assert Enum.map(scaled_response["items"], &String.downcase(&1["token"]["address_hash"])) == [
+               to_string(scaled_token.contract_address_hash)
+             ]
+    end
+
+    test "paginates mixed token types and ERC-8056 without gaps or duplicates", %{conn: conn} do
+      address = insert(:address)
+
+      balances =
+        for value <- 1..52 do
+          scaled_ui? = rem(value, 2) == 1
+
+          token =
+            insert(:token,
+              type: if(scaled_ui?, do: "ERC-20", else: "ERC-721"),
+              extensions: if(scaled_ui?, do: ["ERC-8056"], else: nil),
+              fiat_value: nil
+            )
+
+          balance =
+            insert(:address_current_token_balance_with_token_id_and_fixed_token_type,
+              address: address,
+              token_contract_address_hash: token.contract_address_hash,
+              token_id: nil,
+              token_type: token.type,
+              value: Decimal.new(value)
+            )
+
+          {balance, token, scaled_ui?}
+        end
+
+      filter = %{type: "ERC-721,ERC-8056"}
+
+      first_page =
+        conn
+        |> get("/api/v2/addresses/#{address.hash}/tokens", filter)
+        |> json_response(200)
+
+      second_page =
+        conn
+        |> get(
+          "/api/v2/addresses/#{address.hash}/tokens",
+          Map.merge(first_page["next_page_params"], filter)
+        )
+        |> json_response(200)
+
+      first_page_hashes = Enum.map(first_page["items"], &String.downcase(&1["token"]["address_hash"]))
+      second_page_hashes = Enum.map(second_page["items"], &String.downcase(&1["token"]["address_hash"]))
+      all_page_hashes = first_page_hashes ++ second_page_hashes
+
+      expected_hashes =
+        MapSet.new(balances, fn {_balance, token, _scaled_ui?} -> to_string(token.contract_address_hash) end)
+
+      scaled_ui_hashes =
+        MapSet.new(balances, fn
+          {_balance, token, true} -> to_string(token.contract_address_hash)
+          {_balance, _token, false} -> nil
+        end)
+        |> MapSet.delete(nil)
+
+      assert length(first_page_hashes) == 50
+      assert first_page["next_page_params"] != nil
+      assert length(second_page_hashes) == 2
+      assert second_page["next_page_params"] == nil
+      assert MapSet.disjoint?(MapSet.new(first_page_hashes), MapSet.new(second_page_hashes))
+      assert MapSet.new(all_page_hashes) == expected_hashes
+      assert length(all_page_hashes) == MapSet.size(expected_hashes)
+      assert not MapSet.disjoint?(MapSet.new(first_page_hashes), scaled_ui_hashes)
+      assert not MapSet.disjoint?(MapSet.new(second_page_hashes), scaled_ui_hashes)
+    end
+
     test "get token balances with ok reputation", %{conn: conn} do
       init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
       Application.put_env(:block_scout_web, :hide_scam_addresses, true)

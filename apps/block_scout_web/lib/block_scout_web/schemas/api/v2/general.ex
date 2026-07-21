@@ -599,6 +599,25 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   Multiple values use union semantics. Example: `ERC-721,ERC-8056` returns ERC-721 transfers and ERC-8056 transfers.
   """
 
+  @token_balance_type_param_description """
+  Filter token balances by token type or extension. Comma-separated list of:
+  * ERC-20 - Fungible tokens
+  * ERC-721 - Non-fungible tokens
+  * ERC-1155 - Multi-token standard
+  * ERC-404 - Hybrid fungible/non-fungible tokens
+  * ERC-7984 - Confidential fungible tokens
+  * ERC-8056 - Tokens advertising the ERC-8056 extension
+  #{if @chain_type == :zilliqa do
+    """
+    * ZRC-2 - Fungible tokens on Zilliqa
+    """
+  else
+    ""
+  end}
+
+  Multiple values use union semantics. Example: `ERC-721,ERC-8056` returns ERC-721 balances and ERC-8056 balances.
+  """
+
   @doc """
   Returns a parameter definition for filtering by token type.
   """
@@ -640,6 +659,28 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       },
       required: false,
       description: @token_transfer_type_param_description
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for filtering token balances by token type or extension.
+  """
+  @spec token_balance_type_param() :: Parameter.t()
+  def token_balance_type_param do
+    %Parameter{
+      name: :type,
+      in: :query,
+      schema: %Schema{
+        anyOf: [
+          EmptyString,
+          %Schema{
+            type: :string,
+            pattern: @token_transfer_type_pattern
+          }
+        ]
+      },
+      required: false,
+      description: @token_balance_type_param_description
     }
   end
 

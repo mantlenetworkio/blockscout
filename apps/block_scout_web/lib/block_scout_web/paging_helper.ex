@@ -27,7 +27,7 @@ defmodule BlockScoutWeb.PagingHelper do
   @allowed_token_transfer_type_labels @allowed_base_token_transfer_type_labels ++
                                         @allowed_chain_type_token_transfer_type_labels
   @allowed_token_extensions ["ERC-8056"]
-  @allowed_token_transfer_type_selectors @allowed_token_transfer_type_labels ++ @allowed_token_extensions
+  @allowed_token_type_selectors @allowed_token_transfer_type_labels ++ @allowed_token_extensions
   @allowed_nft_type_labels ["ERC-721", "ERC-1155", "ERC-404"]
   @allowed_chain_id [1, 56, 99]
   @allowed_stability_validators_states ["active", "probation", "inactive"]
@@ -96,18 +96,21 @@ defmodule BlockScoutWeb.PagingHelper do
   def token_transfers_types_options(_), do: [token_type: []]
 
   @doc """
-    Parse transfer type selectors, including token extensions exposed as union selectors.
+    Parse token type selectors, including token extensions exposed as union selectors.
   """
+  @spec token_type_selectors_options(map()) :: [{:token_type, list()}]
+  def token_type_selectors_options(%{"type" => filters}) do
+    [token_type: filters_to_list(filters, @allowed_token_type_selectors)]
+  end
+
+  def token_type_selectors_options(%{type: filters}) do
+    [token_type: filters_to_list(filters, @allowed_token_type_selectors)]
+  end
+
+  def token_type_selectors_options(_), do: [token_type: []]
+
   @spec token_transfer_type_selectors_options(map()) :: [{:token_type, list()}]
-  def token_transfer_type_selectors_options(%{"type" => filters}) do
-    [token_type: filters_to_list(filters, @allowed_token_transfer_type_selectors)]
-  end
-
-  def token_transfer_type_selectors_options(%{type: filters}) do
-    [token_type: filters_to_list(filters, @allowed_token_transfer_type_selectors)]
-  end
-
-  def token_transfer_type_selectors_options(_), do: [token_type: []]
+  def token_transfer_type_selectors_options(params), do: token_type_selectors_options(params)
 
   @spec token_extension_options(map()) :: [{:token_extension, String.t() | nil}]
   def token_extension_options(params) do
