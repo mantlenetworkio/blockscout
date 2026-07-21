@@ -3475,6 +3475,129 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
              ]
     end
 
+    test "excludes ERC-8056 after applying token type selectors", %{conn: conn} do
+      address = insert(:address)
+      plain_token = insert(:token, type: "ERC-20", extensions: nil)
+      scaled_token = insert(:token, type: "ERC-20", extensions: ["ERC-8056"])
+      nft_token = insert(:token, type: "ERC-721")
+
+      for token <- [plain_token, scaled_token, nft_token] do
+        insert(:address_current_token_balance_with_token_id_and_fixed_token_type,
+          address: address,
+          token_contract_address_hash: token.contract_address_hash,
+          token_id: nil,
+          token_type: token.type
+        )
+      end
+
+      all_erc20_response =
+        conn
+        |> get("/api/v2/addresses/#{address.hash}/tokens", %{type: "ERC-20"})
+        |> json_response(200)
+
+      assert MapSet.new(all_erc20_response["items"], &String.downcase(&1["token"]["address_hash"])) ==
+               MapSet.new([
+                 to_string(plain_token.contract_address_hash),
+                 to_string(scaled_token.contract_address_hash)
+               ])
+
+      plain_erc20_response =
+        conn
+        |> get("/api/v2/addresses/#{address.hash}/tokens", %{
+          type: "ERC-20",
+          exclude_token_extension: "ERC-8056"
+        })
+        |> json_response(200)
+
+      assert Enum.map(plain_erc20_response["items"], &String.downcase(&1["token"]["address_hash"])) == [
+               to_string(plain_token.contract_address_hash)
+             ]
+
+      mixed_response =
+        conn
+        |> get("/api/v2/addresses/#{address.hash}/tokens", %{
+          type: "ERC-20,ERC-721",
+          exclude_token_extension: "ERC-8056"
+        })
+        |> json_response(200)
+
+      assert MapSet.new(mixed_response["items"], &String.downcase(&1["token"]["address_hash"])) ==
+               MapSet.new([
+                 to_string(plain_token.contract_address_hash),
+                 to_string(nft_token.contract_address_hash)
+               ])
+    end
+
+    test "rejects an unknown excluded token extension", %{conn: conn} do
+      address = insert(:address)
+
+      request =
+        get(conn, "/api/v2/addresses/#{address.hash}/tokens", %{
+          type: "ERC-20",
+          exclude_token_extension: "ERC-9999"
+        })
+
+      assert json_response(request, 422)
+    end
+
+    test "paginates after excluding ERC-8056 without gaps or duplicates", %{conn: conn} do
+      address = insert(:address)
+
+      balances =
+        for value <- 1..104 do
+          scaled_ui? = rem(value, 2) == 1
+
+          token =
+            insert(:token,
+              type: "ERC-20",
+              extensions: if(scaled_ui?, do: ["ERC-8056"], else: nil),
+              fiat_value: nil
+            )
+
+          balance =
+            insert(:address_current_token_balance_with_token_id_and_fixed_token_type,
+              address: address,
+              token_contract_address_hash: token.contract_address_hash,
+              token_id: nil,
+              token_type: "ERC-20",
+              value: Decimal.new(value)
+            )
+
+          {balance, token, scaled_ui?}
+        end
+
+      filter = %{type: "ERC-20", exclude_token_extension: "ERC-8056"}
+
+      first_page =
+        conn
+        |> get("/api/v2/addresses/#{address.hash}/tokens", filter)
+        |> json_response(200)
+
+      second_page =
+        conn
+        |> get(
+          "/api/v2/addresses/#{address.hash}/tokens",
+          Map.merge(first_page["next_page_params"], filter)
+        )
+        |> json_response(200)
+
+      first_page_hashes = Enum.map(first_page["items"], &String.downcase(&1["token"]["address_hash"]))
+      second_page_hashes = Enum.map(second_page["items"], &String.downcase(&1["token"]["address_hash"]))
+      all_page_hashes = first_page_hashes ++ second_page_hashes
+
+      expected_hashes =
+        balances
+        |> Enum.reject(fn {_balance, _token, scaled_ui?} -> scaled_ui? end)
+        |> MapSet.new(fn {_balance, token, _scaled_ui?} -> to_string(token.contract_address_hash) end)
+
+      assert length(first_page_hashes) == 50
+      assert first_page["next_page_params"] != nil
+      assert length(second_page_hashes) == 2
+      assert second_page["next_page_params"] == nil
+      assert length(all_page_hashes) == MapSet.size(MapSet.new(all_page_hashes))
+      assert MapSet.new(all_page_hashes) == expected_hashes
+    end
+
     test "paginates mixed token types and ERC-8056 without gaps or duplicates", %{conn: conn} do
       address = insert(:address)
 

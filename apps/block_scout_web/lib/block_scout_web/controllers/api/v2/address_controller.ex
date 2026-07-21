@@ -20,6 +20,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
   import BlockScoutWeb.PagingHelper,
     only: [
       addresses_sorting: 1,
+      exclude_token_extension_options: 1,
       token_extension_options: 1,
       token_type_selectors_options: 1,
       token_transfer_type_selectors_options: 1,
@@ -958,7 +959,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
       "Retrieves token balances for a specific address with pagination and filtering by token type. Useful for displaying large token portfolios.",
     parameters:
       base_params() ++
-        [address_hash_param(), token_balance_type_param()] ++
+        [address_hash_param(), token_balance_type_param(), exclude_token_extension_param()] ++
         define_paging_params(["fiat_value_nullable", "id", "items_count", "value"]),
     responses: [
       ok:
@@ -1003,6 +1004,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
               params
               |> paging_options()
               |> Keyword.merge(token_type_selectors_options(params))
+              |> Keyword.merge(exclude_token_extension_options(params))
               |> Keyword.merge(@api_true)
               |> Keyword.merge(@token_preload_options)
               |> fetch_scam_token_toggle(conn)

@@ -564,11 +564,13 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @token_type_param_description """
-  Filter by token type. Comma-separated list of:
+  Filter tokens by token type or extension. Comma-separated list of:
   * ERC-20 - Fungible tokens
   * ERC-721 - Non-fungible tokens
   * ERC-1155 - Multi-token standard
   * ERC-404 - Hybrid fungible/non-fungible tokens
+  * ERC-7984 - Confidential fungible tokens
+  * ERC-8056 - Tokens advertising the ERC-8056 extension
   #{if @chain_type == :zilliqa do
     """
     * ZRC-2 - Fungible tokens on Zilliqa
@@ -577,7 +579,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
     ""
   end}
 
-  Example: `ERC-20,ERC-721` to show both fungible and NFT transfers
+  Multiple values use union semantics. Example: `ERC-721,ERC-8056` returns ERC-721 tokens and ERC-8056 tokens.
   """
 
   @token_transfer_type_param_description """
@@ -631,7 +633,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
           EmptyString,
           %Schema{
             type: :string,
-            pattern: @token_type_pattern
+            pattern: @token_transfer_type_pattern
           }
         ]
       },
@@ -681,6 +683,20 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       },
       required: false,
       description: @token_balance_type_param_description
+    }
+  end
+
+  @doc """
+  Returns a parameter definition for excluding token balances by extension.
+  """
+  @spec exclude_token_extension_param() :: Parameter.t()
+  def exclude_token_extension_param do
+    %Parameter{
+      name: :exclude_token_extension,
+      in: :query,
+      schema: %Schema{type: :string, enum: ["ERC-8056"]},
+      required: false,
+      description: "Exclude token balances advertising the specified token extension."
     }
   end
 

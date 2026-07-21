@@ -109,6 +109,13 @@ defmodule BlockScoutWeb.PagingHelper do
 
   def token_type_selectors_options(_), do: [token_type: []]
 
+  @spec exclude_token_extension_options(map()) :: [{:excluded_token_extensions, list()}]
+  def exclude_token_extension_options(params) do
+    extension = params[:exclude_token_extension] || params["exclude_token_extension"]
+
+    [excluded_token_extensions: if(extension in @allowed_token_extensions, do: [extension], else: [])]
+  end
+
   @spec token_transfer_type_selectors_options(map()) :: [{:token_type, list()}]
   def token_transfer_type_selectors_options(params), do: token_type_selectors_options(params)
 

@@ -250,9 +250,11 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   def last_token_balances(address_hash, options, type) do
     paging_options = Keyword.get(options, :paging_options, @default_paging_options)
     head_timestamp = Keyword.get(options, :head_timestamp, Decimal.new(0))
+    excluded_token_extensions = Keyword.get(options, :excluded_token_extensions, [])
 
     address_hash
     |> last_token_balances_query(type, head_timestamp)
+    |> exclude_token_extensions(excluded_token_extensions)
     |> limit(^paging_options.page_size)
   end
 
@@ -312,6 +314,15 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   end
 
   defp filter_by_token_type_selectors(query, _types), do: query
+
+  defp exclude_token_extensions(query, extensions) when is_list(extensions) and extensions != [] do
+    from(
+      [_balance, token, _state] in query,
+      where: not fragment("COALESCE(? && ?::varchar[], FALSE)", token.extensions, ^extensions)
+    )
+  end
+
+  defp exclude_token_extensions(query, _extensions), do: query
 
   defp with_scaled_value(query, head_timestamp) do
     effective_multiplier = holder_effective_multiplier_query(head_timestamp)
