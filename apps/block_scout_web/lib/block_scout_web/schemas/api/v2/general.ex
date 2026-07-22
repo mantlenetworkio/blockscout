@@ -30,10 +30,8 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
 
   if @chain_type == :zilliqa do
     @token_type_pattern ~r/^\[?(ERC-20|ERC-721|ERC-1155|ERC-404|ZRC-2|ERC-7984)(,(ERC-20|ERC-721|ERC-1155|ERC-404|ZRC-2|ERC-7984))*\]?$/i
-    @token_transfer_type_pattern ~r/^\[?(ERC-20|ERC-721|ERC-1155|ERC-404|ZRC-2|ERC-7984|ERC-8056)(,(ERC-20|ERC-721|ERC-1155|ERC-404|ZRC-2|ERC-7984|ERC-8056))*\]?$/i
   else
     @token_type_pattern ~r/^\[?(ERC-20|ERC-721|ERC-1155|ERC-404|ERC-7984)(,(ERC-20|ERC-721|ERC-1155|ERC-404|ERC-7984))*\]?$/i
-    @token_transfer_type_pattern ~r/^\[?(ERC-20|ERC-721|ERC-1155|ERC-404|ERC-7984|ERC-8056)(,(ERC-20|ERC-721|ERC-1155|ERC-404|ERC-7984|ERC-8056))*\]?$/i
   end
 
   # Matches ISO-like datetime strings where separators between time fields can be ':' or percent-encoded '%3A'.
@@ -564,13 +562,12 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @token_type_param_description """
-  Filter tokens by token type or extension. Comma-separated list of:
+  Filter tokens by token standard. Comma-separated list of:
   * ERC-20 - Fungible tokens
   * ERC-721 - Non-fungible tokens
   * ERC-1155 - Multi-token standard
   * ERC-404 - Hybrid fungible/non-fungible tokens
   * ERC-7984 - Confidential fungible tokens
-  * ERC-8056 - Tokens advertising the ERC-8056 extension
   #{if @chain_type == :zilliqa do
     """
     * ZRC-2 - Fungible tokens on Zilliqa
@@ -578,18 +575,16 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   else
     ""
   end}
-
-  Multiple values use union semantics. Example: `ERC-721,ERC-8056` returns ERC-721 tokens and ERC-8056 tokens.
+  Multiple values use union semantics within this parameter.
   """
 
   @token_transfer_type_param_description """
-  Filter transfers by token type or extension. Comma-separated list of:
+  Filter transfers by token standard. Comma-separated list of:
   * ERC-20 - Fungible tokens
   * ERC-721 - Non-fungible tokens
   * ERC-1155 - Multi-token standard
   * ERC-404 - Hybrid fungible/non-fungible tokens
   * ERC-7984 - Confidential fungible tokens
-  * ERC-8056 - Transfers with an indexed scaled UI snapshot
   #{if @chain_type == :zilliqa do
     """
     * ZRC-2 - Fungible tokens on Zilliqa
@@ -597,18 +592,16 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   else
     ""
   end}
-
-  Multiple values use union semantics. Example: `ERC-721,ERC-8056` returns ERC-721 transfers and ERC-8056 transfers.
+  Multiple values use union semantics within this parameter.
   """
 
   @token_balance_type_param_description """
-  Filter token balances by token type or extension. Comma-separated list of:
+  Filter token balances by token standard. Comma-separated list of:
   * ERC-20 - Fungible tokens
   * ERC-721 - Non-fungible tokens
   * ERC-1155 - Multi-token standard
   * ERC-404 - Hybrid fungible/non-fungible tokens
   * ERC-7984 - Confidential fungible tokens
-  * ERC-8056 - Tokens advertising the ERC-8056 extension
   #{if @chain_type == :zilliqa do
     """
     * ZRC-2 - Fungible tokens on Zilliqa
@@ -616,8 +609,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   else
     ""
   end}
-
-  Multiple values use union semantics. Example: `ERC-721,ERC-8056` returns ERC-721 balances and ERC-8056 balances.
+  Multiple values use union semantics within this parameter.
   """
 
   @doc """
@@ -633,7 +625,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
           EmptyString,
           %Schema{
             type: :string,
-            pattern: @token_transfer_type_pattern
+            pattern: @token_type_pattern
           }
         ]
       },
@@ -643,7 +635,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
-  Returns a parameter definition for filtering transfers by token type or extension.
+  Returns a parameter definition for filtering transfers by token standard.
   """
   @spec token_transfer_type_param() :: Parameter.t()
   def token_transfer_type_param do
@@ -655,7 +647,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
           EmptyString,
           %Schema{
             type: :string,
-            pattern: @token_transfer_type_pattern
+            pattern: @token_type_pattern
           }
         ]
       },
@@ -665,7 +657,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
-  Returns a parameter definition for filtering token balances by token type or extension.
+  Returns a parameter definition for filtering token balances by token standard.
   """
   @spec token_balance_type_param() :: Parameter.t()
   def token_balance_type_param do
@@ -677,7 +669,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
           EmptyString,
           %Schema{
             type: :string,
-            pattern: @token_transfer_type_pattern
+            pattern: @token_type_pattern
           }
         ]
       },
@@ -710,7 +702,8 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       in: :query,
       schema: %Schema{type: :string, enum: ["ERC-8056"]},
       required: false,
-      description: "Filter by token extension."
+      description:
+        "Filter by token extension. When combined with `type`, both filters must match the same token or transfer."
     }
   end
 

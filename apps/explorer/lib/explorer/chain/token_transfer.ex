@@ -176,8 +176,6 @@ defmodule Explorer.Chain.TokenTransfer do
   # event NativeCoinBurned(address indexed from, uint256 amount)
   @arc_native_coin_burned_event "0xaaf1ef013644e67c5cea90217acdf0accd334f8437fc9a89a53cfc9b25fb5c25"
   @erc7984_transfer_event "0x67500e8d0ed826d2194f514dd0d8124f35648ab6e3fb5e6ed867134cffe661e9"
-  @scaled_ui_type_selector "ERC-8056"
-
   @transfer_function_signature "0xa9059cbb"
 
   @typedoc """
@@ -340,7 +338,7 @@ defmodule Explorer.Chain.TokenTransfer do
         only_consensus_transfers_query()
         |> preload(^preloads)
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
-        |> filter_by_token_type_selectors(token_type)
+        |> filter_by_token_types(token_type)
         |> filter_by_token_extension(Keyword.get(options, :token_extension))
         |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> page_token_transfer(paging_options)
@@ -396,37 +394,21 @@ defmodule Explorer.Chain.TokenTransfer do
   end
 
   @doc """
-  Filters token transfers by real token types and transfer-level extension selectors using union semantics.
+  Filters token transfers by token standard.
   """
-  @spec filter_by_token_type_selectors(Ecto.Query.t(), binary() | [binary()] | nil) ::
+  @spec filter_by_token_types(Ecto.Query.t(), binary() | [binary()] | nil) ::
           Ecto.Query.t()
-  def filter_by_token_type_selectors(query, selectors) when selectors in [nil, []], do: query
+  def filter_by_token_types(query, token_types) when token_types in [nil, []], do: query
 
-  def filter_by_token_type_selectors(query, selector) when is_binary(selector) do
-    filter_by_token_type_selectors(query, [selector])
+  def filter_by_token_types(query, token_type) when is_binary(token_type) do
+    filter_by_token_types(query, [token_type])
   end
 
-  def filter_by_token_type_selectors(query, selectors) when is_list(selectors) do
-    token_types = Enum.reject(selectors, &(&1 == @scaled_ui_type_selector))
-    include_scaled_ui? = @scaled_ui_type_selector in selectors
-
+  def filter_by_token_types(query, token_types) when is_list(token_types) do
     query = maybe_join_token_for_type_filter(query, token_types)
-    type_condition = token_type_condition(token_types)
-    scaled_ui_condition = scaled_ui_type_condition(include_scaled_ui?)
+    condition = token_type_condition(token_types)
 
-    case {type_condition, scaled_ui_condition} do
-      {nil, nil} ->
-        query
-
-      {condition, nil} ->
-        where(query, ^condition)
-
-      {nil, condition} ->
-        where(query, ^condition)
-
-      {type_condition, scaled_ui_condition} ->
-        where(query, ^dynamic(^type_condition or ^scaled_ui_condition))
-    end
+    where(query, ^condition)
   end
 
   defp maybe_join_token_for_type_filter(query, []), do: query
@@ -447,18 +429,6 @@ defmodule Explorer.Chain.TokenTransfer do
     else
       dynamic([token: token], token.type in ^token_types)
     end
-  end
-
-  defp scaled_ui_type_condition(false), do: nil
-
-  defp scaled_ui_type_condition(true) do
-    extension_token_hashes = Token.hashes_by_extension_query(@scaled_ui_type_selector)
-
-    dynamic(
-      [tt],
-      not is_nil(tt.ui_amount_status) and
-        tt.token_contract_address_hash in subquery(extension_token_hashes)
-    )
   end
 
   @spec count_token_transfers_from_token_hash(Hash.t()) :: non_neg_integer()
@@ -669,7 +639,7 @@ defmodule Explorer.Chain.TokenTransfer do
       |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
       |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
       |> preload([token: token], [{:token, token}])
-      |> filter_by_token_type_selectors(token_types)
+      |> filter_by_token_types(token_types)
       |> filter_by_token_extension(Keyword.get(options, :token_extension))
       |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
       |> handle_paging_options(paging_options)
@@ -679,7 +649,7 @@ defmodule Explorer.Chain.TokenTransfer do
         |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
         |> filter_by_direction(:to, address_hash)
         |> filter_by_token_address_hash(token_address_hash)
-        |> filter_by_token_type_selectors(token_types)
+        |> filter_by_token_types(token_types)
         |> filter_by_token_extension(Keyword.get(options, :token_extension))
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
         |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
@@ -691,7 +661,7 @@ defmodule Explorer.Chain.TokenTransfer do
         |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
         |> filter_by_direction(:from, address_hash)
         |> filter_by_token_address_hash(token_address_hash)
-        |> filter_by_token_type_selectors(token_types)
+        |> filter_by_token_types(token_types)
         |> filter_by_token_extension(Keyword.get(options, :token_extension))
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
         |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)

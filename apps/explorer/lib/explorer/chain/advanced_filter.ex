@@ -939,7 +939,7 @@ defmodule Explorer.Chain.AdvancedFilter do
 
     fn query, unnested? ->
       query
-      |> TokenTransfer.filter_by_token_type_selectors(token_transfer_selectors)
+      |> TokenTransfer.filter_by_token_types(token_transfer_selectors)
       |> query_function.(unnested?)
     end
   end

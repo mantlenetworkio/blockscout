@@ -59,57 +59,56 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   Function responsible for `api/v2/advanced-filters/` endpoint.
   """
   @spec list(Plug.Conn.t(), map()) :: Plug.Conn.t() | {:format, term()}
-  def list(_conn, %{"token_extension" => extension}) when extension != "ERC-8056", do: {:format, extension}
-
   def list(conn, params) do
-    full_options =
-      params
-      |> extract_filters()
-      |> Keyword.merge(paging_options(params))
-      |> Keyword.merge(@api_true)
-      |> fetch_scam_token_toggle(conn)
+    with {:ok, filters} <- extract_filters(params) do
+      full_options =
+        filters
+        |> Keyword.merge(paging_options(params))
+        |> Keyword.merge(@api_true)
+        |> fetch_scam_token_toggle(conn)
 
-    advanced_filters_plus_one = AdvancedFilter.list(full_options)
+      advanced_filters_plus_one = AdvancedFilter.list(full_options)
 
-    {advanced_filters, next_page} = split_list_by_page(advanced_filters_plus_one)
+      {advanced_filters, next_page} = split_list_by_page(advanced_filters_plus_one)
 
-    decoded_transactions =
-      advanced_filters
-      |> Enum.map(fn af -> %Transaction{to_address: af.to_address, input: af.input, hash: af.hash} end)
-      |> Transaction.decode_transactions(true, @api_true)
+      decoded_transactions =
+        advanced_filters
+        |> Enum.map(fn af -> %Transaction{to_address: af.to_address, input: af.input, hash: af.hash} end)
+        |> Transaction.decode_transactions(true, @api_true)
 
-    next_page_params =
-      next_page |> next_page_params(advanced_filters, Map.take(params, ["items_count"]), false, &paging_params/1)
+      next_page_params =
+        next_page |> next_page_params(advanced_filters, Map.take(params, ["items_count"]), false, &paging_params/1)
 
-    render(conn, :advanced_filters,
-      advanced_filters: advanced_filters,
-      decoded_transactions: decoded_transactions,
-      search_params: %{
-        method_ids: method_id_to_name_from_params(full_options[:methods] || [], decoded_transactions),
-        tokens: contract_address_hash_to_token_from_params(full_options[:token_contract_address_hashes])
-      },
-      next_page_params: next_page_params
-    )
+      render(conn, :advanced_filters,
+        advanced_filters: advanced_filters,
+        decoded_transactions: decoded_transactions,
+        search_params: %{
+          method_ids: method_id_to_name_from_params(full_options[:methods] || [], decoded_transactions),
+          tokens: contract_address_hash_to_token_from_params(full_options[:token_contract_address_hashes])
+        },
+        next_page_params: next_page_params
+      )
+    end
   end
 
   @doc """
   Function responsible for `api/v2/advanced-filters/csv` endpoint.
   """
-  @spec list_csv(Plug.Conn.t(), map()) :: Plug.Conn.t()
+  @spec list_csv(Plug.Conn.t(), map()) :: Plug.Conn.t() | {:format, term()}
   def list_csv(conn, params) do
-    full_options = build_csv_export_options(params)
+    with {:ok, filters} <- extract_filters(params) do
+      full_options = build_csv_export_options(filters, params)
 
-    if CsvHelper.async_enabled?() do
-      handle_async_csv_export(conn, full_options)
-    else
-      stream_csv_to_conn(conn, CsvExportAdvancedFilter.export(full_options))
+      if CsvHelper.async_enabled?() do
+        handle_async_csv_export(conn, full_options)
+      else
+        stream_csv_to_conn(conn, CsvExportAdvancedFilter.export(full_options))
+      end
     end
   end
 
-  defp build_csv_export_options(params) do
-    []
-    |> Keyword.merge(extract_filters(params))
-    |> Keyword.delete(:token_extension)
+  defp build_csv_export_options(filters, params) do
+    filters
     |> Keyword.merge(paging_options(params))
     |> Keyword.update(:paging_options, %PagingOptions{page_size: CsvHelper.limit()}, fn
       %PagingOptions{} = paging_options ->
@@ -235,42 +234,47 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
   end
 
   defp extract_filters(params) do
-    [
-      transaction_types: prepare_transaction_types(params["transaction_types"]),
-      methods: params["methods"] |> prepare_methods(),
-      age: prepare_age(params["age_from"], params["age_to"]),
-      from_address_hashes:
-        prepare_include_exclude_address_hashes(
-          params["from_address_hashes_to_include"],
-          params["from_address_hashes_to_exclude"],
-          &prepare_address_hash/1
-        ),
-      to_address_hashes:
-        prepare_include_exclude_address_hashes(
-          params["to_address_hashes_to_include"],
-          params["to_address_hashes_to_exclude"],
-          &prepare_address_hash/1
-        ),
-      address_relation: prepare_address_relation(params["address_relation"]),
-      amount: prepare_amount(params["amount_from"], params["amount_to"]),
-      token_extension: prepare_token_extension(params["token_extension"]),
-      token_contract_address_hashes:
-        params["token_contract_address_hashes_to_include"]
-        |> prepare_include_exclude_address_hashes(
-          params["token_contract_address_hashes_to_exclude"],
-          &prepare_token_address_hash/1
-        )
-        |> Enum.map(fn
-          {key, value} when is_list(value) -> {key, Enum.take(value, @tokens_filter_limit)}
-          key_value -> key_value
-        end)
-    ]
+    with {:ok, transaction_types} <- parse_transaction_types(params["transaction_types"]),
+         {:ok, token_extension} <- parse_token_extension(params["token_extension"]) do
+      {:ok,
+       [
+         transaction_types: transaction_types,
+         methods: params["methods"] |> prepare_methods(),
+         age: prepare_age(params["age_from"], params["age_to"]),
+         from_address_hashes:
+           prepare_include_exclude_address_hashes(
+             params["from_address_hashes_to_include"],
+             params["from_address_hashes_to_exclude"],
+             &prepare_address_hash/1
+           ),
+         to_address_hashes:
+           prepare_include_exclude_address_hashes(
+             params["to_address_hashes_to_include"],
+             params["to_address_hashes_to_exclude"],
+             &prepare_address_hash/1
+           ),
+         address_relation: prepare_address_relation(params["address_relation"]),
+         amount: prepare_amount(params["amount_from"], params["amount_to"]),
+         token_extension: token_extension,
+         token_contract_address_hashes:
+           params["token_contract_address_hashes_to_include"]
+           |> prepare_include_exclude_address_hashes(
+             params["token_contract_address_hashes_to_exclude"],
+             &prepare_token_address_hash/1
+           )
+           |> Enum.map(fn
+             {key, value} when is_list(value) -> {key, Enum.take(value, @tokens_filter_limit)}
+             key_value -> key_value
+           end)
+       ]}
+    end
   end
 
-  defp prepare_token_extension("ERC-8056"), do: "ERC-8056"
-  defp prepare_token_extension(_), do: nil
+  defp parse_token_extension(nil), do: {:ok, nil}
+  defp parse_token_extension("ERC-8056"), do: {:ok, "ERC-8056"}
+  defp parse_token_extension(extension), do: {:format, extension}
 
-  @default_allowed_transaction_types ~w(COIN_TRANSFER CONTRACT_INTERACTION CONTRACT_CREATION ERC-20 ERC-404 ERC-721 ERC-1155 ERC-7984 ERC-8056)
+  @default_allowed_transaction_types ~w(COIN_TRANSFER CONTRACT_INTERACTION CONTRACT_CREATION ERC-20 ERC-404 ERC-721 ERC-1155 ERC-7984)
 
   if @chain_type == :zilliqa do
     @chain_type_allowed_transaction_types ~w(ZRC-2)
@@ -280,14 +284,34 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterController do
 
   @allowed_transaction_types @default_allowed_transaction_types ++ @chain_type_allowed_transaction_types
 
-  defp prepare_transaction_types(transaction_types) when is_binary(transaction_types) do
-    transaction_types
-    |> String.upcase()
-    |> String.split(",")
-    |> Enum.filter(&(&1 in @allowed_transaction_types))
+  defp parse_transaction_types(nil), do: {:ok, nil}
+
+  defp parse_transaction_types(transaction_types) when is_binary(transaction_types) do
+    parsed_transaction_types =
+      transaction_types
+      |> unwrap_brackets()
+      |> String.split(",")
+      |> Enum.map(&(&1 |> String.trim() |> String.upcase()))
+
+    if Enum.all?(parsed_transaction_types, &(&1 in @allowed_transaction_types)) do
+      {:ok, parsed_transaction_types}
+    else
+      {:format, transaction_types}
+    end
   end
 
-  defp prepare_transaction_types(_), do: nil
+  defp parse_transaction_types(transaction_types), do: {:format, transaction_types}
+
+  defp unwrap_brackets(transaction_types) do
+    transaction_types = String.trim(transaction_types)
+
+    if String.starts_with?(transaction_types, "[") and String.ends_with?(transaction_types, "]") do
+      transaction_types
+      |> String.slice(1, String.length(transaction_types) - 2)
+    else
+      transaction_types
+    end
+  end
 
   defp prepare_methods(methods) when is_binary(methods) do
     methods

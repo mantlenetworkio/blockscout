@@ -20,8 +20,6 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   alias Explorer.Chain.ScaledUi.TokenState
 
   @default_paging_options %PagingOptions{page_size: 50}
-  @scaled_ui_extension "ERC-8056"
-
   @typedoc """
    *  `address` - The `t:Explorer.Chain.Address.t/0` that is the balance's owner.
    *  `address_hash` - The address hash foreign key.
@@ -250,10 +248,12 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
   def last_token_balances(address_hash, options, type) do
     paging_options = Keyword.get(options, :paging_options, @default_paging_options)
     head_timestamp = Keyword.get(options, :head_timestamp, Decimal.new(0))
+    token_extension = Keyword.get(options, :token_extension)
     excluded_token_extensions = Keyword.get(options, :excluded_token_extensions, [])
 
     address_hash
     |> last_token_balances_query(type, head_timestamp)
+    |> filter_by_token_extension(token_extension)
     |> exclude_token_extensions(excluded_token_extensions)
     |> limit(^paging_options.page_size)
   end
@@ -285,35 +285,23 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
         order_by: [desc: ctb.value, desc: ctb.id]
       )
 
-    filter_by_token_type_selectors(query, types)
+    filter_by_token_types(query, types)
   end
 
-  defp filter_by_token_type_selectors(query, types) when is_list(types) and types != [] do
-    token_types = Enum.reject(types, &(&1 == @scaled_ui_extension))
-    include_scaled_ui? = @scaled_ui_extension in types
-
-    type_condition =
-      if token_types != [], do: dynamic([_ctb, token, _state], token.type in ^token_types)
-
-    extension_condition =
-      if include_scaled_ui? do
-        dynamic(
-          [_ctb, token, _state],
-          fragment("? @> ARRAY[?]::varchar[]", token.extensions, ^@scaled_ui_extension)
-        )
-      end
-
-    condition =
-      case {type_condition, extension_condition} do
-        {nil, condition} -> condition
-        {condition, nil} -> condition
-        {type_condition, extension_condition} -> dynamic([], ^type_condition or ^extension_condition)
-      end
-
-    from(balance in query, where: ^condition)
+  defp filter_by_token_types(query, types) when is_list(types) and types != [] do
+    from([_balance, token, _state] in query, where: token.type in ^types)
   end
 
-  defp filter_by_token_type_selectors(query, _types), do: query
+  defp filter_by_token_types(query, _types), do: query
+
+  defp filter_by_token_extension(query, nil), do: query
+
+  defp filter_by_token_extension(query, extension) do
+    from(
+      [_balance, token, _state] in query,
+      where: fragment("? @> ARRAY[?]::varchar[]", token.extensions, ^extension)
+    )
+  end
 
   defp exclude_token_extensions(query, extensions) when is_list(extensions) and extensions != [] do
     from(

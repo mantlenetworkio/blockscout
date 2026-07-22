@@ -823,34 +823,15 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
       end)
     end
 
-    test "filters tokens by ERC-8056 type selector with union semantics", %{conn: conn} do
-      scaled_token = insert(:token, type: "ERC-20", extensions: ["ERC-8056"])
-      nft_token = insert(:token, type: "ERC-721")
-      insert(:token, type: "ERC-20")
+    test "rejects ERC-8056 as a token type", %{conn: conn} do
+      response = conn |> get("/api/v2/tokens", %{type: "ERC-8056"}) |> json_response(422)
 
-      scaled_response =
-        conn
-        |> get("/api/v2/tokens", %{type: "ERC-8056"})
-        |> json_response(200)
-
-      assert [%{"address_hash" => address_hash, "type" => "ERC-20"}] = scaled_response["items"]
-      assert String.downcase(address_hash) == to_string(scaled_token.contract_address_hash)
-
-      union_response =
-        conn
-        |> get("/api/v2/tokens", %{type: "ERC-721,ERC-8056"})
-        |> json_response(200)
-
-      assert MapSet.new(union_response["items"], &String.downcase(&1["address_hash"])) ==
-               MapSet.new([
-                 to_string(scaled_token.contract_address_hash),
-                 to_string(nft_token.contract_address_hash)
-               ])
+      assert hd(response["errors"])["source"] == %{"pointer" => "/type"}
     end
 
-    test "paginates token type and ERC-8056 selectors without gaps or duplicates", %{conn: conn} do
+    test "paginates the intersection of token type and extension without gaps or duplicates", %{conn: conn} do
       tokens =
-        for value <- 1..52 do
+        for value <- 1..104 do
           scaled_ui? = rem(value, 2) == 1
 
           token =
@@ -866,7 +847,7 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
 
       insert(:token, type: "ERC-20", fiat_value: Decimal.new(1_000), circulating_market_cap: nil)
 
-      filter = %{"type" => "ERC-721,ERC-8056"}
+      filter = %{"type" => "ERC-20", "token_extension" => "ERC-8056"}
 
       first_page =
         conn
@@ -882,9 +863,7 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
       second_page_hashes = Enum.map(second_page["items"], &String.downcase(&1["address_hash"]))
       all_page_hashes = first_page_hashes ++ second_page_hashes
 
-      expected_hashes = MapSet.new(tokens, fn {token, _scaled_ui?} -> to_string(token.contract_address_hash) end)
-
-      scaled_ui_hashes =
+      expected_hashes =
         tokens
         |> Enum.filter(fn {_token, scaled_ui?} -> scaled_ui? end)
         |> MapSet.new(fn {token, _scaled_ui?} -> to_string(token.contract_address_hash) end)
@@ -896,8 +875,6 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
       assert MapSet.disjoint?(MapSet.new(first_page_hashes), MapSet.new(second_page_hashes))
       assert MapSet.new(all_page_hashes) == expected_hashes
       assert length(all_page_hashes) == MapSet.size(expected_hashes)
-      assert not MapSet.disjoint?(MapSet.new(first_page_hashes), scaled_ui_hashes)
-      assert not MapSet.disjoint?(MapSet.new(second_page_hashes), scaled_ui_hashes)
     end
 
     test "filters tokens by ERC-8056 extension", %{conn: conn} do

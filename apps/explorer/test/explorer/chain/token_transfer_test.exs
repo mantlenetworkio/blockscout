@@ -497,8 +497,8 @@ defmodule Explorer.Chain.TokenTransferTest do
     end
   end
 
-  describe "filter_by_token_type_selectors/2" do
-    test "uses the same union semantics before and after token type denormalization" do
+  describe "filter_by_token_types/2" do
+    test "uses the same token type semantics before and after denormalization" do
       old_denormalization_status = BackgroundMigrations.get_tt_denormalization_finished()
 
       on_exit(fn ->
@@ -518,13 +518,12 @@ defmodule Explorer.Chain.TokenTransferTest do
       insert(:token, contract_address: nft_token_address, type: "ERC-721")
       insert(:token, contract_address: plain_token_address, type: "ERC-20")
 
-      scaled_transfer =
-        insert(:token_transfer,
-          transaction: insert(:transaction) |> with_block(),
-          token_contract_address: scaled_token_address,
-          token_type: "ERC-20",
-          ui_amount_status: "ok"
-        )
+      insert(:token_transfer,
+        transaction: insert(:transaction) |> with_block(),
+        token_contract_address: scaled_token_address,
+        token_type: "ERC-20",
+        ui_amount_status: "ok"
+      )
 
       nft_transfer =
         insert(:token_transfer,
@@ -548,18 +547,14 @@ defmodule Explorer.Chain.TokenTransferTest do
       )
 
       expected_keys =
-        MapSet.new([
-          {scaled_transfer.transaction_hash, scaled_transfer.block_hash,
-           scaled_transfer.log_index},
-          {nft_transfer.transaction_hash, nft_transfer.block_hash, nft_transfer.log_index}
-        ])
+        MapSet.new([{nft_transfer.transaction_hash, nft_transfer.block_hash, nft_transfer.log_index}])
 
       for denormalization_finished? <- [false, true] do
         BackgroundMigrations.set_tt_denormalization_finished(denormalization_finished?)
 
         actual_keys =
           TokenTransfer.only_consensus_transfers_query()
-          |> TokenTransfer.filter_by_token_type_selectors(["ERC-721", "ERC-8056"])
+          |> TokenTransfer.filter_by_token_types(["ERC-721"])
           |> Repo.all()
           |> MapSet.new(&{&1.transaction_hash, &1.block_hash, &1.log_index})
 
@@ -568,7 +563,7 @@ defmodule Explorer.Chain.TokenTransferTest do
 
       single_selector_keys =
         TokenTransfer.only_consensus_transfers_query()
-        |> TokenTransfer.filter_by_token_type_selectors("ERC-721")
+        |> TokenTransfer.filter_by_token_types("ERC-721")
         |> Repo.all()
         |> MapSet.new(&{&1.transaction_hash, &1.block_hash, &1.log_index})
 

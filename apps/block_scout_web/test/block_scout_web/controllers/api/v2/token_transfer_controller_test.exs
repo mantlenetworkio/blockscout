@@ -148,7 +148,7 @@ defmodule BlockScoutWeb.API.V2.TokenTransferControllerTest do
              ]
     end
 
-    test "combines token types and ERC-8056 with union semantics", %{conn: conn} do
+    test "combines token type and extension filters with intersection semantics", %{conn: conn} do
       scaled_token = insert(:token, type: "ERC-20", extensions: ["ERC-8056"])
       nft_token = insert(:token, type: "ERC-721")
       plain_token = insert(:token, type: "ERC-20")
@@ -186,23 +186,18 @@ defmodule BlockScoutWeb.API.V2.TokenTransferControllerTest do
 
       response =
         conn
-        |> get("/api/v2/token-transfers", %{type: "ERC-721,ERC-8056"})
+        |> get("/api/v2/token-transfers", %{type: "ERC-20", token_extension: "ERC-8056"})
         |> json_response(200)
 
-      assert MapSet.new(response["items"], & &1["transaction_hash"]) ==
-               MapSet.new([to_string(scaled_transaction.hash), to_string(nft_transaction.hash)])
-
-      intersection_response =
-        conn
-        |> get("/api/v2/token-transfers", %{
-          type: "ERC-721,ERC-8056",
-          token_extension: "ERC-8056"
-        })
-        |> json_response(200)
-
-      assert Enum.map(intersection_response["items"], & &1["transaction_hash"]) == [
+      assert Enum.map(response["items"], & &1["transaction_hash"]) == [
                to_string(scaled_transaction.hash)
              ]
+    end
+
+    test "rejects ERC-8056 as a token transfer type", %{conn: conn} do
+      response = conn |> get("/api/v2/token-transfers", %{type: "ERC-8056"}) |> json_response(422)
+
+      assert hd(response["errors"])["source"] == %{"pointer" => "/type"}
     end
 
     test "rejects unsupported token extensions", %{conn: conn} do

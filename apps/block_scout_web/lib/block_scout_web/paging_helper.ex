@@ -27,7 +27,6 @@ defmodule BlockScoutWeb.PagingHelper do
   @allowed_token_transfer_type_labels @allowed_base_token_transfer_type_labels ++
                                         @allowed_chain_type_token_transfer_type_labels
   @allowed_token_extensions ["ERC-8056"]
-  @allowed_token_type_selectors @allowed_token_transfer_type_labels ++ @allowed_token_extensions
   @allowed_nft_type_labels ["ERC-721", "ERC-1155", "ERC-404"]
   @allowed_chain_id [1, 56, 99]
   @allowed_stability_validators_states ["active", "probation", "inactive"]
@@ -80,34 +79,20 @@ defmodule BlockScoutWeb.PagingHelper do
   @doc """
     Parse 'type' query parameter from request option map
   """
-  @spec token_transfers_types_options(map()) :: [{:token_type, list}]
-  def token_transfers_types_options(%{"type" => filters}) do
+  @spec token_types_options(map()) :: [{:token_type, list()}]
+  def token_types_options(%{"type" => filters}) do
     [
       token_type: filters_to_list(filters, @allowed_token_transfer_type_labels)
     ]
   end
 
-  def token_transfers_types_options(%{type: filters}) do
+  def token_types_options(%{type: filters}) do
     [
       token_type: filters_to_list(filters, @allowed_token_transfer_type_labels)
     ]
   end
 
-  def token_transfers_types_options(_), do: [token_type: []]
-
-  @doc """
-    Parse token type selectors, including token extensions exposed as union selectors.
-  """
-  @spec token_type_selectors_options(map()) :: [{:token_type, list()}]
-  def token_type_selectors_options(%{"type" => filters}) do
-    [token_type: filters_to_list(filters, @allowed_token_type_selectors)]
-  end
-
-  def token_type_selectors_options(%{type: filters}) do
-    [token_type: filters_to_list(filters, @allowed_token_type_selectors)]
-  end
-
-  def token_type_selectors_options(_), do: [token_type: []]
+  def token_types_options(_), do: [token_type: []]
 
   @spec exclude_token_extension_options(map()) :: [{:excluded_token_extensions, list()}]
   def exclude_token_extension_options(params) do
@@ -115,9 +100,6 @@ defmodule BlockScoutWeb.PagingHelper do
 
     [excluded_token_extensions: if(extension in @allowed_token_extensions, do: [extension], else: [])]
   end
-
-  @spec token_transfer_type_selectors_options(map()) :: [{:token_type, list()}]
-  def token_transfer_type_selectors_options(params), do: token_type_selectors_options(params)
 
   @spec token_extension_options(map()) :: [{:token_extension, String.t() | nil}]
   def token_extension_options(params) do

@@ -134,6 +134,40 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
              ]
     end
 
+    test "applies the ERC-8056 extension filter to CSV exports", %{conn: conn} do
+      original_config = Application.get_env(:explorer, Explorer.Chain.CsvExport)
+      Application.put_env(:explorer, Explorer.Chain.CsvExport, Keyword.put(original_config || [], :async?, false))
+
+      on_exit(fn ->
+        if original_config do
+          Application.put_env(:explorer, Explorer.Chain.CsvExport, original_config)
+        else
+          Application.delete_env(:explorer, Explorer.Chain.CsvExport)
+        end
+      end)
+
+      scaled_token = insert(:token, extensions: ["ERC-8056"])
+      plain_token = insert(:token)
+
+      insert(:token_transfer,
+        transaction: insert(:transaction) |> with_block(),
+        token_contract_address: scaled_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        transaction: insert(:transaction) |> with_block(),
+        token_contract_address: plain_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      response = get(conn, "/api/v2/advanced-filters/csv", %{"token_extension" => "ERC-8056"})
+
+      assert response.status == 200
+      assert response.resp_body =~ Explorer.Chain.Address.checksum(scaled_token.contract_address_hash)
+      refute response.resp_body =~ Explorer.Chain.Address.checksum(plain_token.contract_address_hash)
+    end
+
     test "returns 422 for an unsupported token extension", %{conn: conn} do
       response =
         conn
@@ -143,7 +177,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
       assert response == %{"message" => "Invalid parameter(s)"}
     end
 
-    test "combines transaction types and ERC-8056 with union semantics", %{conn: conn} do
+    test "combines transaction type and extension filters with intersection semantics", %{conn: conn} do
       scaled_token = insert(:token, type: "ERC-20", extensions: ["ERC-8056"])
       nft_token = insert(:token, type: "ERC-721")
       plain_token = insert(:token, type: "ERC-20")
@@ -181,36 +215,70 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
 
       response =
         conn
-        |> get("/api/v2/advanced-filters", %{"transaction_types" => "ERC-721,ERC-8056"})
+        |> get("/api/v2/advanced-filters", %{
+          "transaction_types" => "ERC-20",
+          "token_extension" => "ERC-8056"
+        })
         |> json_response(200)
 
-      assert MapSet.new(response["items"], &String.downcase(&1["token"]["address_hash"])) ==
-               MapSet.new([
-                 to_string(scaled_token.contract_address_hash),
-                 to_string(nft_token.contract_address_hash)
-               ])
+      assert Enum.map(response["items"], &String.downcase(&1["token"]["address_hash"])) == [
+               to_string(scaled_token.contract_address_hash)
+             ]
     end
 
-    test "combines native transfers and ERC-8056 with union semantics", %{conn: conn} do
-      scaled_token = insert(:token, type: "ERC-20", extensions: ["ERC-8056"])
-      scaled_transaction = insert(:transaction) |> with_block()
-      native_transaction = insert(:transaction, value: 1) |> with_block()
-      insert(:transaction, value: 0) |> with_block()
+    test "rejects ERC-8056 as a transaction type", %{conn: conn} do
+      response =
+        conn
+        |> get("/api/v2/advanced-filters", %{"transaction_types" => "ERC-8056"})
+        |> json_response(422)
+
+      assert response == %{"message" => "Invalid parameter(s)"}
+    end
+
+    test "rejects ERC-8056 as a transaction type for CSV exports", %{conn: conn} do
+      response =
+        conn
+        |> get("/api/v2/advanced-filters/csv", %{"transaction_types" => "ERC-8056"})
+        |> json_response(422)
+
+      assert response == %{"message" => "Invalid parameter(s)"}
+    end
+
+    test "rejects malformed and unsupported transaction types before filtering", %{conn: conn} do
+      for path <- ["/api/v2/advanced-filters", "/api/v2/advanced-filters/csv"],
+          transaction_types <- [
+            "[ERC-8056]",
+            "ERC-20, ERC-8056",
+            "ERC-9999",
+            "ERC-20,,ERC-721",
+            "[[ERC-20]]"
+          ] do
+        response =
+          conn
+          |> get(path, %{"transaction_types" => transaction_types})
+          |> json_response(422)
+
+        assert response == %{"message" => "Invalid parameter(s)"}
+      end
+    end
+
+    test "normalizes brackets and whitespace around allowed transaction types", %{conn: conn} do
+      token = insert(:token, type: "ERC-20")
+      transaction = insert(:transaction) |> with_block()
 
       insert(:token_transfer,
-        transaction: scaled_transaction,
-        token_contract_address: scaled_token.contract_address,
-        token_type: "ERC-20",
-        ui_amount_status: "ok"
+        transaction: transaction,
+        token_contract_address: token.contract_address,
+        token_type: "ERC-20"
       )
 
       response =
         conn
-        |> get("/api/v2/advanced-filters", %{"transaction_types" => "COIN_TRANSFER,ERC-8056"})
+        |> get("/api/v2/advanced-filters", %{"transaction_types" => " [ ERC-20 ] "})
         |> json_response(200)
 
-      assert MapSet.new(response["items"], & &1["hash"]) ==
-               MapSet.new([to_string(scaled_transaction.hash), to_string(native_transaction.hash)])
+      assert [%{"hash" => transaction_hash}] = response["items"]
+      assert transaction_hash == to_string(transaction.hash)
     end
 
     test "get and paginate advanced filter (transactions split between pages)", %{conn: conn} do

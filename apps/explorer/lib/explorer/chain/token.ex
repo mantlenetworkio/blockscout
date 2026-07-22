@@ -107,8 +107,6 @@ defmodule Explorer.Chain.Token do
 
   # milliseconds
   @timeout 60_000
-  @scaled_ui_extension "ERC-8056"
-
   @default_sorting [
     desc_nulls_last: :circulating_market_cap,
     desc_nulls_last: :fiat_value,
@@ -466,7 +464,7 @@ defmodule Explorer.Chain.Token do
   def base_token_query(type, sorting) do
     query = from(t in Token, preload: [:contract_address])
 
-    query |> filter_by_token_type_selectors(type) |> SortingHelper.apply_sorting(sorting, @default_sorting)
+    query |> filter_by_token_types(type) |> SortingHelper.apply_sorting(sorting, @default_sorting)
   end
 
   def default_sorting, do: @default_sorting
@@ -497,7 +495,7 @@ defmodule Explorer.Chain.Token do
       Token
       |> Chain.join_associations(necessity_by_association)
       |> ExplorerHelper.maybe_hide_scam_addresses_with_select(:contract_address_hash, options)
-      |> filter_by_token_type_selectors(token_type)
+      |> filter_by_token_types(token_type)
       |> filter_by_extension(token_extension)
       |> SortingHelper.apply_sorting(sorting, @default_sorting)
       |> SortingHelper.page_with_sorting(paging_options, sorting, @default_sorting)
@@ -561,26 +559,10 @@ defmodule Explorer.Chain.Token do
     end
   end
 
-  defp filter_by_token_type_selectors(query, empty_type) when empty_type in [nil, []], do: query
+  defp filter_by_token_types(query, empty_type) when empty_type in [nil, []], do: query
 
-  defp filter_by_token_type_selectors(query, selectors) when is_list(selectors) do
-    token_types = Enum.reject(selectors, &(&1 == @scaled_ui_extension))
-
-    case {@scaled_ui_extension in selectors, token_types} do
-      {true, []} ->
-        filter_by_extension(query, @scaled_ui_extension)
-
-      {true, token_types} ->
-        where(
-          query,
-          [token],
-          token.type in ^token_types or
-            fragment("? @> ARRAY[?]::varchar[]", token.extensions, ^@scaled_ui_extension)
-        )
-
-      {false, token_types} ->
-        where(query, [token], token.type in ^token_types)
-    end
+  defp filter_by_token_types(query, token_types) when is_list(token_types) do
+    where(query, [token], token.type in ^token_types)
   end
 
   @spec filter_by_extension(Ecto.Queryable.t(), String.t() | nil) :: Ecto.Query.t()

@@ -34,7 +34,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
     only: [
       chain_ids_filter_options: 1,
       token_extension_options: 1,
-      token_type_selectors_options: 1,
+      token_types_options: 1,
       tokens_sorting: 1
     ]
 
@@ -694,7 +694,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
         maybe_parsed_limit = params[:limit]
         %PagingOptions{paging_options | page_size: min(page_size, maybe_parsed_limit && abs(maybe_parsed_limit))}
       end)
-      |> Keyword.merge(token_type_selectors_options(params))
+      |> Keyword.merge(token_types_options(params))
       |> Keyword.merge(token_extension_options(params))
       |> Keyword.merge(tokens_sorting(params))
       |> Keyword.merge(@api_true)

@@ -27,7 +27,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       filter_options: 2,
       method_filter_options: 1,
       token_extension_options: 1,
-      token_transfer_type_selectors_options: 1,
+      token_types_options: 1,
       type_filter_options: 1
     ]
 
@@ -682,7 +682,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       full_options =
         [necessity_by_association: @token_transfers_necessity_by_association]
         |> Keyword.merge(paging_options)
-        |> Keyword.merge(token_transfer_type_selectors_options(params))
+        |> Keyword.merge(token_types_options(params))
         |> Keyword.merge(token_extension_options(params))
         |> Keyword.merge(@api_true)
         |> fetch_scam_token_toggle(conn)

@@ -72,7 +72,9 @@ defmodule Explorer.Chain.CsvExport.AdvancedFilter do
       "Fee",
       "CurrentPrice",
       "TxDateOpeningPrice",
-      "TxDateClosingPrice"
+      "TxDateClosingPrice",
+      "TokenUIValue",
+      "TokenUIMultiplier"
     ]
 
     af_lists =
@@ -117,22 +119,15 @@ defmodule Explorer.Chain.CsvExport.AdvancedFilter do
       Address.checksum(advanced_filter.token_transfer.token.contract_address_hash),
       decimal_to_string(token_transfer_total["decimals"], :normal),
       advanced_filter.token_transfer.token.symbol,
-      case token_transfer_total["decimals"] do
-        nil ->
-          decimal_to_string(token_transfer_total["value"], :xsd)
-
-        decimals ->
-          token_transfer_total["value"] &&
-            token_transfer_total["value"]
-            |> Decimal.div(Integer.pow(10, Decimal.to_integer(decimals)))
-            |> decimal_to_string(:xsd)
-      end,
+      format_token_value(token_transfer_total["value"], token_transfer_total["decimals"]),
       token_transfer_total["token_id"],
       advanced_filter.block_number,
       decimal_to_string(advanced_filter.fee, :normal),
       nil,
       nil,
-      nil
+      nil,
+      format_token_value(advanced_filter.token_transfer.ui_value, token_transfer_total["decimals"]),
+      format_ui_multiplier(advanced_filter.token_transfer.ui_multiplier)
     ]
   end
 
@@ -161,8 +156,28 @@ defmodule Explorer.Chain.CsvExport.AdvancedFilter do
       decimal_to_string(advanced_filter.fee, :normal),
       decimal_to_string(exchange_rate.fiat_value, :xsd),
       decimal_to_string(opening_price, :xsd),
-      decimal_to_string(closing_price, :xsd)
+      decimal_to_string(closing_price, :xsd),
+      nil,
+      nil
     ]
+  end
+
+  defp format_token_value(value, nil), do: decimal_to_string(value, :xsd)
+  defp format_token_value(nil, _decimals), do: nil
+
+  defp format_token_value(value, decimals) do
+    value
+    |> Decimal.div(Integer.pow(10, Decimal.to_integer(decimals)))
+    |> decimal_to_string(:xsd)
+  end
+
+  defp format_ui_multiplier(nil), do: nil
+
+  defp format_ui_multiplier(multiplier) do
+    multiplier
+    |> Decimal.div(Integer.pow(10, 18))
+    |> Decimal.normalize()
+    |> decimal_to_string(:normal)
   end
 
   defp decimal_to_string(nil, _), do: nil
