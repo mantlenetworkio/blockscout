@@ -28,16 +28,12 @@
         "url": "https://docs.mantle.xyz/network"
       },
       {
-        "text": "Grants",
-        "url": "https://www.mantle.xyz/grants"
-      },
-      {
         "text": "Faucet",
         "url": "https://faucet.sepolia.mantle.xyz/"
       },
       {
         "text": "GitHub",
-        "url": "https://github.com/mantlenetworkio"
+        "url": "https://github.com/mantle-xyz"
       }
     ]
   },
@@ -50,7 +46,7 @@
       },
       {
         "text": "Twitter",
-        "url": "https://twitter.com/0xMantle"
+        "url": "https://x.com/Mantle_Official"
       },
       {
         "text": "Telegram",
@@ -62,7 +58,7 @@
       },
       {
         "text": "Events",
-        "url": "https://www.mantle.xyz/events"
+        "url": "https://luma.com/mantleeventscal?period=past"
       }
     ]
   }

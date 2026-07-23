@@ -6,7 +6,7 @@ defmodule Explorer.Chain.ScaledUi.Reader do
   alias Explorer.Chain.{Block, Hash, ScaledUiMultiplierUpdate}
   alias Explorer.Chain.ScaledUi.{Timeline, TokenState}
 
-  @multiplier_scale Decimal.new("1000000000000000000")
+  @multiplier_scale 1_000_000_000_000_000_000
 
   @spec canonical_head_timestamp(module()) :: Decimal.t()
   def canonical_head_timestamp(repo) do
@@ -50,10 +50,11 @@ defmodule Explorer.Chain.ScaledUi.Reader do
   def scaled_amount(amount, state, head_timestamp) do
     case current_multiplier(state, head_timestamp) do
       {:ok, multiplier} ->
-        amount
-        |> Decimal.mult(multiplier)
-        |> Decimal.div(@multiplier_scale)
-        |> Decimal.round(0, :floor)
+        amount_integer = Decimal.to_integer(amount)
+        multiplier_integer = Decimal.to_integer(multiplier)
+        scaled_integer = div(amount_integer * multiplier_integer, @multiplier_scale)
+
+        Decimal.new(scaled_integer)
 
       :unknown ->
         nil

@@ -78,3 +78,6 @@ tasks_in_progress
 /temp
 
 openapi.yaml
+
+/docs
+.codegraph

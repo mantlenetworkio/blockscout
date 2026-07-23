@@ -7,6 +7,32 @@ defmodule Explorer.Chain.Address.CurrentTokenBalanceTest do
   alias Explorer.Chain.ScaledUi.TokenState
 
   describe "token_holders_ordered_by_value/2" do
+    test "floors scaled holder values when the product is not divisible by the multiplier scale" do
+      token = insert(:token, extensions: ["ERC-8056"])
+
+      %TokenState{}
+      |> TokenState.changeset(%{
+        base_multiplier: Decimal.new("500000000000000000"),
+        capability_block: 1,
+        timeline_status: "ok",
+        token_contract_address_hash: token.contract_address_hash
+      })
+      |> Repo.insert!()
+
+      insert(
+        :address_current_token_balance,
+        token_contract_address_hash: token.contract_address_hash,
+        value: Decimal.new("1753499999999999999997")
+      )
+
+      [result] =
+        token.contract_address_hash
+        |> CurrentTokenBalance.token_holders_ordered_by_value(head_timestamp: Decimal.new(100))
+        |> Repo.all()
+
+      assert Decimal.equal?(result.scaled_value, Decimal.new("876749999999999999998"))
+    end
+
     test "returns the last value for each address" do
       %Token{contract_address_hash: contract_address_hash} = insert(:token)
       address_a = insert(:address)
@@ -150,6 +176,37 @@ defmodule Explorer.Chain.Address.CurrentTokenBalanceTest do
   end
 
   describe "last_token_balances/1" do
+    test "floors scaled and fiat values when the product is not divisible by the multiplier scale" do
+      address = insert(:address)
+      token = insert(:token, decimals: 0, extensions: ["ERC-8056"], fiat_value: Decimal.new(1))
+
+      %TokenState{}
+      |> TokenState.changeset(%{
+        base_multiplier: Decimal.new("500000000000000000"),
+        capability_block: 1,
+        timeline_status: "ok",
+        token_contract_address_hash: token.contract_address_hash
+      })
+      |> Repo.insert!()
+
+      insert(
+        :address_current_token_balance,
+        address: address,
+        token_contract_address_hash: token.contract_address_hash,
+        value: Decimal.new("1753499999999999999997")
+      )
+
+      [result] =
+        address.hash
+        |> CurrentTokenBalance.last_token_balances([head_timestamp: Decimal.new(100)], nil)
+        |> Repo.all()
+
+      expected = Decimal.new("876749999999999999998")
+
+      assert Decimal.equal?(result.scaled_value, expected)
+      assert Decimal.equal?(result.fiat_value, expected)
+    end
+
     test "sorts fiat balances by scaled value and keeps raw values as a stable tie-breaker" do
       address = insert(:address)
 

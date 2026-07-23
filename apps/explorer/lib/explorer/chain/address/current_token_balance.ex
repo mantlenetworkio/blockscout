@@ -184,7 +184,7 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
     dynamic(
       [ctb, _token, state],
       fragment(
-        "CASE WHEN ? IS NOT NULL AND ? = 'ok' AND ? IS NOT NULL THEN FLOOR(? * ? / 1000000000000000000) ELSE NULL END",
+        "CASE WHEN ? IS NOT NULL AND ? = 'ok' AND ? IS NOT NULL THEN div(? * ?, 1000000000000000000::numeric) ELSE NULL END",
         state.capability_block,
         state.timeline_status,
         state.base_multiplier,
@@ -319,7 +319,7 @@ defmodule Explorer.Chain.Address.CurrentTokenBalance do
       dynamic(
         [balance, state],
         fragment(
-          "CASE WHEN ? IS NOT NULL AND ? = 'ok' AND ? IS NOT NULL THEN FLOOR(? * ? / 1000000000000000000) ELSE NULL END",
+          "CASE WHEN ? IS NOT NULL AND ? = 'ok' AND ? IS NOT NULL THEN div(? * ?, 1000000000000000000::numeric) ELSE NULL END",
           state.capability_block,
           state.timeline_status,
           state.base_multiplier,

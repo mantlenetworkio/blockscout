@@ -5,6 +5,39 @@ defmodule Explorer.Chain.ScaledUi.ReaderTest do
   alias Explorer.Chain.ScaledUiMultiplierUpdate
   alias Explorer.Repo
 
+  describe "scaled_amount/3" do
+    test "floors without rounding the quotient first" do
+      amount = Decimal.new("9999999999999999999999999999")
+      state = trusted_state("500000000000000000")
+
+      assert Reader.scaled_amount(amount, state, Decimal.new(0)) ==
+               Decimal.new("4999999999999999999999999999")
+    end
+
+    test "preserves exact precision at the uint256 boundary" do
+      uint256_max = Bitwise.bsl(1, 256) - 1
+      amount = Decimal.new(uint256_max)
+      state = trusted_state("500000000000000000")
+      expected = uint256_max |> div(2) |> Decimal.new()
+
+      assert Reader.scaled_amount(amount, state, Decimal.new(0)) == expected
+    end
+
+    test "uses the effective pending multiplier with exact floor semantics" do
+      amount = Decimal.new("9999999999999999999999999999")
+
+      state =
+        trusted_state("1000000000000000000")
+        |> Map.merge(%{
+          pending_effective_at: Decimal.new(100),
+          pending_multiplier: Decimal.new("500000000000000000")
+        })
+
+      assert Reader.scaled_amount(amount, state, Decimal.new(100)) ==
+               Decimal.new("4999999999999999999999999999")
+    end
+  end
+
   test "returns the canonical head timestamp as Unix seconds" do
     insert(:block, number: 100, consensus: true, timestamp: ~U[2026-07-16 00:00:00Z])
     head = insert(:block, number: 101, consensus: true, timestamp: ~U[2026-07-16 00:01:00Z])
@@ -57,4 +90,13 @@ defmodule Explorer.Chain.ScaledUi.ReaderTest do
   end
 
   def handle_query(_event, _measurements, metadata, pid), do: send(pid, {:query, metadata.query})
+
+  defp trusted_state(base_multiplier) do
+    %{
+      base_multiplier: Decimal.new(base_multiplier),
+      pending_effective_at: nil,
+      pending_multiplier: nil,
+      timeline_status: "ok"
+    }
+  end
 end
