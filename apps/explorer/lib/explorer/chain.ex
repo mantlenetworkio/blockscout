@@ -2138,7 +2138,7 @@ defmodule Explorer.Chain do
         |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
         |> preload([token: token], [{:token, token}])
         |> TokenTransfer.filter_by_token_types(token_type)
-        |> TokenTransfer.filter_by_token_extension(Keyword.get(options, :token_extension))
+        |> TokenTransfer.filter_by_token_extension(Keyword.get(options, :token_extension), options)
         |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> TokenTransfer.page_token_transfer(paging_options)
         |> limit(^paging_options.page_size)

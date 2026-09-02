@@ -276,7 +276,7 @@ defmodule Explorer.Chain.TokenTransfer do
 
         only_consensus_transfers_query()
         |> where([tt], tt.token_contract_address_hash == ^token_address_hash and not is_nil(tt.block_number))
-        |> filter_by_token_extension(Keyword.get(options, :token_extension))
+        |> filter_by_token_extension(Keyword.get(options, :token_extension), options)
         |> preload(^preloads)
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
         |> page_token_transfer(paging_options)
@@ -339,7 +339,7 @@ defmodule Explorer.Chain.TokenTransfer do
         |> preload(^preloads)
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
         |> filter_by_token_types(token_type)
-        |> filter_by_token_extension(Keyword.get(options, :token_extension))
+        |> filter_by_token_extension(Keyword.get(options, :token_extension), options)
         |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> page_token_transfer(paging_options)
         |> limit(^paging_options.page_size)
@@ -605,6 +605,11 @@ defmodule Explorer.Chain.TokenTransfer do
 
   An `Ecto.Query` for `TokenTransfer.t()`.
 
+  Note that building the query is not free when `options` carries a
+  `:token_extension`: the extension token hashes are read from the database
+  first, so the planner receives them as literal values. See
+  `resolve_extension_token_hashes/2`.
+
   ## Examples
 
   Fetch all incoming ERC20 token transfers for a specific address:
@@ -640,17 +645,21 @@ defmodule Explorer.Chain.TokenTransfer do
       |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
       |> preload([token: token], [{:token, token}])
       |> filter_by_token_types(token_types)
-      |> filter_by_token_extension(Keyword.get(options, :token_extension))
+      |> filter_by_token_extension(Keyword.get(options, :token_extension), options)
       |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
       |> handle_paging_options(paging_options)
     else
+      # Both union branches filter on the same extension. Resolve the token
+      # hashes once so the two branches share a single lookup.
+      extension_token_hashes = resolve_extension_token_hashes(Keyword.get(options, :token_extension), options)
+
       to_address_hash_query =
         only_consensus_transfers_query()
         |> join(:inner, [tt], token in assoc(tt, :token), as: :token)
         |> filter_by_direction(:to, address_hash)
         |> filter_by_token_address_hash(token_address_hash)
         |> filter_by_token_types(token_types)
-        |> filter_by_token_extension(Keyword.get(options, :token_extension))
+        |> filter_by_extension_token_hashes(extension_token_hashes)
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
         |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> handle_paging_options(paging_options)
@@ -662,7 +671,7 @@ defmodule Explorer.Chain.TokenTransfer do
         |> filter_by_direction(:from, address_hash)
         |> filter_by_token_address_hash(token_address_hash)
         |> filter_by_token_types(token_types)
-        |> filter_by_token_extension(Keyword.get(options, :token_extension))
+        |> filter_by_extension_token_hashes(extension_token_hashes)
         |> order_by([tt], desc: tt.block_number, desc: tt.log_index)
         |> ExplorerHelper.maybe_hide_scam_addresses_for_token_transfers(options)
         |> handle_paging_options(paging_options)
@@ -704,16 +713,72 @@ defmodule Explorer.Chain.TokenTransfer do
     where(query, [tt], tt.token_contract_address_hash == ^token_address_hash)
   end
 
-  @spec filter_by_token_extension(Ecto.Queryable.t(), String.t() | nil) :: Ecto.Query.t()
-  def filter_by_token_extension(query, nil), do: query
+  @doc """
+  Restricts a token transfers query to tokens carrying the given extension.
 
-  def filter_by_token_extension(query, extension) do
-    extension_token_hashes = Token.hashes_by_extension_query(extension)
+  The matching contract address hashes are resolved eagerly rather than
+  inlined as a subquery. Inlined, Postgres estimates the semi-join against
+  `tokens` at a single row and cannot see which hashes it will match, so it
+  discards the `(token_contract_address_hash, block_number DESC, log_index
+  DESC)` index and falls back to a full parallel sequential scan of
+  `token_transfers` — 14 s over ~35M rows on hoodi-qa3. Passing the resolved
+  hashes as a bind parameter lets the planner inspect them and drive the scan
+  from that index instead (sub-millisecond).
 
+  That figure assumes few tokens carry the extension — 4 on hoodi-qa3. The
+  resolved list is uncapped, and Postgres stops using per-hash index scans for
+  `= ANY($1)` somewhere in the low thousands of elements. A chain that mass
+  deploys extension tokens would need a different approach, such as a partial
+  index on the extension discriminator.
+
+  An empty result means no token carries the extension, which correctly
+  matches no transfers.
+  """
+  @spec filter_by_token_extension(Ecto.Queryable.t(), String.t() | nil, Keyword.t()) :: Ecto.Query.t()
+  def filter_by_token_extension(query, nil, _options), do: query
+
+  def filter_by_token_extension(query, extension, options) do
+    filter_by_extension_token_hashes(query, resolve_extension_token_hashes(extension, options))
+  end
+
+  @doc """
+  Resolves the contract address hashes of the tokens carrying the given extension.
+
+  This performs a database read. Callers that build more than one query from the
+  same extension must resolve once and pass the result to
+  `filter_by_extension_token_hashes/2`, so the lookup does not repeat per branch.
+  Callers that may discard the query without running it should resolve lazily,
+  so a cache hit does not pay for a read.
+  """
+  @spec resolve_extension_token_hashes(String.t() | nil, Keyword.t()) :: [Hash.Address.t()] | nil
+  def resolve_extension_token_hashes(nil, _options), do: nil
+
+  def resolve_extension_token_hashes(extension, options) do
+    extension
+    |> Token.hashes_by_extension_query()
+    |> Chain.select_repo(options).all()
+  end
+
+  @doc """
+  Restricts a token transfers query to the given, already resolved, extension token hashes.
+
+  The two arguments are not interchangeable:
+
+  - `nil` means no extension was requested, so the query passes through unfiltered.
+  - `[]` means an extension was requested but no token carries it, so the query
+    matches no transfers.
+
+  Pass only values produced by `resolve_extension_token_hashes/2`. Passing a
+  nil-able value from elsewhere silently returns every transfer.
+  """
+  @spec filter_by_extension_token_hashes(Ecto.Queryable.t(), [Hash.Address.t()] | nil) :: Ecto.Query.t()
+  def filter_by_extension_token_hashes(query, nil), do: query
+
+  def filter_by_extension_token_hashes(query, extension_token_hashes) when is_list(extension_token_hashes) do
     where(
       query,
       [tt],
-      not is_nil(tt.ui_amount_status) and tt.token_contract_address_hash in subquery(extension_token_hashes)
+      not is_nil(tt.ui_amount_status) and tt.token_contract_address_hash in ^extension_token_hashes
     )
   end
 

@@ -170,10 +170,13 @@ defmodule Explorer.Chain.Address.Counters do
     )
   end
 
-  def address_to_token_transfer_count_query(address_hash, token_extension) do
+  # Unlike the arity-1 version, this reads the extension token hashes from the
+  # database while building the query. Call it lazily if the result may be
+  # discarded. See `TokenTransfer.resolve_extension_token_hashes/2`.
+  def address_to_token_transfer_count_query(address_hash, token_extension, options) do
     address_hash
     |> address_to_token_transfer_count_query()
-    |> TokenTransfer.filter_by_token_extension(token_extension)
+    |> TokenTransfer.filter_by_token_extension(token_extension, options)
   end
 
   @spec address_to_token_transfer_count(Address.t()) :: non_neg_integer()
@@ -421,7 +424,7 @@ defmodule Explorer.Chain.Address.Counters do
       configure_task(
         :token_transfers_erc8056,
         cached_counters,
-        address_to_token_transfer_count_query(address_hash, "ERC-8056"),
+        fn -> address_to_token_transfer_count_query(address_hash, "ERC-8056", options) end,
         address_hash,
         options
       )
@@ -552,13 +555,16 @@ defmodule Explorer.Chain.Address.Counters do
     end
   end
 
-  defp configure_task(counter_type, cache, query, address_hash, options) do
+  # Accepts a zero-arity function when building the query itself costs a database
+  # read, so a warm counter cache does not pay for a query that `run_or_ignore/4`
+  # then discards.
+  defp configure_task(counter_type, cache, build_query, address_hash, options) when is_function(build_query, 0) do
     address_hash = to_string(address_hash)
     start = System.monotonic_time()
 
     run_or_ignore(cache[counter_type], counter_type, address_hash, fn ->
       result =
-        query
+        build_query.()
         |> count(options, counter_type)
 
       stop = System.monotonic_time()
@@ -571,6 +577,10 @@ defmodule Explorer.Chain.Address.Counters do
 
       {counter_type, result}
     end)
+  end
+
+  defp configure_task(counter_type, cache, query, address_hash, options) do
+    configure_task(counter_type, cache, fn -> query end, address_hash, options)
   end
 
   defp count(query, options, :internal_transactions) do

@@ -811,7 +811,7 @@ defmodule Explorer.Chain.AdvancedFilter do
     )
     |> filter_token_transfers_by_age(options)
     |> filter_by_token(options[:token_contract_address_hashes])
-    |> filter_token_transfers_by_extension(options[:token_extension])
+    |> filter_token_transfers_by_extension(options[:token_extension], options)
     |> filter_token_transfers_by_addresses(
       options[:from_address_hashes],
       options[:to_address_hashes],
@@ -946,12 +946,17 @@ defmodule Explorer.Chain.AdvancedFilter do
 
   defp filter_token_transfer_by_types(query_function, _), do: query_function
 
-  defp filter_token_transfers_by_extension(query_function, nil), do: query_function
+  defp filter_token_transfers_by_extension(query_function, nil, _options), do: query_function
 
-  defp filter_token_transfers_by_extension(query_function, extension) do
+  defp filter_token_transfers_by_extension(query_function, extension, options) do
+    # Resolve outside the closure: the address filters wrap this one and invoke
+    # it once per included address, so resolving inside would issue one
+    # identical tokens read per address.
+    extension_token_hashes = TokenTransfer.resolve_extension_token_hashes(extension, options)
+
     fn query, unnested? ->
       query
-      |> TokenTransfer.filter_by_token_extension(extension)
+      |> TokenTransfer.filter_by_extension_token_hashes(extension_token_hashes)
       |> query_function.(unnested?)
     end
   end

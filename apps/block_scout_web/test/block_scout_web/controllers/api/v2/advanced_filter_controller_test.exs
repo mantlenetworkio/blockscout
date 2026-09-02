@@ -134,6 +134,64 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
              ]
     end
 
+    test "applies the ERC-8056 extension filter across a multi-address fan-out", %{conn: conn} do
+      scaled_token = insert(:token, extensions: ["ERC-8056"])
+      plain_token = insert(:token)
+
+      sender_a = insert(:address)
+      sender_b = insert(:address)
+      recipient = insert(:address)
+
+      matching_a = insert(:transaction) |> with_block()
+      matching_b = insert(:transaction) |> with_block()
+      matching_incoming = insert(:transaction) |> with_block()
+      plain_transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        from_address: sender_a,
+        transaction: matching_a,
+        token_contract_address: scaled_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        from_address: sender_b,
+        transaction: matching_b,
+        token_contract_address: scaled_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        to_address: recipient,
+        transaction: matching_incoming,
+        token_contract_address: scaled_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        from_address: sender_a,
+        transaction: plain_transaction,
+        token_contract_address: plain_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      response =
+        conn
+        |> get("/api/v2/advanced-filters", %{
+          "token_extension" => "ERC-8056",
+          "from_address_hashes_to_include" => "#{sender_a.hash},#{sender_b.hash}",
+          "to_address_hashes_to_include" => to_string(recipient.hash)
+        })
+        |> json_response(200)
+
+      assert MapSet.new(response["items"], & &1["hash"]) ==
+               MapSet.new([
+                 to_string(matching_a.hash),
+                 to_string(matching_b.hash),
+                 to_string(matching_incoming.hash)
+               ])
+    end
+
     test "applies the ERC-8056 extension filter to CSV exports", %{conn: conn} do
       original_config = Application.get_env(:explorer, Explorer.Chain.CsvExport)
       Application.put_env(:explorer, Explorer.Chain.CsvExport, Keyword.put(original_config || [], :async?, false))

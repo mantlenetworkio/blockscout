@@ -1326,6 +1326,79 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
       assert Enum.map(response["items"], & &1["transaction_hash"]) == [to_string(annotated_transaction.hash)]
     end
 
+    test "returns nothing when no token carries the extension", %{conn: conn} do
+      address = insert(:address)
+      plain_token = insert(:token)
+
+      insert(:token_transfer,
+        from_address: address,
+        transaction: insert(:transaction) |> with_block(),
+        token_contract_address: plain_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        to_address: address,
+        transaction: insert(:transaction) |> with_block(),
+        token_contract_address: plain_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      response =
+        conn
+        |> get("/api/v2/addresses/#{address.hash}/token-transfers", %{token_extension: "ERC-8056"})
+        |> json_response(200)
+
+      assert response["items"] == []
+    end
+
+    test "applies the extension filter to both directions of the union", %{conn: conn} do
+      address = insert(:address)
+      scaled_token = insert(:token, extensions: ["ERC-8056"])
+      plain_token = insert(:token)
+
+      outgoing_transaction = insert(:transaction) |> with_block()
+      incoming_transaction = insert(:transaction) |> with_block()
+      outgoing_plain_transaction = insert(:transaction) |> with_block()
+      incoming_plain_transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        from_address: address,
+        transaction: outgoing_transaction,
+        token_contract_address: scaled_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        to_address: address,
+        transaction: incoming_transaction,
+        token_contract_address: scaled_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        from_address: address,
+        transaction: outgoing_plain_transaction,
+        token_contract_address: plain_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      insert(:token_transfer,
+        to_address: address,
+        transaction: incoming_plain_transaction,
+        token_contract_address: plain_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      response =
+        conn
+        |> get("/api/v2/addresses/#{address.hash}/token-transfers", %{token_extension: "ERC-8056"})
+        |> json_response(200)
+
+      assert MapSet.new(response["items"], & &1["transaction_hash"]) ==
+               MapSet.new([to_string(outgoing_transaction.hash), to_string(incoming_transaction.hash)])
+    end
+
     test "combines token type and extension filters with intersection semantics", %{conn: conn} do
       address = insert(:address)
       scaled_token = insert(:token, type: "ERC-20", extensions: ["ERC-8056"])

@@ -194,6 +194,23 @@ defmodule BlockScoutWeb.API.V2.TokenTransferControllerTest do
              ]
     end
 
+    test "returns nothing when no token carries the extension", %{conn: conn} do
+      plain_token = insert(:token)
+
+      insert(:token_transfer,
+        transaction: insert(:transaction) |> with_block(),
+        token_contract_address: plain_token.contract_address,
+        ui_amount_status: "ok"
+      )
+
+      response =
+        conn
+        |> get("/api/v2/token-transfers", %{token_extension: "ERC-8056"})
+        |> json_response(200)
+
+      assert response["items"] == []
+    end
+
     test "rejects ERC-8056 as a token transfer type", %{conn: conn} do
       response = conn |> get("/api/v2/token-transfers", %{type: "ERC-8056"}) |> json_response(422)
 
