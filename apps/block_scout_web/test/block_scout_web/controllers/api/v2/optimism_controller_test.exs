@@ -4,8 +4,9 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
 
   import Mox
 
+  alias Explorer.Application.Constants
   alias Explorer.Chain.{Address, Data}
-  alias Explorer.Chain.Optimism.{Deposit, Withdrawal}
+  alias Explorer.Chain.Optimism.{Deposit, OutputRoot, Withdrawal}
   alias Explorer.Repo
   alias Explorer.TestHelper
 
@@ -201,6 +202,81 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
                  ],
                  "next_page_params" => nil
                } = json_response(conn, 200)
+      end
+    end
+  end
+
+  describe "/optimism/output-roots/:index" do
+    if @chain_type == :optimism do
+      test "returns the root with its block range, counts, L1 finality and challenge period end", %{conn: conn} do
+        Constants.set_constant_value(OutputRoot.finalization_period_constant(), "43200")
+        insert(:op_output_root, l2_output_index: 7, l2_block_number: 3_000_100)
+
+        root =
+          insert(:op_output_root,
+            l2_output_index: 8,
+            l2_block_number: 3_000_110,
+            l1_block_number: 500,
+            l1_timestamp: ~U[2026-10-01 01:00:11.000000Z]
+          )
+
+        blocks = for n <- 3_000_101..3_000_110, do: insert(:block, number: n)
+        :transaction |> insert() |> with_block(List.first(blocks))
+        :transaction |> insert() |> with_block(List.last(blocks))
+        :transaction |> insert() |> with_block(insert(:block, number: 3_000_111))
+        Constants.set_constant_value(OutputRoot.l1_safe_block_number_constant(), "600")
+        Constants.set_constant_value(OutputRoot.l1_finalized_block_number_constant(), "499")
+
+        request = get(conn, "/api/v2/optimism/output-roots/8")
+
+        assert %{
+                 "l2_output_index" => 8,
+                 "l2_block_number" => 3_000_110,
+                 "l1_block_number" => 500,
+                 "l1_timestamp" => "2026-10-01T01:00:11.000000Z",
+                 "l2_start_block_number" => 3_000_101,
+                 "l2_end_block_number" => 3_000_110,
+                 "blocks_count" => 10,
+                 "transactions_count" => 2,
+                 "l1_finality" => "safe",
+                 "challenge_period_end" => "2026-10-01T13:00:11.000000Z",
+                 "output_root" => output_root,
+                 "l1_transaction_hash" => l1_transaction_hash
+               } = json_response(request, 200)
+
+        assert output_root == to_string(root.output_root)
+        assert l1_transaction_hash == to_string(root.l1_transaction_hash)
+      end
+
+      test "reports an unknown range when the previous root is missing", %{conn: conn} do
+        insert(:op_output_root, l2_output_index: 12, l2_block_number: 3_000_300)
+
+        request = get(conn, "/api/v2/optimism/output-roots/12")
+
+        assert %{
+                 "l2_start_block_number" => nil,
+                 "l2_end_block_number" => 3_000_300,
+                 "blocks_count" => nil,
+                 "transactions_count" => nil,
+                 "l1_finality" => nil,
+                 "challenge_period_end" => nil
+               } = json_response(request, 200)
+      end
+
+      test "returns 404 for an unknown index", %{conn: conn} do
+        request = get(conn, "/api/v2/optimism/output-roots/999")
+        assert json_response(request, 404)
+      end
+
+      test "returns 422 for a non-integer index", %{conn: conn} do
+        request = get(conn, "/api/v2/optimism/output-roots/abc")
+        assert json_response(request, 422)
+      end
+
+      # The counter may serve a table estimate, so only the routing is asserted: "count" must not reach /:index.
+      test "keeps /output-roots/count routed to the counter", %{conn: conn} do
+        request = get(conn, "/api/v2/optimism/output-roots/count")
+        assert is_integer(json_response(request, 200))
       end
     end
   end

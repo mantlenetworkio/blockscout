@@ -105,6 +105,26 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
   end
 
   @doc """
+    Function to render GET requests to `/api/v2/optimism/output-roots/:index` endpoint.
+  """
+  def render("optimism_output_root.json", %{output_root: root, details: details}) do
+    %{
+      "l2_output_index" => root.l2_output_index,
+      "l2_block_number" => root.l2_block_number,
+      "l1_transaction_hash" => root.l1_transaction_hash,
+      "l1_timestamp" => root.l1_timestamp,
+      "l1_block_number" => root.l1_block_number,
+      "output_root" => root.output_root,
+      "l2_start_block_number" => details.l2_start_block_number,
+      "l2_end_block_number" => details.l2_end_block_number,
+      "blocks_count" => details.blocks_count,
+      "transactions_count" => details.transactions_count,
+      "l1_finality" => details.l1_finality && Atom.to_string(details.l1_finality),
+      "challenge_period_end" => details.challenge_period_end
+    }
+  end
+
+  @doc """
     Function to render GET requests to `/api/v2/optimism/games` endpoint.
   """
   def render("optimism_games.json", %{

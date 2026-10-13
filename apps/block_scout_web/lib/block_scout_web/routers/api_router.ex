@@ -309,6 +309,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
         get("/batches/:number", V2.OptimismController, :batch_by_number)
         get("/output-roots", V2.OptimismController, :output_roots)
         get("/output-roots/count", V2.OptimismController, :output_roots_count)
+        get("/output-roots/:index", V2.OptimismController, :output_root)
         get("/deposits", V2.OptimismController, :deposits)
         get("/deposits/count", V2.OptimismController, :deposits_count)
         get("/withdrawals", V2.OptimismController, :withdrawals)

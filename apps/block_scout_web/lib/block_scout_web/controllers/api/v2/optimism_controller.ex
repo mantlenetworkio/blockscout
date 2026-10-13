@@ -285,6 +285,40 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
     items_count(conn, OutputRoot)
   end
 
+  operation :output_root,
+    summary: "Output root by its index.",
+    description: "Retrieves an output root, the L2 block range it commits to and the L1 finality of its proposal.",
+    parameters: [
+      %OpenApiSpex.Parameter{
+        name: :index,
+        in: :path,
+        schema: Schemas.General.IntegerString,
+        required: true,
+        description: "Output root index (`l2OutputIndex`) in the path."
+      }
+      | base_params()
+    ],
+    responses: [
+      ok: {"Output root detailed info.", "application/json", Schemas.Optimism.OutputRoot.Detailed},
+      unprocessable_entity: JsonErrorResponse.response(),
+      not_found: NotFoundResponse.response()
+    ]
+
+  @doc """
+  Function to handle GET requests to `/api/v2/optimism/output-roots/:index` endpoint.
+  """
+  @spec output_root(Plug.Conn.t(), map()) :: Plug.Conn.t() | {:error, :not_found}
+  def output_root(conn, %{index: index}) do
+    with {index, ""} <- Integer.parse(index),
+         %OutputRoot{} = root <- OutputRoot.by_index(index, @api_true) do
+      conn
+      |> put_status(200)
+      |> render(:optimism_output_root, %{output_root: root, details: OutputRoot.details(root, @api_true)})
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
   operation :games,
     summary: "List games.",
     description: "Retrieves a paginated list of games.",
