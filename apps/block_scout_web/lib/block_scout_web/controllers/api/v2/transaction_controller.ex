@@ -46,7 +46,8 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
 
   import Ecto.Query,
     only: [
-      preload: 2
+      preload: 2,
+      where: 3
     ]
 
   require Logger
@@ -486,9 +487,11 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
               []
 
             _ ->
-              # here we need to subtract 1 because the block range inside the `fetch_transactions` function
-              # starts from the `from_block + 1`
-              Transaction.fetch_transactions(paging_options, l2_block_number_from - 1, l2_block_number_to)
+              # both ends are inclusive: `fetch_transactions` filters `from_block <= block_number <= to_block`;
+              # transactions that lost consensus keep their block number, so they are excluded explicitly
+              paging_options
+              |> Transaction.fetch_transactions(l2_block_number_from, l2_block_number_to)
+              |> where([transaction], transaction.block_consensus == true)
           end
 
         query
