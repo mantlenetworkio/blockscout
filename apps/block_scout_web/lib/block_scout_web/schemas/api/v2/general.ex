@@ -382,6 +382,20 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   end
 
   @doc """
+  Returns a parameter definition for an output root index in the path.
+  """
+  @spec output_root_index_param() :: Parameter.t()
+  def output_root_index_param do
+    %Parameter{
+      name: :output_root_index_param,
+      in: :path,
+      schema: %Schema{type: :integer, minimum: 0},
+      required: true,
+      description: "Output root index (`l2OutputIndex`)"
+    }
+  end
+
+  @doc """
   Returns a parameter definition for filtering transactions by type.
   """
   @spec transaction_type_param() :: Parameter.t()

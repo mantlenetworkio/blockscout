@@ -3503,4 +3503,72 @@ defmodule BlockScoutWeb.API.V2.TransactionControllerTest do
       end
     end
   end
+
+  describe "/transactions/optimism-output-root/:output_root_index_param" do
+    if @chain_type == :optimism do
+      test "lists only the transactions of the committed blocks", %{conn: conn} do
+        insert(:op_output_root, l2_output_index: 40, l2_block_number: 4_100_000)
+        insert(:op_output_root, l2_output_index: 41, l2_block_number: 4_100_002)
+        before_range = insert(:block, number: 4_100_000)
+        first = insert(:block, number: 4_100_001)
+        last = insert(:block, number: 4_100_002)
+        after_range = insert(:block, number: 4_100_003)
+
+        in_first = :transaction |> insert() |> with_block(first)
+        in_last = :transaction |> insert() |> with_block(last)
+        :transaction |> insert() |> with_block(before_range)
+        :transaction |> insert() |> with_block(after_range)
+
+        request = get(conn, "/api/v2/transactions/optimism-output-root/41")
+        assert %{"items" => items, "next_page_params" => nil} = json_response(request, 200)
+        assert Enum.map(items, & &1["hash"]) == [to_string(in_last.hash), to_string(in_first.hash)]
+      end
+
+      test "pages across a page boundary without duplicates", %{conn: conn} do
+        insert(:op_output_root, l2_output_index: 50, l2_block_number: 4_200_000)
+        insert(:op_output_root, l2_output_index: 51, l2_block_number: 4_200_060)
+
+        hashes =
+          for n <- 4_200_001..4_200_060 do
+            block = insert(:block, number: n)
+            :transaction |> insert() |> with_block(block) |> Map.get(:hash) |> to_string()
+          end
+
+        request = get(conn, "/api/v2/transactions/optimism-output-root/51")
+        assert %{"items" => page1, "next_page_params" => next_page_params} = json_response(request, 200)
+        assert length(page1) == 50
+
+        request = get(conn, "/api/v2/transactions/optimism-output-root/51", next_page_params)
+        assert %{"items" => page2, "next_page_params" => nil} = json_response(request, 200)
+
+        assert Enum.map(page1 ++ page2, & &1["hash"]) == Enum.reverse(hashes)
+      end
+
+      test "is empty when the range is unknown", %{conn: conn} do
+        insert(:op_output_root, l2_output_index: 60, l2_block_number: 4_300_000)
+        block = insert(:block, number: 4_300_000)
+        :transaction |> insert() |> with_block(block)
+
+        request = get(conn, "/api/v2/transactions/optimism-output-root/60")
+        assert %{"items" => [], "next_page_params" => nil} = json_response(request, 200)
+      end
+
+      test "excludes transactions that lost consensus", %{conn: conn} do
+        insert(:op_output_root, l2_output_index: 70, l2_block_number: 4_400_000)
+        insert(:op_output_root, l2_output_index: 71, l2_block_number: 4_400_001)
+        block = insert(:block, number: 4_400_001)
+        canonical = :transaction |> insert() |> with_block(block)
+        :transaction |> insert() |> with_block(block, block_consensus: false)
+
+        request = get(conn, "/api/v2/transactions/optimism-output-root/71")
+        assert %{"items" => [item], "next_page_params" => nil} = json_response(request, 200)
+        assert item["hash"] == to_string(canonical.hash)
+      end
+
+      test "returns 404 for an unknown root", %{conn: conn} do
+        request = get(conn, "/api/v2/transactions/optimism-output-root/999")
+        assert json_response(request, 404)
+      end
+    end
+  end
 end

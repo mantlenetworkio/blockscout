@@ -984,6 +984,40 @@ defmodule BlockScoutWeb.API.V2.BlockControllerTest do
     end
   end
 
+  describe "/blocks/optimism-output-root/:output_root_index_param" do
+    if @chain_type == :optimism do
+      test "lists the committed blocks newest first across pages", %{conn: conn} do
+        insert(:op_output_root, l2_output_index: 20, l2_block_number: 4_000_000)
+        insert(:op_output_root, l2_output_index: 21, l2_block_number: 4_000_060)
+        for n <- 4_000_000..4_000_061, do: insert(:block, number: n)
+
+        request = get(conn, "/api/v2/blocks/optimism-output-root/21")
+        assert %{"items" => page1, "next_page_params" => next_page_params} = json_response(request, 200)
+        assert length(page1) == 50
+        assert next_page_params == %{"block_number" => 4_000_011, "items_count" => 50}
+
+        request = get(conn, "/api/v2/blocks/optimism-output-root/21", next_page_params)
+        assert %{"items" => page2, "next_page_params" => nil} = json_response(request, 200)
+
+        heights = Enum.map(page1 ++ page2, & &1["height"])
+        assert heights == Enum.to_list(4_000_060..4_000_001//-1)
+      end
+
+      test "is empty when the range is unknown", %{conn: conn} do
+        insert(:op_output_root, l2_output_index: 30, l2_block_number: 4_000_500)
+        insert(:block, number: 4_000_500)
+
+        request = get(conn, "/api/v2/blocks/optimism-output-root/30")
+        assert %{"items" => [], "next_page_params" => nil} = json_response(request, 200)
+      end
+
+      test "returns 404 for an unknown root", %{conn: conn} do
+        request = get(conn, "/api/v2/blocks/optimism-output-root/999")
+        assert json_response(request, 404)
+      end
+    end
+  end
+
   defp compare_item(%Block{} = block, json) do
     assert to_string(block.hash) == json["hash"]
     assert block.number == json["height"]

@@ -170,6 +170,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
 
       if @chain_type == :optimism do
         get("/optimism-batch/:batch_number_param", V2.TransactionController, :optimism_batch)
+        get("/optimism-output-root/:output_root_index_param", V2.TransactionController, :optimism_output_root)
       end
 
       if @chain_type == :scroll do
@@ -225,6 +226,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
 
       if @chain_type == :optimism do
         get("/optimism-batch/:batch_number_param", V2.BlockController, :optimism_batch)
+        get("/optimism-output-root/:output_root_index_param", V2.BlockController, :optimism_output_root)
       end
 
       if @chain_type == :scroll do

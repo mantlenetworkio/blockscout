@@ -46,6 +46,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
   alias Explorer.Chain.Beacon.Deposit
   alias Explorer.Chain.{Block, InternalTransaction}
   alias Explorer.Chain.Cache.{BlockNumber, Counters.AverageBlockTime}
+  alias Explorer.Chain.Optimism.OutputRoot, as: OptimismOutputRoot
   alias Explorer.Chain.Optimism.TransactionBatch, as: OptimismTransactionBatch
   alias Explorer.Chain.Scroll.Reader, as: ScrollReader
   alias Timex.Duration
@@ -311,6 +312,62 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
       next_page_params: next_page_params
     })
+  end
+
+  operation :optimism_output_root,
+    summary: "List L2 blocks committed by an Optimism output root",
+    description: "Retrieves the consensus L2 blocks in the range committed by the output root with the given index.",
+    parameters:
+      base_params() ++
+        [output_root_index_param()] ++
+        define_paging_params(["block_number", "items_count"]),
+    responses: [
+      ok:
+        {"L2 blocks committed by the output root.", "application/json",
+         paginated_response(
+           items: Schemas.Block,
+           next_page_params_example: %{
+             "block_number" => 22_566_361,
+             "items_count" => 50
+           }
+         )},
+      unprocessable_entity: JsonErrorResponse.response(),
+      not_found: NotFoundResponse.response()
+    ]
+
+  @doc """
+    Function to handle GET requests to `/api/v2/blocks/optimism-output-root/:output_root_index_param` endpoint.
+    It renders the list of L2 blocks committed by the output root; the list is empty while the range is unknown.
+  """
+  @spec optimism_output_root(Plug.Conn.t(), map()) :: Plug.Conn.t() | {:error, :not_found}
+  def optimism_output_root(conn, %{output_root_index_param: index} = params) do
+    case OptimismOutputRoot.by_index(index, @api_true) do
+      nil ->
+        {:error, :not_found}
+
+      root ->
+        full_options =
+          params
+          |> select_block_type()
+          |> Keyword.merge(paging_options(params))
+          |> Keyword.merge(@api_true)
+
+        blocks_plus_one =
+          case OptimismOutputRoot.block_range(root, @api_true) do
+            {nil, _end_block} -> []
+            {start_block, end_block} -> OptimismOutputRoot.blocks_in_range(start_block, end_block, full_options)
+          end
+
+        {blocks, next_page} = split_list_by_page(blocks_plus_one)
+        next_page_params = next_page |> next_page_params(blocks, params)
+
+        conn
+        |> put_status(200)
+        |> render(:blocks, %{
+          blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+          next_page_params: next_page_params
+        })
+    end
   end
 
   operation :scroll_batch,

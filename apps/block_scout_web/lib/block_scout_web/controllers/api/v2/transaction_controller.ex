@@ -64,6 +64,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   alias Explorer.Chain.Beacon.Reader, as: BeaconReader
   alias Explorer.Chain.Cache.Counters.{NewPendingTransactionsCount, Transactions24hCount}
   alias Explorer.Chain.{FheOperation, Hash, Transaction}
+  alias Explorer.Chain.Optimism.OutputRoot, as: OptimismOutputRoot
   alias Explorer.Chain.Optimism.TransactionBatch, as: OptimismTransactionBatch
   alias Explorer.Chain.Scroll.Reader, as: ScrollReader
   alias Explorer.Chain.Token.Instance
@@ -423,6 +424,43 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     l2_block_number_to = OptimismTransactionBatch.edge_l2_block_number(batch_number, :max, @api_true)
 
     handle_block_range_transactions(conn, params, l2_block_number_from, l2_block_number_to)
+  end
+
+  operation :optimism_output_root,
+    summary: "List L2 transactions committed by an Optimism output root",
+    description: "Retrieves the L2 transactions in the block range committed by the output root with the given index.",
+    parameters:
+      base_params() ++
+        [output_root_index_param()] ++ define_paging_params(["block_number", "index", "items_count"]),
+    responses: [
+      ok:
+        {"L2 transactions committed by the output root.", "application/json",
+         paginated_response(
+           items: Schemas.Transaction.Response,
+           next_page_params_example: %{
+             "block_number" => 142_678_440,
+             "index" => 5,
+             "items_count" => 50
+           }
+         )},
+      unprocessable_entity: JsonErrorResponse.response(),
+      not_found: NotFoundResponse.response()
+    ]
+
+  @doc """
+    Function to handle GET requests to `/api/v2/transactions/optimism-output-root/:output_root_index_param` endpoint.
+    It renders the list of L2 transactions committed by the output root; the list is empty while the range is unknown.
+  """
+  @spec optimism_output_root(Plug.Conn.t(), map()) :: Plug.Conn.t() | {:error, :not_found}
+  def optimism_output_root(conn, %{output_root_index_param: index} = params) do
+    case OptimismOutputRoot.by_index(index, @api_true) do
+      nil ->
+        {:error, :not_found}
+
+      root ->
+        {start_block, end_block} = OptimismOutputRoot.block_range(root, @api_true)
+        handle_block_range_transactions(conn, params, start_block, end_block)
+    end
   end
 
   operation :scroll_batch,
