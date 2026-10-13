@@ -429,7 +429,7 @@ defmodule EthereumJSONRPC do
     Fetches a block from the blockchain using a semantic tag identifier.
 
     ## Parameters
-    - `tag`: One of "earliest", "latest", "pending", or "safe" to identify the block
+    - `tag`: One of "earliest", "latest", "pending", "safe", or "finalized" to identify the block
     - `json_rpc_named_arguments`: Configuration for the JSON-RPC connection
 
     ## Returns
@@ -440,7 +440,7 @@ defmodule EthereumJSONRPC do
   """
   @spec fetch_block_by_tag(tag(), json_rpc_named_arguments) ::
           {:ok, Blocks.t()} | {:error, reason :: :invalid_tag | :not_found | term()}
-  def fetch_block_by_tag(tag, json_rpc_named_arguments) when tag in ~w(earliest latest pending safe) do
+  def fetch_block_by_tag(tag, json_rpc_named_arguments) when tag in ~w(earliest latest pending safe finalized) do
     [%{tag: tag}]
     |> fetch_blocks_by_params(&Block.ByTag.request/1, json_rpc_named_arguments, false)
   end
@@ -505,7 +505,7 @@ defmodule EthereumJSONRPC do
     Fetches the block number for a block identified by a semantic tag.
 
     ## Parameters
-    - `tag`: One of "earliest", "latest", "pending", or "safe" to identify the block
+    - `tag`: One of "earliest", "latest", "pending", "safe", or "finalized" to identify the block
     - `json_rpc_named_arguments`: Configuration for the JSON-RPC connection
 
     ## Returns
@@ -516,7 +516,7 @@ defmodule EthereumJSONRPC do
   """
   @spec fetch_block_number_by_tag(tag(), json_rpc_named_arguments) ::
           {:ok, non_neg_integer()} | {:error, reason :: :invalid_tag | :not_found | term()}
-  def fetch_block_number_by_tag(tag, json_rpc_named_arguments) when tag in ~w(earliest latest pending safe) do
+  def fetch_block_number_by_tag(tag, json_rpc_named_arguments) when tag in ~w(earliest latest pending safe finalized) do
     tag
     |> fetch_block_by_tag(json_rpc_named_arguments)
     |> Block.ByTag.number_from_result()
