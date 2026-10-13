@@ -20,6 +20,10 @@ defmodule Explorer.Chain.Optimism.OutputRoot do
   # Largest value of the bigint primary key.
   @max_index 9_223_372_036_854_775_807
 
+  # Counting visits one heap page per transaction, so a dense range can take minutes (228 s for one
+  # hoodi-qa3 stress-test root). Past this limit the count is reported as unknown.
+  @transactions_count_timeout_ms 5_000
+
   @typedoc """
     * `l2_output_index` - A unique index of the output root.
     * `l2_block_number` - An L2 block number of the output root.
@@ -160,7 +164,7 @@ defmodule Explorer.Chain.Optimism.OutputRoot do
       if is_nil(start_block) do
         {nil, nil}
       else
-        {max(end_block - start_block + 1, 0), Transaction.transaction_count_for_block_range(start_block..end_block//1)}
+        {max(end_block - start_block + 1, 0), transactions_count(start_block, end_block, options)}
       end
 
     challenge_period_end =
@@ -196,6 +200,35 @@ defmodule Explorer.Chain.Optimism.OutputRoot do
     |> limit(^paging_options.page_size)
     |> join_associations(necessity_by_association)
     |> select_repo(options).all(timeout: :infinity)
+  end
+
+  @doc """
+    Counts the rows of `query`, or returns `nil` when Postgres cancels the count after `timeout_ms`.
+    `SET LOCAL statement_timeout` makes the server stop the query, so the connection is not held.
+  """
+  @spec count_within(Ecto.Queryable.t(), non_neg_integer(), [Chain.api?()]) :: non_neg_integer() | nil
+  def count_within(query, timeout_ms, options \\ []) do
+    repo = select_repo(options)
+
+    {:ok, count} =
+      repo.transaction(fn ->
+        repo.query!("SET LOCAL statement_timeout = #{timeout_ms}")
+        repo.aggregate(query, :count, timeout: :infinity)
+      end)
+
+    count
+  rescue
+    error in Postgrex.Error ->
+      if error.postgres[:code] == :query_canceled, do: nil, else: reraise(error, __STACKTRACE__)
+  end
+
+  defp transactions_count(start_block, end_block, options) do
+    from(transaction in Transaction,
+      where:
+        transaction.block_number >= ^start_block and transaction.block_number <= ^end_block and
+          transaction.block_consensus == true
+    )
+    |> count_within(@transactions_count_timeout_ms, options)
   end
 
   defp page_blocks(query, %PagingOptions{key: {block_number}}), do: where(query, [block], block.number < ^block_number)

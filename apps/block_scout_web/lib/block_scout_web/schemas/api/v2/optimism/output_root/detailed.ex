@@ -33,7 +33,8 @@ defmodule BlockScoutWeb.Schemas.API.V2.Optimism.OutputRoot.Detailed do
         transactions_count: %Schema{
           type: :integer,
           nullable: true,
-          description: "Number of L2 transactions in the range; null when the range is unknown."
+          description:
+            "Number of L2 transactions in the range; null when the range is unknown or counting takes longer than 5 s."
         },
         l1_finality: %Schema{
           type: :string,

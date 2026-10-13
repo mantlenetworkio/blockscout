@@ -8,6 +8,8 @@ defmodule Explorer.Chain.Optimism.OutputRootTest do
     alias Explorer.Chain.Optimism.OutputRoot
     alias Explorer.PagingOptions
 
+    import Ecto.Query, only: [from: 2]
+
     describe "by_index/2" do
       test "finds a root by its index and rejects out-of-range indexes" do
         root = insert(:op_output_root, l2_output_index: 3)
@@ -105,6 +107,28 @@ defmodule Explorer.Chain.Optimism.OutputRootTest do
         root = insert(:op_output_root, l2_output_index: 13, l2_block_number: 2_000_500)
 
         assert %{challenge_period_end: nil} = OutputRoot.details(root)
+      end
+    end
+
+    describe "count_within/3" do
+      test "counts the rows when the query finishes in time" do
+        :transaction |> insert() |> with_block(insert(:block, number: 2_000_600))
+
+        query = from(t in Explorer.Chain.Transaction, where: t.block_number == 2_000_600)
+
+        assert OutputRoot.count_within(query, 5_000) == 1
+      end
+
+      test "returns nil when Postgres cancels the count at the timeout" do
+        :transaction |> insert() |> with_block(insert(:block, number: 2_000_700))
+
+        # pg_sleep makes the count take ~200 ms per row, well past the 50 ms timeout
+        query =
+          from(t in Explorer.Chain.Transaction,
+            where: t.block_number == 2_000_700 and fragment("pg_sleep(0.2) IS NOT NULL")
+          )
+
+        assert OutputRoot.count_within(query, 50) == nil
       end
     end
 
