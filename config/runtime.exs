@@ -1456,7 +1456,9 @@ config :indexer, Indexer.Fetcher.Optimism.TransactionBatch,
   alt_da_server_url: System.get_env("INDEXER_OPTIMISM_L1_BATCH_ALT_DA_SERVER_URL", ""),
   genesis_block_l2: ConfigHelper.parse_integer_or_nil_env_var("INDEXER_OPTIMISM_L2_BATCH_GENESIS_BLOCK_NUMBER"),
   inbox: System.get_env("INDEXER_OPTIMISM_L1_BATCH_INBOX"),
-  submitter: System.get_env("INDEXER_OPTIMISM_L1_BATCH_SUBMITTER")
+  submitter: System.get_env("INDEXER_OPTIMISM_L1_BATCH_SUBMITTER"),
+  submitter_updates_range_size:
+    ConfigHelper.parse_integer_env_var("INDEXER_OPTIMISM_L1_BATCH_SUBMITTER_UPDATES_RANGE_SIZE", 10_000, min: 1)
 
 config :indexer, Indexer.Fetcher.Optimism.EIP1559ConfigUpdate,
   chunk_size: ConfigHelper.parse_integer_env_var("INDEXER_OPTIMISM_L2_HOLOCENE_BLOCKS_CHUNK_SIZE", 25),

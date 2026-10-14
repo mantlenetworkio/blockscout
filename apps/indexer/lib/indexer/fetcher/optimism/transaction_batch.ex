@@ -37,7 +37,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   alias Explorer.Chain.Optimism.{FrameSequence, FrameSequenceBlob}
   alias Explorer.Chain.Optimism.TransactionBatch, as: OptimismTransactionBatch
   alias Indexer.Fetcher.{Optimism, RollupL1ReorgMonitor}
-  alias Indexer.Fetcher.Optimism.BlobRetryQueue
+  alias Indexer.Fetcher.Optimism.{BatcherTimeline, BlobRetryQueue}
   alias Indexer.Helper
   alias Indexer.Prometheus.Instrumenter
   alias Indexer.RollupReorgMonitorQueue
@@ -95,11 +95,9 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
          _ <- RollupL1ReorgMonitor.wait_for_start(__MODULE__),
          {:rpc_l1_undefined, false} <- {:rpc_l1_undefined, is_nil(optimism_l1_rpc)},
          json_rpc_named_arguments = Helper.json_rpc_named_arguments(optimism_l1_rpc),
-         {:system_config_read, {start_block_l1, batch_inbox, batch_submitter}} <-
+         {:system_config_read, {start_block_l1, batch_inbox}} <-
            {:system_config_read, read_system_config(system_config, json_rpc_named_arguments)},
          {:batch_inbox_valid, true} <- {:batch_inbox_valid, Helper.address_correct?(batch_inbox)},
-         {:batch_submitter_valid, true} <-
-           {:batch_submitter_valid, Helper.address_correct?(batch_submitter)},
          true <- start_block_l1 > 0,
          chunk_size = parse_integer(env[:blocks_chunk_size]),
          {:chunk_size_valid, true} <- {:chunk_size_valid, !is_nil(chunk_size) && chunk_size > 0},
@@ -111,7 +109,18 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
          {:l1_transaction_not_found, false} <-
            {:l1_transaction_not_found, !is_nil(last_l1_transaction_hash) && is_nil(last_l1_transaction)},
          {:ok, block_check_interval, last_safe_block} <-
-           Helper.get_block_check_interval(json_rpc_named_arguments) do
+           Helper.get_block_check_interval(json_rpc_named_arguments),
+         {:batcher_timeline, {:ok, batcher_timeline}} <-
+           {:batcher_timeline,
+            BatcherTimeline.init(
+              system_config,
+              start_block_l1,
+              env[:submitter],
+              env[:submitter_updates_range_size],
+              json_rpc_named_arguments,
+              # after a restart, the batcher updates are read from where the processing resumes
+              from: max(start_block_l1, last_l1_block_number)
+            )} do
       start_block = max(start_block_l1, last_l1_block_number)
 
       chain_id_l1 =
@@ -132,7 +141,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
       {:noreply,
        %{
          batch_inbox: batch_inbox,
-         batch_submitter: batch_submitter,
+         batcher_timeline: batcher_timeline,
          eip4844_blobs_api_url: Helper.trim_url(env[:eip4844_blobs_api_url]),
          eip4844_blobs_api_fallback_url: Helper.trim_url(env[:eip4844_blobs_api_fallback_url]),
          celestia_blobs_api_url: Helper.trim_url(env[:celestia_blobs_api_url]),
@@ -166,8 +175,8 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
         Logger.error("Batch Inbox address is invalid or not defined.")
         {:stop, :normal, state}
 
-      {:batch_submitter_valid, false} ->
-        Logger.error("Batch Submitter address is invalid or not defined.")
+      {:batcher_timeline, {:error, reason}} ->
+        Logger.error(reason)
         {:stop, :normal, state}
 
       {:start_block_l1_valid, false} ->
@@ -218,7 +227,8 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   #
   # ## Parameters (in the `state` param)
   # - `batch_inbox`: L1 address which accepts L1 batch transactions
-  # - `batch_submitter`: L1 address which sends L1 batch transactions to the `batch_inbox`
+  # - `batcher_timeline`: `BatcherTimeline` with the L1 address authorized to send batch transactions
+  #                       to the `batch_inbox` at each L1 block
   # - `eip4844_blobs_api_url`: URL of Blockscout Blobs API to get EIP-4844 blobs
   # - `celestia_blobs_api_url`: URL of the server where Celestia blobs can be read from
   # - `eigenda_blobs_api_url`: URL of the server where EigenDA blobs can be read from
@@ -238,7 +248,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
         :continue,
         %{
           batch_inbox: batch_inbox,
-          batch_submitter: batch_submitter,
+          batcher_timeline: batcher_timeline,
           eip4844_blobs_api_url: eip4844_blobs_api_url,
           eip4844_blobs_api_fallback_url: eip4844_blobs_api_fallback_url,
           celestia_blobs_api_url: celestia_blobs_api_url,
@@ -294,15 +304,17 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
         @empty_hash
       end
 
-    {last_written_block, new_incomplete_channels, _final_prev_chunk_last_hash} =
+    {last_written_block, new_incomplete_channels, _final_prev_chunk_last_hash, new_batcher_timeline} =
       chunk_range
       |> Enum.reduce_while(
-        {start_block - 1, incomplete_channels, initial_prev_chunk_last_hash},
-        fn current_chunk, {_, incomplete_channels_acc, prev_chunk_last_hash} ->
+        {start_block - 1, incomplete_channels, initial_prev_chunk_last_hash, batcher_timeline},
+        fn current_chunk, {_, incomplete_channels_acc, prev_chunk_last_hash, batcher_timeline_acc} ->
           chunk_start = start_block + chunk_size * current_chunk
           chunk_end = min(chunk_start + chunk_size - 1, end_block)
+          # an empty chunk (the end block is below the start block, e.g. after a restart) keeps the position
+          last_scanned_block = max(chunk_end, chunk_start - 1)
 
-          {new_incomplete_channels, last_block_hash} =
+          {new_incomplete_channels, last_block_hash, new_batcher_timeline} =
             if chunk_end >= chunk_start do
               Helper.log_blocks_chunk_handling(
                 chunk_start,
@@ -313,11 +325,11 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
                 :L1
               )
 
-              {:ok, new_incomplete_channels, batches, sequences, blobs, last_block_hash} =
+              {:ok, new_incomplete_channels, batches, sequences, blobs, last_block_hash, new_batcher_timeline} =
                 get_transaction_batches(
                   Range.new(chunk_start, chunk_end),
                   batch_inbox,
-                  batch_submitter,
+                  batcher_timeline_acc,
                   {genesis_block_l2, block_duration},
                   incomplete_channels_acc,
                   {json_rpc_named_arguments, json_rpc_named_arguments_l2},
@@ -372,9 +384,9 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
                 :L1
               )
 
-              {new_incomplete_channels, last_block_hash}
+              {new_incomplete_channels, last_block_hash, new_batcher_timeline}
             else
-              {incomplete_channels_acc, nil}
+              {incomplete_channels_acc, nil, batcher_timeline_acc}
             end
 
           reorg_block = RollupReorgMonitorQueue.pop(__MODULE__)
@@ -384,12 +396,19 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
 
             Optimism.set_last_block_hash(@empty_hash, @counter_type)
 
+            last_kept_block = min(reorg_block - 1, last_scanned_block)
+
+            # the reorg can start below `reorg_block`: the timeline keeps the hashes up to the last kept block,
+            # so the next chunk must extend them, or all unfinalized blocks are processed again
             {:halt,
-             {if(reorg_block <= chunk_end, do: reorg_block - 1, else: chunk_end), new_incomplete_channels, @empty_hash}}
+             {last_kept_block, new_incomplete_channels, @empty_hash,
+              BatcherTimeline.truncate(new_batcher_timeline, last_kept_block)}}
           else
             Optimism.set_last_block_hash(last_block_hash, @counter_type)
 
-            {:cont, {chunk_end, new_incomplete_channels, last_block_hash || prev_chunk_last_hash}}
+            {:cont,
+             {last_scanned_block, new_incomplete_channels, last_block_hash || prev_chunk_last_hash,
+              new_batcher_timeline}}
           end
         end
       )
@@ -404,7 +423,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     end
 
     delay =
-      if new_end_block == last_written_block do
+      if new_end_block <= last_written_block do
         # there is no new block, so wait for some time to let the chain issue the new block
         max(block_check_interval - Timex.diff(Timex.now(), time_before, :milliseconds), 0)
       else
@@ -418,7 +437,8 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
        state
        | start_block: new_start_block,
          end_block: new_end_block,
-         incomplete_channels: new_incomplete_channels
+         incomplete_channels: new_incomplete_channels,
+         batcher_timeline: new_batcher_timeline
      }}
   end
 
@@ -562,7 +582,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   defp get_transaction_batches(
          block_range,
          batch_inbox,
-         batch_submitter,
+         batcher_timeline,
          {genesis_block_l2, block_duration},
          incomplete_channels,
          {json_rpc_named_arguments, json_rpc_named_arguments_l2},
@@ -581,25 +601,31 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
 
         case validate_chain_continuity(chunk_start, blocks_params, prev_chunk_last_hash) do
           :ok ->
-            transactions_filtered = transactions_filter(transactions_params, batch_submitter, batch_inbox)
-
-            case validate_eip4844_blob_hashes(transactions_filtered) do
-              :ok ->
-                transactions_filtered
-                |> get_transaction_batches_inner(
-                  blocks_params,
-                  {genesis_block_l2, block_duration},
-                  incomplete_channels,
-                  json_rpc_named_arguments_l2,
-                  blobs_api_url
-                )
-                |> (&Tuple.insert_at(&1, tuple_size(&1), last_block_hash)).()
+            with {:ok, new_batcher_timeline} <-
+                   BatcherTimeline.sync(batcher_timeline, blocks_params, json_rpc_named_arguments),
+                 transactions_filtered = transactions_filter(transactions_params, new_batcher_timeline, batch_inbox),
+                 :ok <- validate_eip4844_blob_hashes(transactions_filtered) do
+              transactions_filtered
+              |> get_transaction_batches_inner(
+                blocks_params,
+                {genesis_block_l2, block_duration},
+                incomplete_channels,
+                json_rpc_named_arguments_l2,
+                blobs_api_url
+              )
+              |> (&Tuple.insert_at(&1, tuple_size(&1), last_block_hash)).()
+              |> (&Tuple.insert_at(&1, tuple_size(&1), new_batcher_timeline)).()
+            else
+              {:reorg, divergence_block} ->
+                # the chunk is on another fork than the blocks whose batcher updates were read before
+                RollupReorgMonitorQueue.push(divergence_block, __MODULE__)
+                {:ok, incomplete_channels, [], [], [], last_block_hash, batcher_timeline}
 
               {:error, message} ->
                 retry_get_transaction_batches(
                   block_range,
                   batch_inbox,
-                  batch_submitter,
+                  batcher_timeline,
                   {genesis_block_l2, block_duration},
                   incomplete_channels,
                   {json_rpc_named_arguments, json_rpc_named_arguments_l2},
@@ -624,7 +650,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
             # and the existing :halt branch will rewind + reset last_block_hash. The returned
             # `last_block_hash` is therefore inconsequential — pick the chunk's tail to keep the
             # tuple shape consistent.
-            {:ok, incomplete_channels, [], [], [], last_block_hash}
+            {:ok, incomplete_channels, [], [], [], last_block_hash, batcher_timeline}
         end
 
       {_, message_or_errors} ->
@@ -637,7 +663,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
         retry_get_transaction_batches(
           block_range,
           batch_inbox,
-          batch_submitter,
+          batcher_timeline,
           {genesis_block_l2, block_duration},
           incomplete_channels,
           {json_rpc_named_arguments, json_rpc_named_arguments_l2},
@@ -652,7 +678,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   defp retry_get_transaction_batches(
          block_range,
          batch_inbox,
-         batch_submitter,
+         batcher_timeline,
          {genesis_block_l2, block_duration},
          incomplete_channels,
          {json_rpc_named_arguments, json_rpc_named_arguments_l2},
@@ -674,7 +700,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
       get_transaction_batches(
         block_range,
         batch_inbox,
-        batch_submitter,
+        batcher_timeline,
         {genesis_block_l2, block_duration},
         incomplete_channels,
         {json_rpc_named_arguments, json_rpc_named_arguments_l2},
@@ -1828,7 +1854,8 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     )
   end
 
-  defp transactions_filter(transactions_params, batch_submitter, batch_inbox) do
+  # Keeps transactions sent to the inbox by the batcher authorized at their L1 block.
+  defp transactions_filter(transactions_params, batcher_timeline, batch_inbox) do
     transactions_params
     |> Enum.filter(fn t ->
       from_address_hash = Map.get(t, :from_address_hash)
@@ -1837,8 +1864,8 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
       if is_nil(from_address_hash) or is_nil(to_address_hash) do
         false
       else
-        String.downcase(from_address_hash) == batch_submitter and
-          String.downcase(to_address_hash) == batch_inbox
+        String.downcase(to_address_hash) == batch_inbox and
+          String.downcase(from_address_hash) == BatcherTimeline.address_at(batcher_timeline, t.block_number)
       end
     end)
     |> Enum.sort(fn t1, t2 ->
@@ -1872,29 +1899,27 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   end
 
   # Reads some public getters of SystemConfig contract and returns retrieved values.
-  # Gets the number of a start block (from which this fetcher should start),
-  # the inbox address, and the batcher (batch submitter) address.
+  # Gets the number of a start block (from which this fetcher should start) and the inbox address.
+  # The batcher (batch submitter) can change over time, so it is tracked by `BatcherTimeline`.
   #
   # If SystemConfig has obsolete implementation, the values are fallen back from the corresponding
-  # env variables (INDEXER_OPTIMISM_L1_START_BLOCK, INDEXER_OPTIMISM_L1_BATCH_INBOX, INDEXER_OPTIMISM_L1_BATCH_SUBMITTER).
+  # env variables (INDEXER_OPTIMISM_L1_START_BLOCK, INDEXER_OPTIMISM_L1_BATCH_INBOX).
   #
   # ## Parameters
   # - `contract_address`: An address of SystemConfig contract.
   # - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection.
   #
   # ## Returns
-  # - A tuple: {start_block, inbox, submitter}.
+  # - A tuple: {start_block, inbox}.
   # - `nil` in case of error.
   @spec read_system_config(String.t(), EthereumJSONRPC.json_rpc_named_arguments()) ::
-          {non_neg_integer(), String.t(), String.t()} | nil
+          {non_neg_integer(), String.t()} | nil
   defp read_system_config(contract_address, json_rpc_named_arguments) do
     requests = [
       # startBlock() public getter
       Contract.eth_call_request("0x48cd4cb1", contract_address, 0, nil, nil),
       # batchInbox() public getter
-      Contract.eth_call_request("0xdac6e63a", contract_address, 1, nil, nil),
-      # batcherHash() public getter
-      Contract.eth_call_request("0xe81b2c6d", contract_address, 2, nil, nil)
+      Contract.eth_call_request("0xdac6e63a", contract_address, 1, nil, nil)
     ]
 
     error_message = &"Cannot call public getters of SystemConfig. Error: #{inspect(&1)}"
@@ -1902,7 +1927,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     env = Application.get_all_env(:indexer)[__MODULE__]
     fallback_start_block = Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:start_block_l1]
 
-    {start_block, batch_inbox, batch_submitter} =
+    {start_block, batch_inbox} =
       case Helper.repeated_call(
              &json_rpc/2,
              [requests, json_rpc_named_arguments],
@@ -1910,40 +1935,22 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
              Helper.finite_retries_number()
            ) do
         {:ok, responses} ->
-          start_block =
-            responses
-            |> Enum.at(0)
-            |> Map.get(:result, fallback_start_block)
-            |> quantity_to_integer()
+          results = Map.new(responses, &{&1.id, Map.get(&1, :result)})
 
-          inbox_result = Map.get(Enum.at(responses, 1), :result)
-          submitter_result = Map.get(Enum.at(responses, 2), :result)
-
-          {batch_inbox, batch_submitter} =
-            with {:nil_result, true, _, _} <-
-                   {:nil_result, is_nil(inbox_result) or is_nil(submitter_result), inbox_result, submitter_result},
-                 {:fallback_defined, true} <-
-                   {:fallback_defined,
-                    Helper.address_correct?(env[:inbox]) and Helper.address_correct?(env[:submitter])} do
-              {env[:inbox], env[:submitter]}
-            else
-              {:nil_result, false, inbox, submitter} ->
-                "0x000000000000000000000000" <> batch_inbox = inbox
-                "0x000000000000000000000000" <> batch_submitter = submitter
-                {"0x" <> batch_inbox, "0x" <> batch_submitter}
-
-              {:fallback_defined, false} ->
-                {nil, nil}
+          batch_inbox =
+            case results[1] do
+              "0x000000000000000000000000" <> batch_inbox -> "0x" <> batch_inbox
+              _ -> env[:inbox]
             end
 
-          {start_block, batch_inbox, batch_submitter}
+          {quantity_to_integer(results[0] || fallback_start_block), batch_inbox}
 
         _ ->
-          {fallback_start_block, env[:inbox], env[:submitter]}
+          {fallback_start_block, env[:inbox]}
       end
 
-    if !is_nil(start_block) and Helper.address_correct?(batch_inbox) and Helper.address_correct?(batch_submitter) do
-      {start_block, String.downcase(batch_inbox), String.downcase(batch_submitter)}
+    if !is_nil(start_block) and Helper.address_correct?(batch_inbox) do
+      {start_block, String.downcase(batch_inbox)}
     end
   end
 
