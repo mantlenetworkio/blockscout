@@ -8,6 +8,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Optimism.Withdrawal do
   alias OpenApiSpex.Schema
 
   OpenApiSpex.schema(%{
+    title: "OptimismWithdrawal",
     description: "Optimism Withdrawal struct.",
     type: :object,
     properties: %{
@@ -16,15 +17,18 @@ defmodule BlockScoutWeb.Schemas.API.V2.Optimism.Withdrawal do
       l1_transaction_hash: General.FullHashNullable,
       l2_timestamp: General.TimestampNullable,
       l2_transaction_hash: General.FullHash,
+      message_hash: General.FullHashNullable,
       msg_data: General.HexStringNullable,
+      msg_eth_value: General.IntegerStringNullable,
       msg_gas_limit: General.IntegerStringNullable,
       msg_nonce: %Schema{type: :integer},
       msg_nonce_raw: General.IntegerString,
       msg_nonce_version: %Schema{type: :integer},
-      msg_sender_address_hash: General.FullHashNullable,
-      msg_target_address_hash: General.FullHashNullable,
+      msg_sender_address_hash: General.AddressHashNullable,
+      msg_target_address_hash: General.AddressHashNullable,
       msg_value: General.IntegerStringNullable,
       portal_contract_address_hash: General.AddressHashNullable,
+      relay_transaction_hash: General.FullHashNullable,
       status: %Schema{
         type: :string,
         enum: [
@@ -34,7 +38,8 @@ defmodule BlockScoutWeb.Schemas.API.V2.Optimism.Withdrawal do
           "In challenge period",
           "Ready for relay",
           "Proven",
-          "Relayed"
+          "Relayed",
+          "Relay failed"
         ],
         nullable: false
       }
@@ -45,6 +50,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Optimism.Withdrawal do
       :l1_transaction_hash,
       :l2_timestamp,
       :l2_transaction_hash,
+      :message_hash,
       :msg_data,
       :msg_gas_limit,
       :msg_nonce,
@@ -54,6 +60,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Optimism.Withdrawal do
       :msg_target_address_hash,
       :msg_value,
       :portal_contract_address_hash,
+      :relay_transaction_hash,
       :status
     ],
     additionalProperties: false

@@ -60,12 +60,14 @@ defmodule Explorer.Factory do
     Withdrawal
   }
 
-  alias Explorer.Chain.Optimism.{InteropMessage, OutputRoot}
+  alias Explorer.Chain.Optimism.{InteropMessage, MessageRelay, OutputRoot}
   alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
   alias Explorer.Chain.Zilliqa.Hash.BLSPublicKey
   alias Explorer.Chain.Zilliqa.Staker, as: ZilliqaStaker
 
   alias Explorer.Chain.Optimism.Deposit, as: OptimismDeposit
+  alias Explorer.Chain.Optimism.Withdrawal, as: OptimismWithdrawal
+  alias Explorer.Chain.Optimism.WithdrawalEvent, as: OptimismWithdrawalEvent
 
   alias Explorer.Chain.Celo.AggregatedElectionReward, as: CeloAggregatedElectionReward
   alias Explorer.Chain.Celo.ElectionReward, as: CeloElectionReward
@@ -1599,6 +1601,118 @@ defmodule Explorer.Factory do
       l2_transaction: l2_transaction
     }
   end
+
+  def op_message_relay_factory do
+    %MessageRelay{
+      message_hash: transaction_hash(),
+      event_type: :RelayedMessage,
+      transaction_hash: transaction_hash(),
+      chain: :l1,
+      block_number: block_number()
+    }
+  end
+
+  @doc """
+    The `relayMessage` calldata of a real Mantle Sepolia deposit (L2 transaction
+    0xd3ab962da515e3f6cd1b3ed0a29087030e82996ed03cae18a2956cb787ef5662). Its relay failed at L2 block 44,302,728 and
+    was replayed in 0x149f16029efd93c9474820b9701dfbcfb621d8f7159def6784f80bd7d50bf98a.
+  """
+  def op_relay_message_calldata do
+    "0xff8daf15000100000000000000000000000000000000000000000000000000000001376100000000000000000000000028aaa9595a3a91c1804eae411ec7ee05ac55b16b000000000000000000000000075532937b1c282fdbf27960378edb9dcc12f8010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000493e000000000000000000000000000000000000000000000000000000000000000e00000000000000000000000000000000000000000000000000000000000000084a7c8f76b00000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000f45316d73672d7265706c61792d6531000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+  end
+
+  @doc "The message hash the L2CrossDomainMessenger emitted for `op_relay_message_calldata/0`."
+  def op_relay_message_hash, do: "0x6ef47993c4e43dd24fea5e0291b92afb3351a89f78af9e0cb0f8ccb7ebd90cde"
+
+  @doc """
+    Inserts an Optimism withdrawal with the `MessagePassed` log of its L2 transaction. The log uses the Mantle layout
+    when `mantle_mode` is on and the OP Stack layout otherwise.
+
+    Options: `:calldata` (the message `data`, 0x string, default a bare `relayMessage` selector), `:sender` (the
+    `MessagePassed` sender, default the L2CrossDomainMessenger predeploy), `:emitter` (the contract that emits the
+    log, default the L2ToL1MessagePasser predeploy), `:finalized_in` (an L1 transaction hash; adds a
+    `WithdrawalFinalized` event).
+  """
+  def insert_op_withdrawal_with_message(opts \\ []) do
+    emitter = get_or_insert_address(Keyword.get(opts, :emitter, "0x4200000000000000000000000000000000000016"))
+    block = insert(:block)
+    transaction = :transaction |> insert() |> with_block(block)
+    nonce = sequence("op_withdrawal_with_message_nonce", & &1)
+    withdrawal_hash = transaction_hash()
+    {:ok, calldata} = Data.cast(Keyword.get(opts, :calldata, "0xff8daf15"))
+
+    {values, types} =
+      if Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] do
+        {[0, 0, 0, calldata.bytes, withdrawal_hash.bytes],
+         [{:uint, 256}, {:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}]}
+      else
+        {[0, 0, calldata.bytes, withdrawal_hash.bytes], [{:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}]}
+      end
+
+    insert(:log,
+      block: block,
+      block_number: block.number,
+      transaction: transaction,
+      address: emitter,
+      first_topic: full_hash(OptimismWithdrawal.message_passed_event()),
+      second_topic: full_hash("0x" <> String.pad_leading(Integer.to_string(nonce, 16), 64, "0")),
+      third_topic: full_hash(address_topic(Keyword.get(opts, :sender, "0x4200000000000000000000000000000000000007"))),
+      fourth_topic: full_hash(address_topic("0x0000000000000000000000000000000000000001")),
+      data: %Data{bytes: ABI.TypeEncoder.encode(values, types)}
+    )
+
+    withdrawal =
+      Repo.insert!(%OptimismWithdrawal{
+        msg_nonce: Decimal.new(nonce),
+        hash: withdrawal_hash,
+        l2_transaction_hash: transaction.hash,
+        l2_block_number: block.number
+      })
+
+    case opts[:finalized_in] do
+      nil ->
+        :ok
+
+      finalize_transaction_hash ->
+        Repo.insert!(%OptimismWithdrawalEvent{
+          withdrawal_hash: withdrawal_hash,
+          l1_event_type: :WithdrawalFinalized,
+          l1_timestamp: DateTime.utc_now(),
+          l1_transaction_hash: finalize_transaction_hash,
+          l1_block_number: block_number()
+        })
+    end
+
+    withdrawal
+  end
+
+  @doc """
+    Inserts an Optimism deposit whose L2 transaction (status `ok`) is sent to `:to` with `:calldata` as input.
+    Defaults: the L2CrossDomainMessenger predeploy and a bare `relayMessage` selector.
+  """
+  def insert_op_deposit_with_message(opts \\ []) do
+    to_address = get_or_insert_address(Keyword.get(opts, :to, "0x4200000000000000000000000000000000000007"))
+    {:ok, input} = Data.cast(Keyword.get(opts, :calldata, "0xff8daf15"))
+
+    l2_transaction =
+      :transaction
+      |> insert(to_address: to_address, input: input)
+      |> with_block(insert(:block), status: :ok)
+
+    insert(:op_deposit, l2_transaction: l2_transaction, l2_transaction_hash: l2_transaction.hash)
+  end
+
+  defp get_or_insert_address(hash_string) do
+    {:ok, hash} = Hash.Address.cast(hash_string)
+    Repo.get(Address, hash) || insert(:address, hash: hash)
+  end
+
+  defp full_hash(hash_string) do
+    {:ok, hash} = Hash.Full.cast(hash_string)
+    hash
+  end
+
+  defp address_topic("0x" <> address), do: "0x000000000000000000000000" <> String.downcase(address)
 
   def db_migration_status_factory do
     %MigrationStatus{

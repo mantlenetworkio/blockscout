@@ -1401,6 +1401,8 @@ config :indexer, Indexer.Fetcher.Optimism.DisputeGame.Supervisor,
 config :indexer, Indexer.Fetcher.Optimism.Deposit.Supervisor, enabled: ConfigHelper.chain_type() == :optimism
 config :indexer, Indexer.Fetcher.Optimism.Withdrawal.Supervisor, enabled: ConfigHelper.chain_type() == :optimism
 config :indexer, Indexer.Fetcher.Optimism.WithdrawalEvent.Supervisor, enabled: ConfigHelper.chain_type() == :optimism
+config :indexer, Indexer.Fetcher.Optimism.MessageRelayL1.Supervisor, enabled: ConfigHelper.chain_type() == :optimism
+config :indexer, Indexer.Fetcher.Optimism.MessageRelayL2.Supervisor, disabled?: ConfigHelper.chain_type() != :optimism
 
 config :indexer, Indexer.Fetcher.Optimism.EIP1559ConfigUpdate.Supervisor,
   disabled?: ConfigHelper.chain_type() != :optimism
@@ -1445,6 +1447,13 @@ config :indexer, Indexer.Fetcher.Optimism.Withdrawal,
   start_block_l2: System.get_env("INDEXER_OPTIMISM_L2_WITHDRAWALS_START_BLOCK", "1"),
   message_passer:
     System.get_env("INDEXER_OPTIMISM_L2_MESSAGE_PASSER_CONTRACT", "0x4200000000000000000000000000000000000016")
+
+config :indexer, Indexer.Fetcher.Optimism.MessageRelayL1,
+  l1_cross_domain_messenger: System.get_env("INDEXER_OPTIMISM_L1_CROSS_DOMAIN_MESSENGER_CONTRACT")
+
+config :indexer, Indexer.Fetcher.Optimism.MessageRelayL2,
+  start_block: ConfigHelper.parse_integer_env_var("INDEXER_OPTIMISM_L2_MESSAGE_RELAYS_START_BLOCK", 1),
+  l2_cross_domain_messenger: System.get_env("INDEXER_OPTIMISM_L2_CROSS_DOMAIN_MESSENGER_CONTRACT")
 
 config :indexer, Indexer.Fetcher.Optimism.TransactionBatch,
   blocks_chunk_size: System.get_env("INDEXER_OPTIMISM_L1_BATCH_BLOCKS_CHUNK_SIZE", "4"),

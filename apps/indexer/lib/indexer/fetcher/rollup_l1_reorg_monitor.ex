@@ -28,6 +28,7 @@ defmodule Indexer.Fetcher.RollupL1ReorgMonitor do
       :optimism ->
         [
           Indexer.Fetcher.Optimism.Deposit,
+          Indexer.Fetcher.Optimism.MessageRelayL1,
           Indexer.Fetcher.Optimism.OutputRoot,
           Indexer.Fetcher.Optimism.TransactionBatch,
           Indexer.Fetcher.Optimism.WithdrawalEvent

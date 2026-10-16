@@ -68,6 +68,45 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
 
         assert %{"items" => [], "next_page_params" => nil} = json_response(request, 200)
       end
+
+      test "deposits carry the relay result and what a replay needs", %{conn: conn} do
+        deposit = insert_op_deposit_with_message(calldata: op_relay_message_calldata())
+
+        insert(:op_message_relay,
+          message_hash: TestHelper.topic(op_relay_message_hash()),
+          event_type: :FailedRelayedMessage,
+          transaction_hash: deposit.l2_transaction_hash,
+          chain: :l2
+        )
+
+        request = get(conn, "/api/v2/optimism/deposits")
+        assert %{"items" => [item]} = json_response(request, 200)
+
+        assert %{
+                 "relay_status" => "Relay failed",
+                 "relay_transaction_hash" => nil,
+                 "msg_target_address_hash" => "0x4200000000000000000000000000000000000007"
+               } = item
+
+        assert item["message_hash"] == op_relay_message_hash()
+        assert item["msg_data"] == op_relay_message_calldata()
+
+        replay = Explorer.Factory.transaction_hash()
+
+        insert(:op_message_relay,
+          message_hash: TestHelper.topic(op_relay_message_hash()),
+          event_type: :RelayedMessage,
+          transaction_hash: replay,
+          chain: :l2
+        )
+
+        request = get(conn, "/api/v2/optimism/deposits")
+
+        assert %{"items" => [%{"relay_status" => "Relayed", "relay_transaction_hash" => relay}]} =
+                 json_response(request, 200)
+
+        assert relay == to_string(replay)
+      end
     end
   end
 
@@ -140,6 +179,74 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
         request = get(conn, "/api/v2/optimism/withdrawals", %{"address_hash" => to_string(unrelated.hash)})
 
         assert %{"items" => [], "next_page_params" => nil} = json_response(request, 200)
+      end
+
+      test "reports a failed relay, and then the replay that delivered the message", %{conn: conn} do
+        finalize = Explorer.Factory.transaction_hash()
+        insert_op_withdrawal_with_message(calldata: op_relay_message_calldata(), finalized_in: finalize)
+
+        insert(:op_message_relay,
+          message_hash: TestHelper.topic(op_relay_message_hash()),
+          event_type: :FailedRelayedMessage,
+          transaction_hash: finalize,
+          chain: :l1,
+          block_number: 10
+        )
+
+        request = get(conn, "/api/v2/optimism/withdrawals")
+        assert %{"items" => [item]} = json_response(request, 200)
+
+        assert %{"status" => "Relay failed", "relay_transaction_hash" => nil, "message_hash" => message_hash} = item
+        assert message_hash == op_relay_message_hash()
+        assert item["l1_transaction_hash"] == to_string(finalize)
+
+        replay = Explorer.Factory.transaction_hash()
+
+        insert(:op_message_relay,
+          message_hash: TestHelper.topic(op_relay_message_hash()),
+          event_type: :RelayedMessage,
+          transaction_hash: replay,
+          chain: :l1,
+          block_number: 20
+        )
+
+        request = get(conn, "/api/v2/optimism/withdrawals")
+
+        assert %{"items" => [%{"status" => "Relayed", "relay_transaction_hash" => relay}]} =
+                 json_response(request, 200)
+
+        assert relay == to_string(replay)
+      end
+
+      test "a normal finalize relays in the finalize transaction", %{conn: conn} do
+        finalize = Explorer.Factory.transaction_hash()
+        insert_op_withdrawal_with_message(calldata: op_relay_message_calldata(), finalized_in: finalize)
+
+        insert(:op_message_relay,
+          message_hash: TestHelper.topic(op_relay_message_hash()),
+          event_type: :RelayedMessage,
+          transaction_hash: finalize,
+          chain: :l1
+        )
+
+        request = get(conn, "/api/v2/optimism/withdrawals")
+        assert %{"items" => [item]} = json_response(request, 200)
+        assert item["status"] == "Relayed"
+        assert item["relay_transaction_hash"] == item["l1_transaction_hash"]
+      end
+
+      test "a finalized withdrawal without an indexed relay stays Relayed", %{conn: conn} do
+        insert_op_withdrawal_with_message(
+          calldata: op_relay_message_calldata(),
+          finalized_in: Explorer.Factory.transaction_hash()
+        )
+
+        request = get(conn, "/api/v2/optimism/withdrawals")
+
+        assert %{"items" => [%{"status" => "Relayed", "relay_transaction_hash" => nil, "message_hash" => message_hash}]} =
+                 json_response(request, 200)
+
+        assert message_hash == op_relay_message_hash()
       end
     end
   end

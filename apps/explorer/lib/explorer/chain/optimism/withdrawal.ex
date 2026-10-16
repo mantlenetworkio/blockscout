@@ -7,9 +7,9 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
 
   alias Explorer.Application.Constants
   alias Explorer.Chain
-  alias Explorer.Chain.{Block, Hash, Log, Transaction}
+  alias Explorer.Chain.{Block, Data, Hash, Log, Transaction}
   alias Explorer.Chain.Cache.OptimismFinalizationPeriod
-  alias Explorer.Chain.Optimism.{DisputeGame, OutputRoot, WithdrawalEvent}
+  alias Explorer.Chain.Optimism.{DisputeGame, MessageRelay, OutputRoot, WithdrawalEvent}
   alias Explorer.{Helper, PagingOptions, Repo}
 
   @game_status_defender_wins 2
@@ -21,6 +21,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   @withdrawal_status_ready_for_relay "Ready for relay"
   @withdrawal_status_proven "Proven"
   @withdrawal_status_relayed "Relayed"
+  @withdrawal_status_relay_failed "Relay failed"
 
   @dispute_game_finality_delay_seconds "optimism_dispute_game_finality_delay_seconds"
   @proof_maturity_delay_seconds "optimism_proof_maturity_delay_seconds"
@@ -65,6 +66,9 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   Accepts an optional `:address_hash` filter (`Hash.Address.t()` or `nil`) which
   restricts the result to withdrawals whose L2 transaction `from_address_hash`
   matches the given hash.
+
+  Each item also carries the relay result of its message: `message_hash`, `relay_status` (`:relayed`, `:failed`, or
+  nil) and `relay_transaction_hash`, all read with one query per page.
   """
   @spec list :: [__MODULE__.t()]
   def list(options \\ []) do
@@ -77,6 +81,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
 
       _ ->
         event_topic = message_passed_event()
+        message_passer = message_passer()
 
         base_query =
           from(w in __MODULE__,
@@ -91,8 +96,8 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
             on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized,
             left_join: log in Log,
             on:
-              log.transaction_hash == w.l2_transaction_hash and log.first_topic == ^event_topic and
-                log.second_topic == fragment("numeric_to_bytea32(msg_nonce)"),
+              log.transaction_hash == w.l2_transaction_hash and log.address_hash == ^message_passer and
+                log.first_topic == ^event_topic and log.second_topic == fragment("numeric_to_bytea32(msg_nonce)"),
             select: %{
               msg_nonce: w.msg_nonce,
               hash: w.hash,
@@ -112,6 +117,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
         |> page_optimism_withdrawals(paging_options)
         |> limit(^paging_options.page_size)
         |> select_repo(options).all(timeout: :infinity)
+        |> with_relays(options)
     end
   end
 
@@ -205,6 +211,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   @spec transaction_statuses(Hash.t()) :: [{non_neg_integer(), String.t(), map()}]
   def transaction_statuses(l2_transaction_hash) do
     event_topic = message_passed_event()
+    message_passer = message_passer()
 
     query =
       from(w in __MODULE__,
@@ -215,8 +222,8 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
         on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized,
         left_join: log in Log,
         on:
-          log.transaction_hash == w.l2_transaction_hash and log.first_topic == ^event_topic and
-            log.second_topic == fragment("numeric_to_bytea32(msg_nonce)"),
+          log.transaction_hash == w.l2_transaction_hash and log.address_hash == ^message_passer and
+            log.first_topic == ^event_topic and log.second_topic == fragment("numeric_to_bytea32(msg_nonce)"),
         select: %{
           hash: w.hash,
           l2_block_number: w.l2_block_number,
@@ -230,6 +237,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
 
     query
     |> Repo.replica().all(timeout: :infinity)
+    |> with_relays(@api_true)
     |> Enum.map(fn w ->
       msg_nonce =
         Bitwise.band(
@@ -244,6 +252,9 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
 
   @doc """
     Gets Optimism Withdrawal status and unlock datetime (only for `In challenge period`).
+
+    When the map carries a `relay_status` (see `list/1`), a relayed message is `Relayed` and a message whose relay
+    failed and was not replayed is `Relay failed`, whatever the portal events say.
 
     Since OP Fault Proofs implementation assumes having more than one WithdrawalProven events for
     the same withdrawal, the function analyzes all the WithdrawalProven events and determines
@@ -264,6 +275,11 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   """
   @spec status(map(), list() | nil, [Chain.api?()]) :: {String.t(), DateTime.t() | nil}
   def status(w, respected_games \\ nil, options \\ [])
+
+  # The messenger's relay result decides as soon as it is indexed: the portal emits `WithdrawalFinalized` with
+  # `success = true` even when the relay fails, and a replay emits no portal event at all.
+  def status(%{relay_status: :relayed}, _respected_games, _options), do: {@withdrawal_status_relayed, nil}
+  def status(%{relay_status: :failed}, _respected_games, _options), do: {@withdrawal_status_relay_failed, nil}
 
   def status(w, respected_games, options) when is_nil(w.l1_transaction_hash) do
     proven_events = proven_events_by_hash(w.hash)
@@ -512,6 +528,66 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
     end
   end
 
+  # Adds the messenger relay result of each withdrawal, reading all of them with one query: `message_hash` (nil when
+  # the message was not sent through the L2CrossDomainMessenger), `relay_status` (`:relayed`, `:failed`, or nil when no
+  # relay is indexed) and `relay_transaction_hash` (the delivering L1 transaction, a replay if the first relay failed).
+  @spec with_relays([map()], [Chain.api?()]) :: [map()]
+  defp with_relays(withdrawals, options) do
+    messenger = MessageRelay.l2_cross_domain_messenger()
+    mantle_mode = mantle_mode?()
+    message_hashes = Enum.map(withdrawals, &relay_message_hash(&1, messenger, mantle_mode))
+
+    summaries =
+      message_hashes
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> MessageRelay.summaries(:l1, options)
+
+    withdrawals
+    |> Enum.zip(message_hashes)
+    |> Enum.map(fn {withdrawal, message_hash} ->
+      summary = Map.get(summaries, message_hash, %{})
+
+      Map.merge(withdrawal, %{
+        message_hash: message_hash,
+        relay_status: summary[:status],
+        relay_transaction_hash: summary[:transaction_hash]
+      })
+    end)
+  end
+
+  # Only the L2CrossDomainMessenger emits `MessagePassed` with itself as the sender, so `data` is then the
+  # `relayMessage` calldata whose keccak256 the L1CrossDomainMessenger emits when relaying.
+  defp relay_message_hash(
+         %{msg_log_sender_address_hash: %Hash{} = sender, msg_log_data: %Data{} = msg_log_data},
+         messenger,
+         mantle_mode
+       ) do
+    if Helper.truncate_address_hash(sender) == messenger do
+      msg_log_data
+      |> message_data(mantle_mode)
+      |> MessageRelay.message_hash()
+    end
+  end
+
+  defp relay_message_hash(_withdrawal, _messenger, _mantle_mode), do: nil
+
+  # Mantle's MessagePassed has 5 non-indexed fields (mntValue, ethValue, gasLimit, data, withdrawalHash),
+  # the OP Stack one has 4 (value, gasLimit, data, withdrawalHash).
+  defp message_data(msg_log_data, true = _mantle_mode) do
+    [_mnt_value, _eth_value, _gas_limit, data, _hash] =
+      Helper.decode_data(msg_log_data, [{:uint, 256}, {:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
+
+    data
+  end
+
+  defp message_data(msg_log_data, false = _mantle_mode) do
+    [_value, _gas_limit, data, _hash] =
+      Helper.decode_data(msg_log_data, [{:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
+
+    data
+  end
+
   @doc """
     Returns a signature of the `MessagePassed` event emitted by `L2ToL1MessagePasser` contract
     in form of 0x-prefixed string.
@@ -530,6 +606,13 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
 
   defp mantle_mode? do
     Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] == true
+  end
+
+  # Only the L2ToL1MessagePasser's own MessagePassed events describe a withdrawal: any contract the withdrawal
+  # transaction calls can emit an event with the same signature and topics.
+  defp message_passer do
+    Application.get_env(:indexer, Indexer.Fetcher.Optimism.Withdrawal, [])[:message_passer] ||
+      "0x4200000000000000000000000000000000000016"
   end
 
   @doc """

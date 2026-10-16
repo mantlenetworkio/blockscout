@@ -5,7 +5,8 @@ defmodule Explorer.Chain.Optimism.Deposit do
 
   import Explorer.Chain, only: [default_paging_options: 0, select_repo: 1]
 
-  alias Explorer.Chain.{Hash, Transaction}
+  alias Explorer.Chain.{Data, Hash, Transaction}
+  alias Explorer.Chain.Optimism.MessageRelay
   alias Explorer.PagingOptions
 
   @required_attrs ~w(l1_block_number l1_transaction_hash l1_transaction_origin l2_transaction_hash)a
@@ -73,6 +74,9 @@ defmodule Explorer.Chain.Optimism.Deposit do
 
   Accepts an optional `:address_hash` filter (`Hash.Address.t()` or `nil`) which
   restricts the result to deposits whose L1 origin address matches the given hash.
+
+  Each item also carries the L2 relay result of its message (`message_hash`, `relay_status`, `relay_transaction_hash`)
+  and what a replay needs (`msg_data`, `msg_target_address_hash`), all read with one query per page.
   """
   @spec list :: [__MODULE__.t()]
   def list(options \\ []) do
@@ -95,7 +99,9 @@ defmodule Explorer.Chain.Optimism.Deposit do
               l1_transaction_hash: d.l1_transaction_hash,
               l1_transaction_origin: d.l1_transaction_origin,
               l2_transaction_hash: d.l2_transaction_hash,
-              l2_transaction_gas_limit: t.gas
+              l2_transaction_gas_limit: t.gas,
+              l2_transaction_to_address_hash: t.to_address_hash,
+              l2_transaction_input: t.input
             },
             order_by: [desc: d.l1_block_number, desc: d.l2_transaction_hash]
           )
@@ -105,6 +111,7 @@ defmodule Explorer.Chain.Optimism.Deposit do
         |> page_deposits(paging_options)
         |> limit(^paging_options.page_size)
         |> select_repo(options).all(timeout: :infinity)
+        |> with_relays(options)
     end
   end
 
@@ -135,6 +142,57 @@ defmodule Explorer.Chain.Optimism.Deposit do
     |> filter_by_address(address_hash)
     |> select_repo(options).aggregate(:count)
   end
+
+  # Adds the L2 relay result of each deposit (one query for the page) and, for deposits relayed by the
+  # L2CrossDomainMessenger, the replay transaction data: the L2 transaction input and its target.
+  @spec with_relays([map()], keyword()) :: [map()]
+  defp with_relays(deposits, options) do
+    messenger = MessageRelay.l2_cross_domain_messenger()
+    message_hashes = Enum.map(deposits, &relay_message_hash(&1, messenger))
+
+    summaries =
+      message_hashes
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> MessageRelay.summaries(:l2, options)
+
+    deposits
+    |> Enum.zip(message_hashes)
+    |> Enum.map(fn {deposit, message_hash} ->
+      summary = Map.get(summaries, message_hash, %{})
+
+      {msg_data, msg_target_address_hash} =
+        if is_nil(message_hash),
+          do: {nil, nil},
+          else: {deposit.l2_transaction_input, deposit.l2_transaction_to_address_hash}
+
+      deposit
+      |> Map.drop([:l2_transaction_input, :l2_transaction_to_address_hash])
+      |> Map.merge(%{
+        message_hash: message_hash,
+        relay_status: summary[:status],
+        relay_transaction_hash: summary[:transaction_hash],
+        msg_data: msg_data,
+        msg_target_address_hash: msg_target_address_hash
+      })
+    end)
+  end
+
+  # The L2 transaction of a deposit relayed by the L2CrossDomainMessenger calls its relayMessage, so the input is the
+  # calldata whose keccak256 the messenger emits.
+  defp relay_message_hash(
+         %{
+           l2_transaction_to_address_hash: %Hash{} = to_address_hash,
+           l2_transaction_input: %Data{bytes: input}
+         },
+         messenger
+       ) do
+    if Hash.to_string(to_address_hash) == messenger do
+      MessageRelay.message_hash(input)
+    end
+  end
+
+  defp relay_message_hash(_deposit, _messenger), do: nil
 
   defp filter_by_address(query, nil), do: query
 

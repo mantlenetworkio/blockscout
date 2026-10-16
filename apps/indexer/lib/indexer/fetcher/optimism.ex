@@ -73,23 +73,27 @@ defmodule Indexer.Fetcher.Optimism do
   end
 
   @doc """
-    Does initializations for `Indexer.Fetcher.Optimism.WithdrawalEvent`, `Indexer.Fetcher.Optimism.OutputRoot`, or
-    `Indexer.Fetcher.Optimism.Deposit` module. Contains common code used by these modules.
+    Does initializations for `Indexer.Fetcher.Optimism.WithdrawalEvent`, `Indexer.Fetcher.Optimism.OutputRoot`,
+    `Indexer.Fetcher.Optimism.MessageRelayL1`, or `Indexer.Fetcher.Optimism.Deposit` module. Contains common code
+    used by these modules.
 
     ## Parameters
-    - `output_oracle`: An address of L2OutputOracle contract on L1.
-                       Must be `nil` if the `caller` is not `Indexer.Fetcher.Optimism.OutputRoot` module.
+    - `output_oracle`: The contract the caller scans when it is not the OptimismPortal: L2OutputOracle for
+                       `Indexer.Fetcher.Optimism.OutputRoot`, L1CrossDomainMessenger for
+                       `Indexer.Fetcher.Optimism.MessageRelayL1`. Must be `nil` for the other callers.
     - `caller`: The module that called this function.
 
     ## Returns
     - A resulting map for the `handle_continue` handler of the calling module.
   """
   @spec init_continue(binary() | nil, module()) :: {:noreply, map()} | {:stop, :normal, %{}}
+  # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   def init_continue(output_oracle, caller)
       when caller in [
              Indexer.Fetcher.Optimism.Deposit,
              Indexer.Fetcher.Optimism.WithdrawalEvent,
-             Indexer.Fetcher.Optimism.OutputRoot
+             Indexer.Fetcher.Optimism.OutputRoot,
+             Indexer.Fetcher.Optimism.MessageRelayL1
            ] do
     if caller != Indexer.Fetcher.Optimism.OutputRoot do
       # two seconds pause needed to avoid exceeding Supervisor restart intensity when DB issues
@@ -103,6 +107,9 @@ defmodule Indexer.Fetcher.Optimism do
 
         Indexer.Fetcher.Optimism.WithdrawalEvent ->
           {"Optimism Portal", "op_withdrawal_events", "Withdrawals L1"}
+
+        Indexer.Fetcher.Optimism.MessageRelayL1 ->
+          {"L1CrossDomainMessenger", "op_message_relays", "Message relays L1"}
 
         _ ->
           {"Output Oracle", "op_output_roots", "Output Roots"}
@@ -128,7 +135,7 @@ defmodule Indexer.Fetcher.Optimism do
            {:l1_transaction_not_found, !is_nil(last_l1_transaction_hash) && is_nil(last_l1_transaction)},
          {:ok, block_check_interval, last_safe_block} <- Helper.get_block_check_interval(json_rpc_named_arguments) do
       contract_address =
-        if caller == Indexer.Fetcher.Optimism.OutputRoot do
+        if caller in [Indexer.Fetcher.Optimism.OutputRoot, Indexer.Fetcher.Optimism.MessageRelayL1] do
           output_oracle
         else
           optimism_portal

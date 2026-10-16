@@ -173,7 +173,12 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
             "l1_block_timestamp" => deposit.l1_block_timestamp,
             "l1_transaction_hash" => deposit.l1_transaction_hash,
             "l1_transaction_origin" => deposit.l1_transaction_origin,
-            "l2_transaction_gas_limit" => deposit.l2_transaction_gas_limit
+            "l2_transaction_gas_limit" => deposit.l2_transaction_gas_limit,
+            "message_hash" => deposit.message_hash,
+            "relay_status" => deposit_relay_status(deposit.relay_status),
+            "relay_transaction_hash" => deposit.relay_transaction_hash,
+            "msg_data" => deposit.msg_data,
+            "msg_target_address_hash" => deposit.msg_target_address_hash
           }
         end),
       next_page_params: next_page_params
@@ -247,7 +252,9 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
             "status" => status,
             "l1_transaction_hash" => w.l1_transaction_hash,
             "challenge_period_end" => challenge_period_end,
-            "portal_contract_address_hash" => portal_contract_address_hash
+            "portal_contract_address_hash" => portal_contract_address_hash,
+            "message_hash" => w.message_hash,
+            "relay_transaction_hash" => w.relay_transaction_hash
           }
           |> Map.merge(msg_fields)
         end),
@@ -586,6 +593,10 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
       |> Map.put("msg_data", "0x" <> Base.encode16(data, case: :lower))
     end
   end
+
+  defp deposit_relay_status(:relayed), do: "Relayed"
+  defp deposit_relay_status(:failed), do: "Relay failed"
+  defp deposit_relay_status(nil), do: nil
 
   defp mantle_mode? do
     Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] == true

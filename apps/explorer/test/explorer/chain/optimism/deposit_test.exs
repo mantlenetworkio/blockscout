@@ -5,7 +5,7 @@ defmodule Explorer.Chain.Optimism.DepositTest do
     use Explorer.DataCase, async: false
 
     alias Explorer.Chain.Optimism.Deposit
-    alias Explorer.{PagingOptions, QueryPlanHelper}
+    alias Explorer.{PagingOptions, QueryPlanHelper, TestHelper}
 
     describe "list/1" do
       test "returns all deposits when :address_hash is not provided" do
@@ -113,6 +113,78 @@ defmodule Explorer.Chain.Optimism.DepositTest do
                  ~r/op_deposits_l1_transaction_origin_index[^\n]*\n\s*Index Cond: [^\n]*ROW\(l1_block_number, l2_transaction_hash\) < ROW/
 
         assert count_plan =~ "op_deposits_l1_transaction_origin_index"
+      end
+    end
+
+    describe "relay status" do
+      test "a deposit relayed by the messenger carries its message and relay result" do
+        deposit = insert_op_deposit_with_message(calldata: op_relay_message_calldata())
+        replay = transaction_hash()
+
+        insert(:op_message_relay,
+          message_hash: TestHelper.topic(op_relay_message_hash()),
+          event_type: :FailedRelayedMessage,
+          transaction_hash: deposit.l2_transaction_hash,
+          chain: :l2,
+          block_number: 10
+        )
+
+        insert(:op_message_relay,
+          message_hash: TestHelper.topic(op_relay_message_hash()),
+          event_type: :RelayedMessage,
+          transaction_hash: replay,
+          chain: :l2,
+          block_number: 15
+        )
+
+        assert [item] = Deposit.list()
+        assert to_string(item.message_hash) == op_relay_message_hash()
+        assert {item.relay_status, item.relay_transaction_hash} == {:relayed, replay}
+        assert to_string(item.msg_data) == op_relay_message_calldata()
+        assert to_string(item.msg_target_address_hash) == "0x4200000000000000000000000000000000000007"
+      end
+
+      test "a deposit not sent to the messenger has no message fields" do
+        insert_op_deposit_with_message(
+          calldata: op_relay_message_calldata(),
+          to: "0x00000000000000000000000000000000000000bb"
+        )
+
+        assert [item] = Deposit.list()
+
+        assert {item.message_hash, item.relay_status, item.msg_data, item.msg_target_address_hash} ==
+                 {nil, nil, nil, nil}
+      end
+
+      test "a deposit without an indexed relay has no relay status yet" do
+        insert_op_deposit_with_message(calldata: op_relay_message_calldata())
+
+        assert [item] = Deposit.list()
+        assert to_string(item.message_hash) == op_relay_message_hash()
+        assert {item.relay_status, item.relay_transaction_hash} == {nil, nil}
+      end
+
+      test "looks the relays of a whole page up with one query" do
+        for _ <- 1..3, do: insert_op_deposit_with_message(calldata: op_relay_message_calldata() <> "00")
+
+        handler_id = "op-deposit-relay-queries-#{System.unique_integer([:positive])}"
+        test_pid = self()
+
+        :ok =
+          :telemetry.attach(
+            handler_id,
+            [:explorer, :repo, :query],
+            fn _event, _measurements, metadata, _config ->
+              if String.contains?(metadata.query, ~s("op_message_relays")), do: send(test_pid, :relay_query)
+            end,
+            nil
+          )
+
+        on_exit(fn -> :telemetry.detach(handler_id) end)
+
+        assert length(Deposit.list()) == 3
+        assert_received :relay_query
+        refute_received :relay_query
       end
     end
 
