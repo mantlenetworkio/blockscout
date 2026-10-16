@@ -144,10 +144,18 @@ defmodule Explorer.Chain.Optimism.Deposit do
 
   defp page_deposits(query, %PagingOptions{key: nil}), do: query
 
+  # A row comparison keeps the filters added before it (`or_where` would OR with them) and lets Postgres start the
+  # index scan right at the page key.
   defp page_deposits(query, %PagingOptions{key: {block_number, l2_transaction_hash}}) do
     from(d in query,
-      where: d.l1_block_number < ^block_number,
-      or_where: d.l1_block_number == ^block_number and d.l2_transaction_hash < ^l2_transaction_hash
+      where:
+        fragment(
+          "(?, ?) < (?, ?)",
+          d.l1_block_number,
+          d.l2_transaction_hash,
+          type(^block_number, :integer),
+          type(^l2_transaction_hash, Hash.Full)
+        )
     )
   end
 end

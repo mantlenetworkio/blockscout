@@ -5,6 +5,7 @@ defmodule Explorer.Chain.Optimism.DepositTest do
     use Explorer.DataCase, async: false
 
     alias Explorer.Chain.Optimism.Deposit
+    alias Explorer.{PagingOptions, QueryPlanHelper}
 
     describe "list/1" do
       test "returns all deposits when :address_hash is not provided" do
@@ -45,6 +46,27 @@ defmodule Explorer.Chain.Optimism.DepositTest do
 
         assert length(result_with_nil) == length(result_without_opt)
       end
+
+      test "pages stay within :address_hash when other addresses deposit in the same L1 block" do
+        origin = address_hash()
+
+        # transaction_hash/0 is a sequence, so the L2 hashes grow in insertion order
+        oldest = insert(:op_deposit, l1_transaction_origin: origin, l1_block_number: 100)
+        insert(:op_deposit, l1_transaction_origin: address_hash(), l1_block_number: 100)
+        newest = insert(:op_deposit, l1_transaction_origin: origin, l1_block_number: 100)
+
+        assert [%{l2_transaction_hash: first_page}] =
+                 Deposit.list(address_hash: origin, paging_options: %PagingOptions{page_size: 1})
+
+        assert first_page == newest.l2_transaction_hash
+
+        second_page_options = %PagingOptions{page_size: 1, key: {100, first_page}}
+
+        assert [%{l2_transaction_hash: second_page}] =
+                 Deposit.list(address_hash: origin, paging_options: second_page_options)
+
+        assert second_page == oldest.l2_transaction_hash
+      end
     end
 
     describe "count/1" do
@@ -72,6 +94,45 @@ defmodule Explorer.Chain.Optimism.DepositTest do
 
         assert Deposit.count(address_hash: other_address.hash) == 0
       end
+    end
+
+    describe "query plans" do
+      test "an address page and its count use the origin index" do
+        insert_unrelated_deposits(1_000)
+        origin = address_hash()
+        deposit = insert(:op_deposit, l1_transaction_origin: origin)
+        page_options = %PagingOptions{page_size: 50, key: {deposit.l1_block_number, deposit.l2_transaction_hash}}
+
+        list_plan =
+          QueryPlanHelper.plan("op_deposits", fn -> Deposit.list(address_hash: origin, paging_options: page_options) end)
+
+        count_plan = QueryPlanHelper.plan("op_deposits", fn -> Deposit.count(address_hash: origin) end)
+
+        # the page key is part of the index condition, so the scan starts right at it
+        assert list_plan =~
+                 ~r/op_deposits_l1_transaction_origin_index[^\n]*\n\s*Index Cond: [^\n]*ROW\(l1_block_number, l2_transaction_hash\) < ROW/
+
+        assert count_plan =~ "op_deposits_l1_transaction_origin_index"
+      end
+    end
+
+    # Deposits of other origins, so that the planner weighs the origin index against a table that is not empty
+    defp insert_unrelated_deposits(count) do
+      now = DateTime.utc_now()
+
+      rows =
+        for block_number <- 1..count do
+          %{
+            l1_block_number: block_number,
+            l1_transaction_hash: transaction_hash(),
+            l1_transaction_origin: address_hash(),
+            l2_transaction_hash: transaction_hash(),
+            inserted_at: now,
+            updated_at: now
+          }
+        end
+
+      Repo.insert_all(Deposit, rows)
     end
   end
 end
