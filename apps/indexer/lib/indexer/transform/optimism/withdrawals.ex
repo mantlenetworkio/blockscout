@@ -5,7 +5,7 @@ defmodule Indexer.Transform.Optimism.Withdrawals do
 
   require Logger
 
-  alias Explorer.Chain.Optimism.Withdrawal
+  alias Explorer.Chain.Optimism.{BridgeMessage, Withdrawal}
   alias Indexer.Fetcher.Optimism.Withdrawal, as: OptimismWithdrawal
   alias Indexer.Helper
 
@@ -22,6 +22,7 @@ defmodule Indexer.Transform.Optimism.Withdrawals do
            true <- Helper.address_correct?(message_passer) do
         message_passer = String.downcase(message_passer)
         message_passed_event = Withdrawal.message_passed_event()
+        bridges = BridgeMessage.bridges()
 
         logs
         |> Enum.filter(fn log ->
@@ -30,7 +31,16 @@ defmodule Indexer.Transform.Optimism.Withdrawals do
         end)
         |> Enum.map(fn log ->
           Logger.info("Withdrawal message found, nonce: #{log.second_topic}.")
-          OptimismWithdrawal.event_to_withdrawal(log.second_topic, log.data, log.transaction_hash, log.block_number)
+
+          OptimismWithdrawal.event_to_withdrawal(
+            log.second_topic,
+            log.third_topic,
+            log.fourth_topic,
+            log.data,
+            log.transaction_hash,
+            log.block_number,
+            bridges
+          )
         end)
       else
         true ->

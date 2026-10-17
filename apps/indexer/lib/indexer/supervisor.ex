@@ -190,6 +190,10 @@ defmodule Indexer.Supervisor do
         ),
         configure(Indexer.Fetcher.Optimism.WithdrawalEvent.Supervisor, [[memory_monitor: memory_monitor]]),
         configure(Indexer.Fetcher.Optimism.MessageRelayL1.Supervisor, [[memory_monitor: memory_monitor]]),
+        configure(
+          Indexer.Fetcher.Optimism.LegacyBridge.Supervisor,
+          [[memory_monitor: memory_monitor, json_rpc_named_arguments: json_rpc_named_arguments]]
+        ),
         {
           Indexer.Fetcher.Optimism.MessageRelayL2.Supervisor,
           [[memory_monitor: memory_monitor, json_rpc_named_arguments: json_rpc_named_arguments]]

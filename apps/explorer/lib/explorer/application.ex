@@ -159,7 +159,6 @@ defmodule Explorer.Application do
         configure(Explorer.TokenInstanceOwnerAddressMigration.Supervisor),
         configure_sc_microservice(Explorer.Chain.Fetcher.LookUpSmartContractSourcesOnDemand),
         configure(Explorer.Chain.Cache.Counters.Rootstock.LockedBTCCount),
-        configure(Explorer.Chain.Cache.OptimismFinalizationPeriod),
         configure(Explorer.Chain.Cache.CeloEpochs),
         configure_mode_dependent_process(Explorer.Migrator.TransactionsDenormalization, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.AddressCurrentTokenBalanceTokenType, :indexer),
@@ -180,6 +179,8 @@ defmodule Explorer.Application do
         |> configure_mode_dependent_process(:indexer)
         |> configure_multichain_search_microservice(),
         configure_mode_dependent_process(Explorer.Migrator.ArbitrumDaRecordsNormalization, :indexer),
+        configure_mode_dependent_process(Explorer.Migrator.OptimismWithdrawalTransfers, :indexer),
+        configure_mode_dependent_process(Explorer.Migrator.OptimismDepositTransfers, :indexer),
         configure_mode_dependent_process(Explorer.Migrator.ShrinkInternalTransactions, :indexer),
         configure_chain_type_dependent_process(Explorer.Chain.Cache.Counters.Blackfort.ValidatorsCount, :blackfort),
         configure_chain_type_dependent_process(Explorer.Chain.Cache.Counters.Stability.ValidatorsCount, :stability),

@@ -23,7 +23,6 @@ defmodule BlockScoutWeb.Mixfile do
       xref: [
         exclude: [
           Explorer.Chain.Beacon.Reader,
-          Explorer.Chain.Cache.OptimismFinalizationPeriod,
           Explorer.Chain.Optimism.OutputRoot,
           Explorer.Chain.Optimism.WithdrawalEvent,
           Explorer.Chain.ZkSync.Reader,

@@ -1631,34 +1631,35 @@ defmodule Explorer.Factory do
     Options: `:calldata` (the message `data`, 0x string, default a bare `relayMessage` selector), `:sender` (the
     `MessagePassed` sender, default the L2CrossDomainMessenger predeploy), `:emitter` (the contract that emits the
     log, default the L2ToL1MessagePasser predeploy), `:finalized_in` (an L1 transaction hash; adds a
-    `WithdrawalFinalized` event).
+    `WithdrawalFinalized` event), `:message_passed` (a fixture's `MessagePassed` topics and data, used verbatim; the
+    withdrawal takes its nonce from them), `:transaction` (an L2 transaction already in a block, to put several
+    withdrawals in one transaction).
   """
   def insert_op_withdrawal_with_message(opts \\ []) do
     emitter = get_or_insert_address(Keyword.get(opts, :emitter, "0x4200000000000000000000000000000000000016"))
-    block = insert(:block)
-    transaction = :transaction |> insert() |> with_block(block)
-    nonce = sequence("op_withdrawal_with_message_nonce", & &1)
-    withdrawal_hash = transaction_hash()
-    {:ok, calldata} = Data.cast(Keyword.get(opts, :calldata, "0xff8daf15"))
 
-    {values, types} =
-      if Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] do
-        {[0, 0, 0, calldata.bytes, withdrawal_hash.bytes],
-         [{:uint, 256}, {:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}]}
-      else
-        {[0, 0, calldata.bytes, withdrawal_hash.bytes], [{:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}]}
+    {block, transaction} =
+      case opts[:transaction] do
+        nil ->
+          block = insert(:block)
+          {block, :transaction |> insert() |> with_block(block)}
+
+        transaction ->
+          {Repo.get_by!(Block, hash: transaction.block_hash), transaction}
       end
+
+    {nonce, topics, data, withdrawal_hash} = message_passed_log(opts)
 
     insert(:log,
       block: block,
       block_number: block.number,
       transaction: transaction,
       address: emitter,
-      first_topic: full_hash(OptimismWithdrawal.message_passed_event()),
-      second_topic: full_hash("0x" <> String.pad_leading(Integer.to_string(nonce, 16), 64, "0")),
-      third_topic: full_hash(address_topic(Keyword.get(opts, :sender, "0x4200000000000000000000000000000000000007"))),
-      fourth_topic: full_hash(address_topic("0x0000000000000000000000000000000000000001")),
-      data: %Data{bytes: ABI.TypeEncoder.encode(values, types)}
+      first_topic: topics.first,
+      second_topic: topics.second,
+      third_topic: topics.third,
+      fourth_topic: topics.fourth,
+      data: data
     )
 
     withdrawal =
@@ -1693,13 +1694,55 @@ defmodule Explorer.Factory do
   def insert_op_deposit_with_message(opts \\ []) do
     to_address = get_or_insert_address(Keyword.get(opts, :to, "0x4200000000000000000000000000000000000007"))
     {:ok, input} = Data.cast(Keyword.get(opts, :calldata, "0xff8daf15"))
+    from = if opts[:from], do: [from_address: get_or_insert_address(opts[:from])], else: []
 
     l2_transaction =
       :transaction
-      |> insert(to_address: to_address, input: input)
+      |> insert([to_address: to_address, input: input] ++ from)
       |> with_block(insert(:block), status: :ok)
 
     insert(:op_deposit, l2_transaction: l2_transaction, l2_transaction_hash: l2_transaction.hash)
+  end
+
+  # The nonce, topics, data and withdrawal hash of a withdrawal's MessagePassed log: a fixture's verbatim (with the
+  # withdrawal hash its data carries), or built from the options in the layout of the configured mode
+  defp message_passed_log(opts) do
+    case opts[:message_passed] do
+      %{"topics" => [event, "0x" <> nonce = nonce_topic, sender, target], "data" => data} ->
+        {:ok, data} = Data.cast(data)
+        {:ok, withdrawal_hash} = Hash.Full.cast(OptimismWithdrawal.parse_message_passed_data(data).hash)
+
+        topics = %{
+          first: full_hash(event),
+          second: full_hash(nonce_topic),
+          third: full_hash(sender),
+          fourth: full_hash(target)
+        }
+
+        {String.to_integer(nonce, 16), topics, data, withdrawal_hash}
+
+      nil ->
+        withdrawal_hash = transaction_hash()
+        nonce = sequence("op_withdrawal_with_message_nonce", & &1)
+        {:ok, calldata} = Data.cast(Keyword.get(opts, :calldata, "0xff8daf15"))
+
+        {values, types} =
+          if Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] do
+            {[0, 0, 0, calldata.bytes, withdrawal_hash.bytes],
+             [{:uint, 256}, {:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}]}
+          else
+            {[0, 0, calldata.bytes, withdrawal_hash.bytes], [{:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}]}
+          end
+
+        topics = %{
+          first: full_hash(OptimismWithdrawal.message_passed_event()),
+          second: full_hash("0x" <> String.pad_leading(Integer.to_string(nonce, 16), 64, "0")),
+          third: full_hash(address_topic(Keyword.get(opts, :sender, "0x4200000000000000000000000000000000000007"))),
+          fourth: full_hash(address_topic("0x0000000000000000000000000000000000000001"))
+        }
+
+        {nonce, topics, %Data{bytes: ABI.TypeEncoder.encode(values, types)}, withdrawal_hash}
+    end
   end
 
   defp get_or_insert_address(hash_string) do

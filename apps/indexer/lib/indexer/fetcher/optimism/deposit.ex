@@ -15,7 +15,7 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
 
   alias Explorer.{Chain, Repo}
   alias Explorer.Chain.Events.Publisher
-  alias Explorer.Chain.Optimism.Deposit
+  alias Explorer.Chain.Optimism.{BridgeMessage, Deposit}
   alias Indexer.Fetcher.Optimism
   alias Indexer.Helper
   alias Indexer.RollupReorgMonitorQueue
@@ -196,33 +196,40 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
         {new_timestamps_acc, new_origins_acc}
       end)
 
-    Enum.map(events, &event_to_deposit(&1, timestamps, origins, transaction_type))
+    bridges = BridgeMessage.bridges()
+
+    Enum.map(events, &event_to_deposit(&1, timestamps, origins, transaction_type, bridges))
   end
 
-  # Prepares `TransactionDeposited` event to be imported to database.
-  #
-  # ## Parameters
-  # - An event map outlining a `TransactionDeposited` event got from `eth_getLogs` response.
-  # - `timestamps`: A `block_number -> timestamp` map to get the timestamp of the event from its block info.
-  # - `origins`: A `transaction_hash -> origin` map to get the origin address of the event transaction.
-  # - `transaction_type`: L1 transaction type to correctly calculate the corresponding L2 transaction hash.
-  #
-  # ## Returns
-  # - A map with the event info ready to be imported to database.
-  @spec event_to_deposit(map(), map(), map(), non_neg_integer()) :: map()
-  defp event_to_deposit(
-         %{
-           "blockHash" => "0x" <> stripped_block_hash,
-           "blockNumber" => block_number_quantity,
-           "transactionHash" => transaction_hash,
-           "logIndex" => "0x" <> stripped_log_index,
-           "topics" => [_, @address_prefix <> from_stripped, @address_prefix <> to_stripped, _],
-           "data" => opaque_data
-         },
-         timestamps,
-         origins,
-         transaction_type
-       ) do
+  @doc """
+    Prepares a `TransactionDeposited` event to be imported to database, with the bridge transfer its message carries.
+
+    ## Parameters
+    - An event map outlining a `TransactionDeposited` event got from `eth_getLogs` response.
+    - `timestamps`: A `block_number -> timestamp` map to get the timestamp of the event from its block info.
+    - `origins`: A `transaction_hash -> origin` map to get the origin address of the event transaction.
+    - `transaction_type`: L1 transaction type to correctly calculate the corresponding L2 transaction hash.
+    - `bridges`: The addresses returned by `Explorer.Chain.Optimism.BridgeMessage.bridges/0`. With `nil` the transfer
+      is not decoded.
+
+    ## Returns
+    - A map with the event info ready to be imported to database.
+  """
+  @spec event_to_deposit(map(), map(), map(), non_neg_integer(), BridgeMessage.bridges() | nil) :: map()
+  def event_to_deposit(
+        %{
+          "blockHash" => "0x" <> stripped_block_hash,
+          "blockNumber" => block_number_quantity,
+          "transactionHash" => transaction_hash,
+          "logIndex" => "0x" <> stripped_log_index,
+          "topics" => [_, @address_prefix <> from_stripped, @address_prefix <> to_stripped, _],
+          "data" => opaque_data
+        },
+        timestamps,
+        origins,
+        transaction_type,
+        bridges
+      ) do
     {_, prefixed_block_hash} = (String.pad_leading("", 64, "0") <> stripped_block_hash) |> String.split_at(-64)
     {_, prefixed_log_index} = (String.pad_leading("", 64, "0") <> stripped_log_index) |> String.split_at(-64)
 
@@ -239,7 +246,9 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
 
     is_system = <<0>>
 
-    rlp_encoded =
+    # `message` holds what the L2 transaction delivers to `to`: its calldata and the values it transfers (`Mint` and
+    # `EthValue` are minted to `from` first)
+    {rlp_encoded, message} =
       if mantle_mode?() do
         {mnt_mint, mnt_value, eth_mint, eth_tx_value, gas_limit, data} = parse_opaque_data_mantle(opaque_data)
 
@@ -272,25 +281,26 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
             base_fields
           end
 
-        ExRLP.encode(fields, encoding: :hex)
+        {ExRLP.encode(fields, encoding: :hex),
+         %{data: data, mnt_value: :binary.decode_unsigned(mnt_value), eth_value: :binary.decode_unsigned(eth_tx_value)}}
       else
         {msg_value, value, gas_limit, data} = parse_opaque_data_standard(opaque_data)
 
         # Standard OP DepositTx RLP (8 fields):
         #   [SourceHash, From, To, Mint, Value, Gas, IsSystemTx, Data]
-        ExRLP.encode(
-          [
-            source_hash,
-            from_stripped |> Base.decode16!(case: :mixed),
-            to_stripped |> Base.decode16!(case: :mixed),
-            msg_value |> String.replace_leading(<<0>>, <<>>),
-            value |> String.replace_leading(<<0>>, <<>>),
-            gas_limit |> String.replace_leading(<<0>>, <<>>),
-            is_system |> String.replace_leading(<<0>>, <<>>),
-            data
-          ],
-          encoding: :hex
-        )
+        {ExRLP.encode(
+           [
+             source_hash,
+             from_stripped |> Base.decode16!(case: :mixed),
+             to_stripped |> Base.decode16!(case: :mixed),
+             msg_value |> String.replace_leading(<<0>>, <<>>),
+             value |> String.replace_leading(<<0>>, <<>>),
+             gas_limit |> String.replace_leading(<<0>>, <<>>),
+             is_system |> String.replace_leading(<<0>>, <<>>),
+             data
+           ],
+           encoding: :hex
+         ), %{data: data, mnt_value: nil, eth_value: :binary.decode_unsigned(value)}}
       end
 
     transaction_type =
@@ -307,13 +317,21 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
 
     block_number = quantity_to_integer(block_number_quantity)
 
-    %{
-      l1_block_number: block_number,
-      l1_block_timestamp: Map.get(timestamps, block_number),
-      l1_transaction_hash: transaction_hash,
-      l1_transaction_origin: Map.get(origins, String.downcase(transaction_hash)),
-      l2_transaction_hash: l2_transaction_hash
-    }
+    transfer =
+      message
+      |> Map.merge(%{from: "0x" <> String.downcase(from_stripped), to: "0x" <> String.downcase(to_stripped)})
+      |> BridgeMessage.decode_deposit(bridges)
+
+    Map.merge(
+      %{
+        l1_block_number: block_number,
+        l1_block_timestamp: Map.get(timestamps, block_number),
+        l1_transaction_hash: transaction_hash,
+        l1_transaction_origin: Map.get(origins, String.downcase(transaction_hash)),
+        l2_transaction_hash: l2_transaction_hash
+      },
+      transfer
+    )
   end
 
   # Parses Mantle opaqueData (4×uint256) → returns all 6 values for 10-field RLP.

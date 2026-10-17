@@ -79,6 +79,9 @@ defmodule Explorer.Chain.Import.Runner.Optimism.Withdrawals do
     {:ok, inserted}
   end
 
+  # A re-import of the same withdrawal without a transfer (decoding not configured) keeps the stored one, and one with a
+  # transfer replaces it as a whole, so the transfer columns always come from a single decoding. A nonce re-imported
+  # for another withdrawal (another hash, after a reorg) never keeps the old transfer.
   defp default_on_conflict do
     from(
       withdrawal in OptimismWithdrawal,
@@ -88,6 +91,60 @@ defmodule Explorer.Chain.Import.Runner.Optimism.Withdrawals do
           hash: fragment("EXCLUDED.hash"),
           l2_transaction_hash: fragment("EXCLUDED.l2_transaction_hash"),
           l2_block_number: fragment("EXCLUDED.l2_block_number"),
+          message_hash:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL AND EXCLUDED.hash = ? THEN ? ELSE EXCLUDED.message_hash END",
+              withdrawal.hash,
+              withdrawal.message_hash
+            ),
+          transfer_type:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL AND EXCLUDED.hash = ? THEN ? ELSE EXCLUDED.transfer_type END",
+              withdrawal.hash,
+              withdrawal.transfer_type
+            ),
+          transfer_from_address_hash:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL AND EXCLUDED.hash = ? THEN ? ELSE EXCLUDED.transfer_from_address_hash END",
+              withdrawal.hash,
+              withdrawal.transfer_from_address_hash
+            ),
+          transfer_to_address_hash:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL AND EXCLUDED.hash = ? THEN ? ELSE EXCLUDED.transfer_to_address_hash END",
+              withdrawal.hash,
+              withdrawal.transfer_to_address_hash
+            ),
+          l1_token_address_hash:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL AND EXCLUDED.hash = ? THEN ? ELSE EXCLUDED.l1_token_address_hash END",
+              withdrawal.hash,
+              withdrawal.l1_token_address_hash
+            ),
+          l2_token_address_hash:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL AND EXCLUDED.hash = ? THEN ? ELSE EXCLUDED.l2_token_address_hash END",
+              withdrawal.hash,
+              withdrawal.l2_token_address_hash
+            ),
+          transfer_amount:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL AND EXCLUDED.hash = ? THEN ? ELSE EXCLUDED.transfer_amount END",
+              withdrawal.hash,
+              withdrawal.transfer_amount
+            ),
+          mnt_value:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL AND EXCLUDED.hash = ? THEN ? ELSE EXCLUDED.mnt_value END",
+              withdrawal.hash,
+              withdrawal.mnt_value
+            ),
+          eth_value:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL AND EXCLUDED.hash = ? THEN ? ELSE EXCLUDED.eth_value END",
+              withdrawal.hash,
+              withdrawal.eth_value
+            ),
           inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", withdrawal.inserted_at),
           updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", withdrawal.updated_at)
         ]
@@ -98,7 +155,19 @@ defmodule Explorer.Chain.Import.Runner.Optimism.Withdrawals do
           withdrawal.hash,
           withdrawal.l2_transaction_hash,
           withdrawal.l2_block_number
-        )
+        ) or
+          fragment(
+            "EXCLUDED.transfer_type IS NOT NULL AND (EXCLUDED.message_hash, EXCLUDED.transfer_type, EXCLUDED.transfer_from_address_hash, EXCLUDED.transfer_to_address_hash, EXCLUDED.l1_token_address_hash, EXCLUDED.l2_token_address_hash, EXCLUDED.transfer_amount, EXCLUDED.mnt_value, EXCLUDED.eth_value) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            withdrawal.message_hash,
+            withdrawal.transfer_type,
+            withdrawal.transfer_from_address_hash,
+            withdrawal.transfer_to_address_hash,
+            withdrawal.l1_token_address_hash,
+            withdrawal.l2_token_address_hash,
+            withdrawal.transfer_amount,
+            withdrawal.mnt_value,
+            withdrawal.eth_value
+          )
     )
   end
 end

@@ -4,6 +4,7 @@ defmodule Explorer.Chain.Optimism.DepositTest do
   if @chain_type == :optimism do
     use Explorer.DataCase, async: false
 
+    alias Explorer.Chain.Cache.BackgroundMigrations
     alias Explorer.Chain.Optimism.Deposit
     alias Explorer.{PagingOptions, QueryPlanHelper, TestHelper}
 
@@ -67,6 +68,14 @@ defmodule Explorer.Chain.Optimism.DepositTest do
 
         assert second_page == oldest.l2_transaction_hash
       end
+
+      test "until the bridge transfer backfill completes, the recipient of a deposit does not see it" do
+        recipient = address_hash()
+        insert(:op_deposit, transfer_to_address_hash: recipient)
+
+        assert Deposit.list(address_hash: recipient) == []
+        assert Deposit.count(address_hash: recipient) == 0
+      end
     end
 
     describe "count/1" do
@@ -113,6 +122,107 @@ defmodule Explorer.Chain.Optimism.DepositTest do
                  ~r/op_deposits_l1_transaction_origin_index[^\n]*\n\s*Index Cond: [^\n]*ROW\(l1_block_number, l2_transaction_hash\) < ROW/
 
         assert count_plan =~ "op_deposits_l1_transaction_origin_index"
+      end
+    end
+
+    describe "after the bridge transfer backfill" do
+      setup do
+        BackgroundMigrations.set_optimism_deposit_transfers_finished(true)
+        on_exit(fn -> BackgroundMigrations.set_optimism_deposit_transfers_finished(false) end)
+      end
+
+      test "an address sees the deposits it sent and the ones it received, each once" do
+        address = address_hash()
+
+        sent =
+          insert(:op_deposit,
+            transfer_from_address_hash: address,
+            transfer_to_address_hash: address_hash(),
+            l1_block_number: 30
+          )
+
+        received =
+          insert(:op_deposit,
+            transfer_from_address_hash: address_hash(),
+            transfer_to_address_hash: address,
+            l1_block_number: 20
+          )
+
+        to_self =
+          insert(:op_deposit,
+            transfer_from_address_hash: address,
+            transfer_to_address_hash: address,
+            l1_block_number: 10
+          )
+
+        # the L1 origin alone no longer matches
+        insert(:op_deposit, l1_transaction_origin: address)
+
+        assert Enum.map(Deposit.list(address_hash: address), & &1.l2_transaction_hash) ==
+                 Enum.map([sent, received, to_self], & &1.l2_transaction_hash)
+
+        assert Deposit.count(address_hash: address) == 3
+      end
+
+      test "the count of an address includes its deposits whose L2 transaction is not indexed yet" do
+        address = address_hash()
+        insert(:op_deposit, transfer_from_address_hash: address)
+
+        Repo.insert!(%Deposit{
+          l1_block_number: 1,
+          l1_block_timestamp: DateTime.utc_now(),
+          l1_transaction_hash: transaction_hash(),
+          l1_transaction_origin: address_hash(),
+          l2_transaction_hash: transaction_hash(),
+          transfer_from_address_hash: address
+        })
+
+        assert length(Deposit.list(address_hash: address)) == 1
+        assert Deposit.count(address_hash: address) == 2
+      end
+
+      test "pages through both sides in order without repeating a deposit" do
+        address = address_hash()
+
+        expected =
+          for block_number <- 5..1//-1 do
+            side = if rem(block_number, 2) == 0, do: :transfer_from_address_hash, else: :transfer_to_address_hash
+            insert(:op_deposit, [{side, address}, {:l1_block_number, block_number}]).l2_transaction_hash
+          end
+
+        assert all_pages(address, nil) == expected
+      end
+
+      test "an address page and its count read the two transfer address indexes" do
+        insert_unrelated_deposits(1_000)
+        address = address_hash()
+        deposit = insert(:op_deposit, transfer_from_address_hash: address)
+        page_options = %PagingOptions{page_size: 50, key: {deposit.l1_block_number, deposit.l2_transaction_hash}}
+
+        list_plan =
+          QueryPlanHelper.plan("op_deposits", fn ->
+            Deposit.list(address_hash: address, paging_options: page_options)
+          end)
+
+        count_plan = QueryPlanHelper.plan("op_deposits", fn -> Deposit.count(address_hash: address) end)
+
+        # each side reads its own index range, starting at the page key
+        for index <- ~w(op_deposits_transfer_from_index op_deposits_transfer_to_index) do
+          assert list_plan =~
+                   ~r/#{index}[^\n]*\n\s*Index Cond: [^\n]*ROW\(l1_block_number, l2_transaction_hash\) < ROW/
+
+          assert count_plan =~ index
+        end
+      end
+
+      defp all_pages(address, key) do
+        page = Deposit.list(address_hash: address, paging_options: %PagingOptions{page_size: 2, key: key})
+        hashes = Enum.map(page, & &1.l2_transaction_hash)
+
+        case page do
+          [_, last] -> hashes ++ all_pages(address, {last.l1_block_number, last.l2_transaction_hash})
+          _ -> hashes
+        end
       end
     end
 
@@ -188,7 +298,7 @@ defmodule Explorer.Chain.Optimism.DepositTest do
       end
     end
 
-    # Deposits of other origins, so that the planner weighs the origin index against a table that is not empty
+    # Deposits of other addresses, so that the planner weighs the address indexes against a table that is not empty
     defp insert_unrelated_deposits(count) do
       now = DateTime.utc_now()
 
@@ -199,6 +309,8 @@ defmodule Explorer.Chain.Optimism.DepositTest do
             l1_transaction_hash: transaction_hash(),
             l1_transaction_origin: address_hash(),
             l2_transaction_hash: transaction_hash(),
+            transfer_from_address_hash: address_hash(),
+            transfer_to_address_hash: address_hash(),
             inserted_at: now,
             updated_at: now
           }

@@ -130,6 +130,29 @@ defmodule Explorer.Chain.Optimism.MessageRelayTest do
       end
     end
 
+    describe "last_relay_query/1" do
+      test "skips the v1 era of a chain whose legacy history is rebuilt from its ranges" do
+        legacy = Application.get_env(:indexer, Indexer.Fetcher.Optimism.LegacyBridge)
+
+        Application.put_env(
+          :indexer,
+          Indexer.Fetcher.Optimism.LegacyBridge,
+          Keyword.merge(legacy || [], l2_end_block: 1_000, l1_end_block: 10_000)
+        )
+
+        on_exit(fn -> Application.put_env(:indexer, Indexer.Fetcher.Optimism.LegacyBridge, legacy) end)
+
+        insert(:op_message_relay, chain: :l2, block_number: 1_000)
+        insert(:op_message_relay, chain: :l1, block_number: 10_000)
+
+        assert Repo.one(MessageRelay.last_relay_query(:l2)) == nil
+        assert Repo.one(MessageRelay.last_relay_query(:l1)) == nil
+
+        later = insert(:op_message_relay, chain: :l2, block_number: 1_001)
+        assert Repo.one(MessageRelay.last_relay_query(:l2)) == {1_001, later.transaction_hash}
+      end
+    end
+
     describe "l2_cross_domain_messenger/0" do
       test "defaults to the predeploy" do
         assert MessageRelay.l2_cross_domain_messenger() == "0x4200000000000000000000000000000000000007"

@@ -11,11 +11,12 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
   import Ecto.Query
 
   import EthereumJSONRPC, only: [quantity_to_integer: 1]
-  import Explorer.Helper, only: [decode_data: 2, parse_integer: 1]
+  import Explorer.Helper, only: [parse_integer: 1]
 
   alias Explorer.{Chain, Repo}
   alias Explorer.Chain.Cache.Counters.LastFetchedCounter
   alias Explorer.Chain.{Data, Hash, Log}
+  alias Explorer.Chain.Optimism.BridgeMessage
   alias Explorer.Chain.Optimism.Withdrawal, as: OptimismWithdrawal
   alias Indexer.Fetcher.Optimism
   alias Indexer.Helper
@@ -192,30 +193,32 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
   end
 
   @doc """
-  Prepares a Withdrawal map to write into database.
+  Prepares a Withdrawal map to write into database, with the bridge transfer its message carries.
 
   ## Parameters
   - `second_topic`: The second topic of the MessagePassed event containing the withdrawal message nonce.
-  - `data`: The data of the MessagePassed event. The data encodes the withdrawal value, gas limit, data, and hash.
+  - `third_topic`: The third topic of the MessagePassed event: the message sender.
+  - `fourth_topic`: The fourth topic of the MessagePassed event: the message target.
+  - `data`: The data of the MessagePassed event. The data encodes the withdrawal value(s), gas limit, data, and hash.
   - `l2_transaction_hash`: The hash of the transaction containing the MessagePassed event.
   - `l2_block_number`: The number of the block containing the MessagePassed event.
+  - `bridges`: The addresses returned by `Explorer.Chain.Optimism.BridgeMessage.bridges/0`. With `nil` the transfer is
+    not decoded.
 
   ## Returns
   - The Withdrawal map ready to be imported to the database.
   """
   @spec event_to_withdrawal(
           Hash.t() | String.t(),
+          Hash.t() | String.t() | nil,
+          Hash.t() | String.t() | nil,
           Data.t() | String.t(),
           Hash.t() | String.t(),
-          non_neg_integer() | String.t()
-        ) :: %{
-          :msg_nonce => Decimal.t(),
-          :hash => String.t(),
-          :l2_transaction_hash => Hash.t() | String.t(),
-          :l2_block_number => non_neg_integer()
-        }
-  def event_to_withdrawal(second_topic, data, l2_transaction_hash, l2_block_number) do
-    hash = parse_message_passed_data(data)
+          non_neg_integer() | String.t(),
+          BridgeMessage.bridges() | nil
+        ) :: map()
+  def event_to_withdrawal(second_topic, third_topic, fourth_topic, data, l2_transaction_hash, l2_block_number, bridges) do
+    message = OptimismWithdrawal.parse_message_passed_data(data)
 
     msg_nonce =
       second_topic
@@ -223,35 +226,27 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
       |> quantity_to_integer()
       |> Decimal.new()
 
-    %{
-      msg_nonce: msg_nonce,
-      hash: hash,
-      l2_transaction_hash: l2_transaction_hash,
-      l2_block_number: quantity_to_integer(l2_block_number)
-    }
-  end
+    transfer =
+      BridgeMessage.decode_withdrawal(
+        %{
+          from: BridgeMessage.topic_to_address(third_topic),
+          to: BridgeMessage.topic_to_address(fourth_topic),
+          data: message.data,
+          mnt_value: message.mnt_value,
+          eth_value: message.eth_value
+        },
+        bridges
+      )
 
-  # Parses MessagePassed event data.
-  # Mantle's MessagePassed has an extra mntValue field:
-  #   (uint256 mntValue, uint256 ethValue, uint256 gasLimit, bytes data, bytes32 withdrawalHash)
-  # Standard OP has:
-  #   (uint256 value, uint256 gasLimit, bytes data, bytes32 withdrawalHash)
-  defp parse_message_passed_data(data) do
-    if mantle_mode?() do
-      [_mnt_value, _eth_value, _gas_limit, _data, hash] =
-        decode_data(data, [{:uint, 256}, {:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
-
-      hash
-    else
-      [_value, _gas_limit, _data, hash] =
-        decode_data(data, [{:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
-
-      hash
-    end
-  end
-
-  defp mantle_mode? do
-    Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] == true
+    Map.merge(
+      %{
+        msg_nonce: msg_nonce,
+        hash: message.hash,
+        l2_transaction_hash: l2_transaction_hash,
+        l2_block_number: quantity_to_integer(l2_block_number)
+      },
+      transfer
+    )
   end
 
   defp msg_nonce_gap_starts(nonce_max) do
@@ -294,12 +289,14 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
          json_rpc_named_arguments
        ) do
     message_passed_event = OptimismWithdrawal.message_passed_event()
+    bridges = BridgeMessage.bridges()
 
     withdrawals =
       if scan_db do
         query =
           from(log in Log,
-            select: {log.second_topic, log.data, log.transaction_hash, log.block_number},
+            select:
+              {log.second_topic, log.third_topic, log.fourth_topic, log.data, log.transaction_hash, log.block_number},
             where:
               log.first_topic == ^message_passed_event and log.address_hash == ^message_passer and
                 log.block_number >= ^block_start and log.block_number <= ^block_end
@@ -307,8 +304,16 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
 
         query
         |> Repo.all(timeout: :infinity)
-        |> Enum.map(fn {second_topic, data, l2_transaction_hash, l2_block_number} ->
-          event_to_withdrawal(second_topic, data, l2_transaction_hash, l2_block_number)
+        |> Enum.map(fn {second_topic, third_topic, fourth_topic, data, l2_transaction_hash, l2_block_number} ->
+          event_to_withdrawal(
+            second_topic,
+            third_topic,
+            fourth_topic,
+            data,
+            l2_transaction_hash,
+            l2_block_number,
+            bridges
+          )
         end)
       else
         {:ok, result} =
@@ -325,9 +330,12 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
         Enum.map(result, fn event ->
           event_to_withdrawal(
             Enum.at(event["topics"], 1),
+            Enum.at(event["topics"], 2),
+            Enum.at(event["topics"], 3),
             event["data"],
             event["transactionHash"],
-            event["blockNumber"]
+            event["blockNumber"],
+            bridges
           )
         end)
       end

@@ -79,6 +79,8 @@ defmodule Explorer.Chain.Import.Runner.Optimism.Deposits do
     {:ok, inserted}
   end
 
+  # A re-import without a transfer (decoding not configured) keeps the stored one, and one with a transfer replaces it
+  # as a whole, so the transfer columns always come from a single decoding.
   defp default_on_conflict do
     from(
       deposit in Deposit,
@@ -89,6 +91,45 @@ defmodule Explorer.Chain.Import.Runner.Optimism.Deposits do
           l1_block_timestamp: fragment("EXCLUDED.l1_block_timestamp"),
           l1_transaction_hash: fragment("EXCLUDED.l1_transaction_hash"),
           l1_transaction_origin: fragment("EXCLUDED.l1_transaction_origin"),
+          message_hash:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL THEN ? ELSE EXCLUDED.message_hash END",
+              deposit.message_hash
+            ),
+          transfer_type:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL THEN ? ELSE EXCLUDED.transfer_type END",
+              deposit.transfer_type
+            ),
+          transfer_from_address_hash:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL THEN ? ELSE EXCLUDED.transfer_from_address_hash END",
+              deposit.transfer_from_address_hash
+            ),
+          transfer_to_address_hash:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL THEN ? ELSE EXCLUDED.transfer_to_address_hash END",
+              deposit.transfer_to_address_hash
+            ),
+          l1_token_address_hash:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL THEN ? ELSE EXCLUDED.l1_token_address_hash END",
+              deposit.l1_token_address_hash
+            ),
+          l2_token_address_hash:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL THEN ? ELSE EXCLUDED.l2_token_address_hash END",
+              deposit.l2_token_address_hash
+            ),
+          transfer_amount:
+            fragment(
+              "CASE WHEN EXCLUDED.transfer_type IS NULL THEN ? ELSE EXCLUDED.transfer_amount END",
+              deposit.transfer_amount
+            ),
+          mnt_value:
+            fragment("CASE WHEN EXCLUDED.transfer_type IS NULL THEN ? ELSE EXCLUDED.mnt_value END", deposit.mnt_value),
+          eth_value:
+            fragment("CASE WHEN EXCLUDED.transfer_type IS NULL THEN ? ELSE EXCLUDED.eth_value END", deposit.eth_value),
           inserted_at: fragment("LEAST(?, EXCLUDED.inserted_at)", deposit.inserted_at),
           updated_at: fragment("GREATEST(?, EXCLUDED.updated_at)", deposit.updated_at)
         ]
@@ -100,7 +141,19 @@ defmodule Explorer.Chain.Import.Runner.Optimism.Deposits do
           deposit.l1_block_timestamp,
           deposit.l1_transaction_hash,
           deposit.l1_transaction_origin
-        )
+        ) or
+          fragment(
+            "EXCLUDED.transfer_type IS NOT NULL AND (EXCLUDED.message_hash, EXCLUDED.transfer_type, EXCLUDED.transfer_from_address_hash, EXCLUDED.transfer_to_address_hash, EXCLUDED.l1_token_address_hash, EXCLUDED.l2_token_address_hash, EXCLUDED.transfer_amount, EXCLUDED.mnt_value, EXCLUDED.eth_value) IS DISTINCT FROM (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            deposit.message_hash,
+            deposit.transfer_type,
+            deposit.transfer_from_address_hash,
+            deposit.transfer_to_address_hash,
+            deposit.l1_token_address_hash,
+            deposit.l2_token_address_hash,
+            deposit.transfer_amount,
+            deposit.mnt_value,
+            deposit.eth_value
+          )
     )
   end
 end

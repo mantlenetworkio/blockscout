@@ -8,7 +8,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   alias Explorer.Application.Constants
   alias Explorer.Chain
   alias Explorer.Chain.{Block, Data, Hash, Log, Transaction}
-  alias Explorer.Chain.Cache.OptimismFinalizationPeriod
+  alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.Optimism.{DisputeGame, MessageRelay, OutputRoot, WithdrawalEvent}
   alias Explorer.{Helper, PagingOptions, Repo}
 
@@ -34,6 +34,8 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   @message_passed_event_mantle "0x5da382596b838a63b4248e533d8e399b3b0f13ba6c6679f670489d44716cb173"
 
   @required_attrs ~w(msg_nonce hash l2_transaction_hash l2_block_number)a
+  @optional_attrs ~w(message_hash transfer_type transfer_from_address_hash transfer_to_address_hash l1_token_address_hash
+                     l2_token_address_hash transfer_amount mnt_value eth_value)a
   @game_fields ~w(created_at resolved_at status)a
 
   @api_true [api?: true]
@@ -43,6 +45,14 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
     * `hash` - A withdrawal hash.
     * `l2_transaction_hash` - An L2 transaction hash which initiated the withdrawal.
     * `l2_block_number` - A block number of the L2 transaction.
+    * `message_hash` - The versioned hash of the cross-domain message, `nil` when the withdrawal was not sent through
+      the L2CrossDomainMessenger.
+    * `transfer_type` - `eth`, `mnt` or `erc20` for an authenticated bridge transfer, `message` for anything else.
+    * `transfer_from_address_hash` / `transfer_to_address_hash` - The bridge sender and recipient. For a `message`: the
+      messenger-level sender and target, or the `MessagePassed` sender and target when it is not a messenger message.
+    * `l1_token_address_hash` / `l2_token_address_hash` - The token on each chain (`erc20` only).
+    * `transfer_amount` - The bridged amount, `nil` for a `message`.
+    * `mnt_value` / `eth_value` - The MNT and ETH values delivered with the message.
   """
   @primary_key false
   typed_schema "op_withdrawals" do
@@ -50,22 +60,31 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
     field(:hash, Hash.Full)
     field(:l2_transaction_hash, Hash.Full)
     field(:l2_block_number, :integer)
+    field(:message_hash, Hash.Full)
+    field(:transfer_type, Ecto.Enum, values: [:eth, :mnt, :erc20, :message])
+    field(:transfer_from_address_hash, Hash.Address)
+    field(:transfer_to_address_hash, Hash.Address)
+    field(:l1_token_address_hash, Hash.Address)
+    field(:l2_token_address_hash, Hash.Address)
+    field(:transfer_amount, :decimal)
+    field(:mnt_value, :decimal)
+    field(:eth_value, :decimal)
 
     timestamps()
   end
 
   def changeset(%__MODULE__{} = withdrawals, attrs \\ %{}) do
     withdrawals
-    |> cast(attrs, @required_attrs)
+    |> cast(attrs, @required_attrs ++ @optional_attrs)
     |> validate_required(@required_attrs)
   end
 
   @doc """
   Lists `t:Explorer.Chain.Optimism.Withdrawal.t/0`'s' in descending order based on message nonce.
 
-  Accepts an optional `:address_hash` filter (`Hash.Address.t()` or `nil`) which
-  restricts the result to withdrawals whose L2 transaction `from_address_hash`
-  matches the given hash.
+  Accepts an optional `:address_hash` filter (`Hash.Address.t()` or `nil`). Once the bridge transfers are backfilled
+  (`Explorer.Migrator.OptimismWithdrawalTransfers`) it matches the withdrawals the address sent or received through the
+  bridge; until then, the withdrawals whose L2 transaction it sent.
 
   Each item also carries the relay result of its message: `message_hash`, `relay_status` (`:relayed`, `:failed`, or
   nil) and `relay_transaction_hash`, all read with one query per page.
@@ -73,7 +92,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   @spec list :: [__MODULE__.t()]
   def list(options \\ []) do
     paging_options = Keyword.get(options, :paging_options, default_paging_options())
-    address_hash = Keyword.get(options, :address_hash)
+    address_filter = options |> Keyword.get(:address_hash) |> address_filter()
 
     case paging_options do
       %PagingOptions{key: {0}} ->
@@ -84,7 +103,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
         message_passer = message_passer()
 
         base_query =
-          from(w in __MODULE__,
+          from(w in withdrawals(address_filter, paging_options),
             as: :withdrawal,
             order_by: [desc: w.msg_nonce],
             left_join: l2_transaction in Transaction,
@@ -97,7 +116,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
             left_join: log in Log,
             on:
               log.transaction_hash == w.l2_transaction_hash and log.address_hash == ^message_passer and
-                log.first_topic == ^event_topic and log.second_topic == fragment("numeric_to_bytea32(msg_nonce)"),
+                log.first_topic == ^event_topic and log.second_topic == fragment("numeric_to_bytea32(?)", w.msg_nonce),
             select: %{
               msg_nonce: w.msg_nonce,
               hash: w.hash,
@@ -113,7 +132,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
           )
 
         base_query
-        |> filter_by_address(address_hash)
+        |> filter_by_initiator(address_filter)
         |> page_optimism_withdrawals(paging_options)
         |> limit(^paging_options.page_size)
         |> select_repo(options).all(timeout: :infinity)
@@ -127,36 +146,75 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
     ## Parameters
     - `options`: A keyword list of options:
       - `:api?` - Whether the function is being called from an API context.
-      - `:address_hash` - An optional `Hash.Address.t()` to restrict the count to
-        withdrawals whose L2 transaction `from_address_hash` matches the given hash.
+      - `:address_hash` - An optional `Hash.Address.t()` to restrict the count to the withdrawals `list/1` returns
+        for the address.
 
     ## Returns
     - A total number of withdrawals.
   """
   @spec count(list()) :: non_neg_integer()
   def count(options \\ []) do
-    address_hash = Keyword.get(options, :address_hash)
-
-    query =
-      from(w in __MODULE__,
-        as: :withdrawal,
-        left_join: l2_transaction in Transaction,
-        as: :l2_transaction,
-        on: w.l2_transaction_hash == l2_transaction.hash
-      )
-
-    query
-    |> filter_by_address(address_hash)
+    options
+    |> Keyword.get(:address_hash)
+    |> address_filter()
+    |> count_query()
     |> select_repo(options).aggregate(:count)
   end
 
-  defp filter_by_address(query, nil), do: query
+  # Once the transfers are backfilled, an address's withdrawals are counted from the two transfer address indexes alone
+  defp count_query({:transfer, address_hash}) do
+    from(w in __MODULE__,
+      where: w.transfer_from_address_hash == ^address_hash or w.transfer_to_address_hash == ^address_hash
+    )
+  end
 
-  defp filter_by_address(query, address_hash) do
+  defp count_query(address_filter) do
+    from(w in __MODULE__,
+      as: :withdrawal,
+      left_join: l2_transaction in Transaction,
+      as: :l2_transaction,
+      on: w.l2_transaction_hash == l2_transaction.hash
+    )
+    |> filter_by_initiator(address_filter)
+  end
+
+  # An address matches the withdrawals it sent or received through the bridge once their transfers are backfilled, and
+  # the withdrawals whose L2 transaction it sent until then. Read once per call, so that a call never mixes the two.
+  defp address_filter(nil), do: nil
+
+  defp address_filter(address_hash) do
+    if BackgroundMigrations.get_optimism_withdrawal_transfers_finished(),
+      do: {:transfer, address_hash},
+      else: {:initiator, address_hash}
+  end
+
+  # A page of each side of the address, so that a heavy address reads at most two pages, each an ordered index range
+  defp withdrawals({:transfer, address_hash}, paging_options) do
+    sent = address_page(:transfer_from_address_hash, address_hash, paging_options)
+    received = address_page(:transfer_to_address_hash, address_hash, paging_options)
+
+    subquery(union(from(w in subquery(sent)), ^from(w in subquery(received))))
+  end
+
+  defp withdrawals(_address_filter, _paging_options), do: __MODULE__
+
+  defp address_page(column, address_hash, paging_options) do
+    from(w in __MODULE__,
+      as: :withdrawal,
+      where: field(w, ^column) == ^address_hash,
+      order_by: [desc: w.msg_nonce],
+      limit: ^paging_options.page_size
+    )
+    |> page_optimism_withdrawals(paging_options)
+  end
+
+  defp filter_by_initiator(query, {:initiator, address_hash}) do
     from([l2_transaction: l2_transaction] in query,
       where: l2_transaction.from_address_hash == ^address_hash
     )
   end
+
+  defp filter_by_initiator(query, _address_filter), do: query
 
   defp page_optimism_withdrawals(query, %PagingOptions{key: nil}), do: query
 
@@ -238,6 +296,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
     query
     |> Repo.replica().all(timeout: :infinity)
     |> with_relays(@api_true)
+    |> with_statuses(@api_true)
     |> Enum.map(fn w ->
       msg_nonce =
         Bitwise.band(
@@ -245,71 +304,81 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
           0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
         )
 
-      {status, _} = status(w, nil, @api_true)
-      {msg_nonce, status, w}
+      {msg_nonce, w.status, w}
     end)
   end
 
   @doc """
-    Gets Optimism Withdrawal status and unlock datetime (only for `In challenge period`).
+    Adds `status`, `challenge_period_end` (only for `In challenge period`) and `prove_transaction_hash` (the latest
+    `WithdrawalProven` transaction) to each withdrawal of a page.
 
-    When the map carries a `relay_status` (see `list/1`), a relayed message is `Relayed` and a message whose relay
-    failed and was not replayed is `Relay failed`, whatever the portal events say.
+    On chains without fault proofs, such as Mantle, a page costs a constant number of queries:
+    - the `WithdrawalProven` events of all its withdrawals;
+    - the latest output root;
+    - the finalization period, which `Indexer.Fetcher.Optimism.OutputRoot` stores (no L1 call);
+    - the respected dispute games, only on chains that store a respected game type.
+    A fault-proof chain still looks the dispute game of each proving event up, as before.
 
-    Since OP Fault Proofs implementation assumes having more than one WithdrawalProven events for
-    the same withdrawal, the function analyzes all the WithdrawalProven events and determines
-    the current withdrawal status for each of them. The first success status is taken and returned
-    as the final one.
+    A message's relay result decides first (see `list/1`): `Relayed`, or `Relay failed` when no relay delivered it.
+    OP Fault Proofs allow several WithdrawalProven events for one withdrawal, so all of them are weighed and the most
+    advanced status wins. While no finalization period is stored, a proven withdrawal stays `In challenge period`
+    without an end, rather than ending after a guessed period.
 
     ## Parameters
-    - `w`: A map with the withdrawal info.
-    - `respected_games`: A list of games returned by the `respected_games(options)` function.
-                         Used to avoid duplicated SQL requests when the `status` function
-                         is called in a loop. If `nil`, the `respected_games(options)` function
-                         is called internally.
+    - `withdrawals`: Maps with `hash`, `l2_block_number`, `l1_transaction_hash` (the finalizing transaction) and
+      `relay_status`.
+    - `options`: `[api?: true]` to read from the replica.
 
     ## Returns
-    - `{status, datetime}` tuple where the `status` is the current withdrawal status,
-                           `datetime` is the point of time when the challenge period ends.
-                           (only for `In challenge period` status).
+    - The withdrawals with `status`, `challenge_period_end` and `prove_transaction_hash` added.
   """
-  @spec status(map(), list() | nil, [Chain.api?()]) :: {String.t(), DateTime.t() | nil}
-  def status(w, respected_games \\ nil, options \\ [])
+  @spec with_statuses([map()], [Chain.api?()]) :: [map()]
+  def with_statuses([], _options), do: []
+
+  def with_statuses(withdrawals, options) do
+    proven_events = proven_events(Enum.map(withdrawals, & &1.hash), options)
+
+    context = %{
+      last_root_l2_block_number: last_root_l2_block_number(options),
+      finalization_period:
+        Helper.parse_integer(Constants.get_constant_value(OutputRoot.finalization_period_constant(), options)),
+      respected_games: respected_games(options)
+    }
+
+    Enum.map(withdrawals, fn w ->
+      events = Map.get(proven_events, w.hash, [])
+      {status, challenge_period_end} = status(w, events, context)
+
+      prove_transaction_hash =
+        case List.last(events) do
+          {_l1_timestamp, _game_address_hash, _game_index, l1_transaction_hash} -> l1_transaction_hash
+          nil -> nil
+        end
+
+      Map.merge(w, %{
+        status: status,
+        challenge_period_end: challenge_period_end,
+        prove_transaction_hash: prove_transaction_hash
+      })
+    end)
+  end
 
   # The messenger's relay result decides as soon as it is indexed: the portal emits `WithdrawalFinalized` with
   # `success = true` even when the relay fails, and a replay emits no portal event at all.
-  def status(%{relay_status: :relayed}, _respected_games, _options), do: {@withdrawal_status_relayed, nil}
-  def status(%{relay_status: :failed}, _respected_games, _options), do: {@withdrawal_status_relay_failed, nil}
+  defp status(%{relay_status: :relayed}, _events, _context), do: {@withdrawal_status_relayed, nil}
+  defp status(%{relay_status: :failed}, _events, _context), do: {@withdrawal_status_relay_failed, nil}
 
-  def status(w, respected_games, options) when is_nil(w.l1_transaction_hash) do
-    proven_events = proven_events_by_hash(w.hash)
+  defp status(%{l1_transaction_hash: l1_transaction_hash}, _events, _context) when not is_nil(l1_transaction_hash),
+    do: {@withdrawal_status_relayed, nil}
 
-    respected_games =
-      if is_nil(respected_games) do
-        respected_games(options)
-      else
-        respected_games
-      end
-
-    if proven_events == [] do
-      cond do
-        appropriate_games_found(w.l2_block_number, respected_games) ->
-          {@withdrawal_status_ready_to_prove, nil}
-
-        appropriate_root_found(w.l2_block_number) ->
-          {@withdrawal_status_ready_to_prove, nil}
-
-        true ->
-          {@withdrawal_status_waiting_for_state_root, nil}
-      end
-    else
-      handle_proven_status(proven_events, respected_games)
-    end
+  defp status(w, [], context) do
+    if appropriate_games_found(w.l2_block_number, context.respected_games) or
+         w.l2_block_number <= context.last_root_l2_block_number,
+       do: {@withdrawal_status_ready_to_prove, nil},
+       else: {@withdrawal_status_waiting_for_state_root, nil}
   end
 
-  def status(_w, _respected_games, _options) do
-    {@withdrawal_status_relayed, nil}
-  end
+  defp status(_w, events, context), do: handle_proven_status(events, context)
 
   @doc """
     Returns the list of games which type is equal to the current respected game type
@@ -317,7 +386,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   """
   @spec respected_games([Chain.api?()]) :: list()
   def respected_games(options) do
-    case Helper.parse_integer(Constants.get_constant_value("optimism_respected_game_type")) do
+    case Helper.parse_integer(Constants.get_constant_value("optimism_respected_game_type", options)) do
       nil ->
         []
 
@@ -357,17 +426,14 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
     end)
   end
 
-  defp appropriate_root_found(withdrawal_l2_block_number) do
-    last_root_l2_block_number =
-      Repo.replica().one(
-        from(root in OutputRoot,
-          select: root.l2_block_number,
-          order_by: [desc: root.l2_output_index],
-          limit: 1
-        )
-      ) || 0
-
-    withdrawal_l2_block_number <= last_root_l2_block_number
+  defp last_root_l2_block_number(options) do
+    select_repo(options).one(
+      from(root in OutputRoot,
+        select: root.l2_block_number,
+        order_by: [desc: root.l2_output_index],
+        limit: 1
+      )
+    ) || 0
   end
 
   # Fetches dispute game info from DB by game's contract address hash or game's unique index.
@@ -407,18 +473,19 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   # Determines the current withdrawal status by the list of the bound WithdrawalProven events.
   #
   # ## Parameters
-  # - `proven_events`: A list of WithdrawalProven events. Each item is `{l1_timestamp, game_address_hash, game_index}` tuple.
-  # - `respected_games`: A list of games returned by the `respected_games(options)` function.
+  # - `proven_events`: A list of WithdrawalProven events, each a `{l1_timestamp, game_address_hash, game_index,
+  #   l1_transaction_hash}` tuple.
+  # - `context`: The page's `respected_games` and `finalization_period` (see `with_statuses/2`).
   #
   # ## Returns
   # - `{status, datetime}` tuple where the `status` is the current withdrawal status,
   #                        `datetime` is the point of time when the challenge period ends.
   #                        (only for `In challenge period` status).
-  @spec handle_proven_status(list(), list()) :: {String.t(), DateTime.t() | nil}
-  defp handle_proven_status(proven_events, respected_games) do
+  @spec handle_proven_status(list(), map()) :: {String.t(), DateTime.t() | nil}
+  defp handle_proven_status(proven_events, %{respected_games: respected_games} = context) do
     statuses =
       proven_events
-      |> Enum.reduce_while([], fn {l1_timestamp, game_address_hash, game_index}, acc ->
+      |> Enum.reduce_while([], fn {l1_timestamp, game_address_hash, game_index, _l1_transaction_hash}, acc ->
         game = game_by_address_hash_or_index(game_address_hash, game_index)
 
         # credo:disable-for-lines:16 Credo.Check.Refactor.PipeChainStart
@@ -431,7 +498,7 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
 
           is_nil(game) or DateTime.compare(l1_timestamp, game.created_at) == :lt ->
             # the old status determining approach
-            pre_fault_proofs_status(l1_timestamp)
+            pre_fault_proofs_status(l1_timestamp, context.finalization_period)
 
           true ->
             # the new status determining approach
@@ -459,37 +526,28 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
     |> List.first()
   end
 
-  # Gets the list of WithdrawalProven events from the `op_withdrawal_events` database table
-  # bound with the given withdrawal hash. The returned events are sorted by `l1_block_number`
-  # in ascending order.
-  #
-  # ## Parameters
-  # - `withdrawal_hash`: The withdrawal hash for which the function should return the events.
+  # Reads the WithdrawalProven events of the given withdrawals from `op_withdrawal_events`, oldest first.
   #
   # ## Returns
-  # - A list of `{l1_timestamp, game_address_hash, game_index}` tuples where `l1_timestamp` is the L1 block timestamp
-  #   when the event appeared, `game_address_hash` is the bound dispute game contract address hash (can be `nil`),
-  #   `game_index` is the bound dispute game index (can be `nil`).
-  @spec proven_events_by_hash(Hash.t()) :: [{DateTime.t(), Hash.t() | nil, non_neg_integer() | nil}]
-  defp proven_events_by_hash(withdrawal_hash) do
-    Repo.replica().all(
-      from(
-        we in WithdrawalEvent,
-        select: {we.l1_timestamp, we.game_address_hash, we.game_index},
-        where: we.withdrawal_hash == ^withdrawal_hash and we.l1_event_type == :WithdrawalProven,
-        order_by: [asc: we.l1_block_number]
-      ),
-      timeout: :infinity
+  # - A `withdrawal hash => events` map, each event a `{l1_timestamp, game_address_hash, game_index,
+  #   l1_transaction_hash}` tuple. `game_address_hash` and `game_index` are `nil` without fault proofs.
+  @spec proven_events([Hash.t()], [Chain.api?()]) :: %{
+          Hash.t() => [{DateTime.t(), Hash.t() | nil, non_neg_integer() | nil, Hash.t()}]
+        }
+  defp proven_events(withdrawal_hashes, options) do
+    from(
+      we in WithdrawalEvent,
+      where: we.withdrawal_hash in ^Enum.uniq(withdrawal_hashes) and we.l1_event_type == :WithdrawalProven,
+      order_by: [asc: we.l1_block_number],
+      select: {we.withdrawal_hash, {we.l1_timestamp, we.game_address_hash, we.game_index, we.l1_transaction_hash}}
     )
+    |> select_repo(options).all(timeout: :infinity)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
   end
 
-  defp pre_fault_proofs_status(l1_timestamp) do
-    challenge_period =
-      case OptimismFinalizationPeriod.get_period() do
-        nil -> 604_800
-        period -> period
-      end
+  defp pre_fault_proofs_status(_l1_timestamp, nil = _challenge_period), do: {@withdrawal_status_in_challenge, nil}
 
+  defp pre_fault_proofs_status(l1_timestamp, challenge_period) do
     if DateTime.compare(l1_timestamp, DateTime.add(DateTime.utc_now(), -challenge_period)) == :lt do
       {@withdrawal_status_ready_for_relay, nil}
     else
@@ -565,27 +623,39 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
        ) do
     if Helper.truncate_address_hash(sender) == messenger do
       msg_log_data
-      |> message_data(mantle_mode)
+      |> parse_message_passed_data(mantle_mode)
+      |> Map.fetch!(:data)
       |> MessageRelay.message_hash()
     end
   end
 
   defp relay_message_hash(_withdrawal, _messenger, _mantle_mode), do: nil
 
-  # Mantle's MessagePassed has 5 non-indexed fields (mntValue, ethValue, gasLimit, data, withdrawalHash),
-  # the OP Stack one has 4 (value, gasLimit, data, withdrawalHash).
-  defp message_data(msg_log_data, true = _mantle_mode) do
-    [_mnt_value, _eth_value, _gas_limit, data, _hash] =
-      Helper.decode_data(msg_log_data, [{:uint, 256}, {:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
+  @doc """
+    Decodes the non-indexed fields of a `MessagePassed` event. Mantle's event has five (mntValue, ethValue, gasLimit,
+    data, withdrawalHash); the OP Stack one has four (value, gasLimit, data, withdrawalHash), and then `mnt_value` is
+    `nil` and `eth_value` is the value.
+  """
+  @spec parse_message_passed_data(Data.t() | String.t(), boolean()) :: %{
+          mnt_value: non_neg_integer() | nil,
+          eth_value: non_neg_integer(),
+          gas_limit: non_neg_integer(),
+          data: binary(),
+          hash: binary()
+        }
+  def parse_message_passed_data(data, mantle_mode \\ mantle_mode?())
 
-    data
+  def parse_message_passed_data(data, true = _mantle_mode) do
+    [mnt_value, eth_value, gas_limit, message, hash] =
+      Helper.decode_data(data, [{:uint, 256}, {:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
+
+    %{mnt_value: mnt_value, eth_value: eth_value, gas_limit: gas_limit, data: message, hash: hash}
   end
 
-  defp message_data(msg_log_data, false = _mantle_mode) do
-    [_value, _gas_limit, data, _hash] =
-      Helper.decode_data(msg_log_data, [{:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
+  def parse_message_passed_data(data, false = _mantle_mode) do
+    [value, gas_limit, message, hash] = Helper.decode_data(data, [{:uint, 256}, {:uint, 256}, :bytes, {:bytes, 32}])
 
-    data
+    %{mnt_value: nil, eth_value: value, gas_limit: gas_limit, data: message, hash: hash}
   end
 
   @doc """
@@ -608,9 +678,12 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
     Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] == true
   end
 
-  # Only the L2ToL1MessagePasser's own MessagePassed events describe a withdrawal: any contract the withdrawal
-  # transaction calls can emit an event with the same signature and topics.
-  defp message_passer do
+  @doc """
+    Returns the L2ToL1MessagePasser address. Only its own `MessagePassed` events describe a withdrawal: any contract
+    the withdrawal transaction calls can emit an event with the same signature and topics.
+  """
+  @spec message_passer() :: String.t()
+  def message_passer do
     Application.get_env(:indexer, Indexer.Fetcher.Optimism.Withdrawal, [])[:message_passer] ||
       "0x4200000000000000000000000000000000000016"
   end

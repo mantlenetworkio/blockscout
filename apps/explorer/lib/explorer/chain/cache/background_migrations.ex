@@ -71,7 +71,9 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
     key: :heavy_indexes_drop_transactions_created_contract_address_hash_with_pending_index_a_finished,
     key: :heavy_indexes_create_addresses_hash_contract_code_not_null_index_finished,
     key: :heavy_indexes_create_address_ids_internal_transactions_indexes_finished,
-    key: :fill_internal_transactions_address_ids_finished
+    key: :fill_internal_transactions_address_ids_finished,
+    key: :optimism_withdrawal_transfers_finished,
+    key: :optimism_deposit_transfers_finished
 
   @dialyzer :no_match
 
@@ -82,6 +84,8 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
     BackfillMultichainSearchDB,
     EmptyInternalTransactionsData,
     FillInternalTransactionsAddressIds,
+    OptimismDepositTransfers,
+    OptimismWithdrawalTransfers,
     SanitizeDuplicatedLogIndexLogs,
     TokenTransferTokenType,
     TransactionsDenormalization
@@ -465,6 +469,20 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
     set_and_return_migration_status(
       CreateInternalTransactionsBlockNumberCreatedContractAddressIdPartialIndex,
       &set_heavy_indexes_create_address_ids_internal_transactions_indexes_finished/1
+    )
+  end
+
+  defp handle_fallback(:optimism_withdrawal_transfers_finished) do
+    set_and_return_migration_status(
+      OptimismWithdrawalTransfers,
+      &set_optimism_withdrawal_transfers_finished/1
+    )
+  end
+
+  defp handle_fallback(:optimism_deposit_transfers_finished) do
+    set_and_return_migration_status(
+      OptimismDepositTransfers,
+      &set_optimism_deposit_transfers_finished/1
     )
   end
 

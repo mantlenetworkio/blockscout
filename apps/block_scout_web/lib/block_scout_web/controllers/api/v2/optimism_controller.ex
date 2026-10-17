@@ -20,6 +20,7 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   alias Explorer.Chain.{Data, Hash, Token, Transaction}
 
   alias Explorer.Chain.Optimism.{
+    BridgeHistory,
     Deposit,
     DisputeGame,
     FrameSequence,
@@ -39,6 +40,24 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   tags(["optimism"])
 
   @api_true [api?: true]
+
+  @bridge_default_limit 50
+
+  @bridge_address_hash_param %OpenApiSpex.Parameter{
+    name: :address_hash,
+    in: :query,
+    schema: Schemas.General.AddressHash,
+    required: true,
+    description: "The bridge sender or recipient."
+  }
+
+  @bridge_limit_param %OpenApiSpex.Parameter{
+    name: :limit,
+    in: :query,
+    schema: %Schema{type: :integer, minimum: 1, maximum: 1000},
+    required: false,
+    description: "The page size, #{@bridge_default_limit} by default."
+  }
 
   operation :batches,
     summary: "List batches.",
@@ -387,7 +406,7 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
 
   operation :deposits,
     summary: "List deposits.",
-    description: "Retrieves a paginated list of deposits. Optionally filtered by L1 origin address.",
+    description: "Retrieves a paginated list of deposits. Optionally filtered by bridge sender or recipient address.",
     parameters:
       base_params() ++
         [
@@ -396,7 +415,8 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
             in: :query,
             schema: Schemas.General.AddressHash,
             required: false,
-            description: "L1 origin address to filter the deposits by."
+            description:
+              "Bridge sender or recipient address to filter the deposits by (the L1 origin until the bridge transfer backfill completes)."
           }
         ] ++
         define_paging_params([
@@ -474,7 +494,7 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
 
   operation :deposits_count,
     summary: "Number of deposits in the list.",
-    description: "Retrieves a size of the deposits list. Optionally filtered by L1 origin address.",
+    description: "Retrieves a size of the deposits list. Optionally filtered by bridge sender or recipient address.",
     parameters:
       base_params() ++
         [
@@ -483,7 +503,8 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
             in: :query,
             schema: Schemas.General.AddressHash,
             required: false,
-            description: "L1 origin address to filter the deposits count by."
+            description:
+              "Bridge sender or recipient address to filter the deposits count by (the L1 origin until the bridge transfer backfill completes)."
           }
         ],
     responses: [
@@ -503,6 +524,199 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
       |> put_status(200)
       |> render(:optimism_items_count, %{count: count})
     end
+  end
+
+  operation :bridge_deposits,
+    summary: "List the bridge deposits of an address.",
+    description:
+      "Retrieves the deposits an address sent or received through the bridge, newest first, pending and failed ones included.",
+    parameters:
+      base_params() ++
+        [
+          @bridge_address_hash_param,
+          @bridge_limit_param,
+          %OpenApiSpex.Parameter{
+            name: :transaction_hash,
+            in: :query,
+            schema: Schemas.General.FullHash,
+            required: false,
+            description: "Only the deposits of this L1 transaction."
+          },
+          %OpenApiSpex.Parameter{
+            name: :l1_block_number,
+            in: :query,
+            schema: %Schema{type: :integer, minimum: 0, maximum: 9_223_372_036_854_775_807},
+            required: false,
+            description: "Paging: the L1 block number of the last deposit of the previous page."
+          },
+          %OpenApiSpex.Parameter{
+            name: :l2_transaction_hash,
+            in: :query,
+            schema: Schemas.General.FullHash,
+            required: false,
+            description:
+              "Paging: the L2 transaction hash of the last deposit of the previous page, or the message hash of a v1 " <>
+                "(pre-Bedrock) deposit, as next_page_params gives it."
+          }
+        ],
+    responses: [
+      ok:
+        {"Bridge deposits of the address.", "application/json",
+         paginated_response(
+           items: Schemas.Optimism.Bridge.Deposit,
+           next_page_params_example: %{
+             "address_hash" => "0x28aaa9595a3a91c1804eae411ec7ee05ac55b16b",
+             "limit" => 50,
+             "l1_block_number" => 11_904_283,
+             "l2_transaction_hash" => "0x242ad9bc4a30a81a553b295162219781e26f1c5bc8b55ae5e696b55844778aba"
+           },
+           title_prefix: "BridgeDeposits"
+         )},
+      unprocessable_entity: JsonErrorResponse.response()
+    ]
+
+  @doc """
+  Function to handle GET requests to `/api/v2/optimism/bridge/deposits` endpoint.
+  """
+  @spec bridge_deposits(Plug.Conn.t(), map()) :: Plug.Conn.t() | {:format, :error}
+  def bridge_deposits(conn, params) do
+    limit = params[:limit] || @bridge_default_limit
+
+    with {:ok, address_hash} <- parse_address_hash(params[:address_hash]),
+         {:ok, transaction_hash} <- parse_optional_full_hash(params[:transaction_hash]),
+         {:ok, paging_key} <- bridge_deposit_paging_key(params) do
+      {deposits, next_page} =
+        address_hash
+        |> BridgeHistory.deposits(
+          limit: limit + 1,
+          transaction_hash: transaction_hash,
+          paging_key: paging_key,
+          api?: true
+        )
+        |> Enum.split(limit)
+
+      next_page_params =
+        bridge_next_page_params(next_page, deposits, params, fn %{paging_key: {l1_block_number, tie}} ->
+          %{l1_block_number: l1_block_number, l2_transaction_hash: to_string(tie)}
+        end)
+
+      conn
+      |> put_status(200)
+      |> render(:optimism_bridge_deposits, %{deposits: deposits, next_page_params: next_page_params})
+    else
+      {:paging_key, :incomplete} ->
+        conn
+        |> put_status(422)
+        |> json(%{
+          errors: [
+            %{
+              title: "Invalid value",
+              source: %{pointer: "/l2_transaction_hash"},
+              detail: "l1_block_number and l2_transaction_hash page together"
+            }
+          ]
+        })
+
+      error ->
+        error
+    end
+  end
+
+  operation :bridge_withdrawals,
+    summary: "List the bridge withdrawals of an address.",
+    description: "Retrieves the withdrawals an address sent or received through the bridge, newest first.",
+    parameters:
+      base_params() ++
+        [
+          @bridge_address_hash_param,
+          @bridge_limit_param,
+          %OpenApiSpex.Parameter{
+            name: :transaction_hash,
+            in: :query,
+            schema: Schemas.General.FullHash,
+            required: false,
+            description: "Only the withdrawals of this L2 transaction."
+          }
+        ] ++ define_paging_params(["nonce"]),
+    responses: [
+      ok:
+        {"Bridge withdrawals of the address.", "application/json",
+         paginated_response(
+           items: Schemas.Optimism.Bridge.Withdrawal,
+           next_page_params_example: %{
+             "address_hash" => "0xbdc9f691d1c34ae6f58285f5e9f59435287ade3a",
+             "limit" => 50,
+             "nonce" => "1766847064778384329583297500742918515827483896875618958121606201292659148"
+           },
+           title_prefix: "BridgeWithdrawals"
+         )},
+      unprocessable_entity: JsonErrorResponse.response()
+    ]
+
+  @doc """
+  Function to handle GET requests to `/api/v2/optimism/bridge/withdrawals` endpoint.
+  """
+  @spec bridge_withdrawals(Plug.Conn.t(), map()) :: Plug.Conn.t() | {:format, :error}
+  def bridge_withdrawals(conn, params) do
+    limit = params[:limit] || @bridge_default_limit
+
+    with {:ok, address_hash} <- parse_address_hash(params[:address_hash]),
+         {:ok, transaction_hash} <- parse_optional_full_hash(params[:transaction_hash]),
+         {:ok, paging_key} <- bridge_withdrawal_paging_key(params[:nonce]) do
+      {withdrawals, next_page} =
+        address_hash
+        |> BridgeHistory.withdrawals(
+          limit: limit + 1,
+          transaction_hash: transaction_hash,
+          paging_key: paging_key,
+          api?: true
+        )
+        |> Enum.split(limit)
+
+      next_page_params =
+        bridge_next_page_params(next_page, withdrawals, params, fn withdrawal ->
+          %{nonce: Decimal.to_string(withdrawal.msg_nonce, :normal)}
+        end)
+
+      conn
+      |> put_status(200)
+      |> render(:optimism_bridge_withdrawals, %{withdrawals: withdrawals, next_page_params: next_page_params})
+    end
+  end
+
+  defp bridge_deposit_paging_key(%{l1_block_number: block_number, l2_transaction_hash: l2_transaction_hash})
+       when is_integer(block_number) and is_binary(l2_transaction_hash) do
+    case Chain.string_to_full_hash(l2_transaction_hash) do
+      {:ok, hash} -> {:ok, {block_number, hash}}
+      :error -> {:format, :error}
+    end
+  end
+
+  # Half a key would silently restart from the first page, and a client following it would loop
+  defp bridge_deposit_paging_key(%{l1_block_number: block_number}) when not is_nil(block_number),
+    do: {:paging_key, :incomplete}
+
+  defp bridge_deposit_paging_key(%{l2_transaction_hash: l2_transaction_hash}) when not is_nil(l2_transaction_hash),
+    do: {:paging_key, :incomplete}
+
+  defp bridge_deposit_paging_key(_params), do: {:ok, nil}
+
+  defp bridge_withdrawal_paging_key(nil), do: {:ok, nil}
+
+  defp bridge_withdrawal_paging_key(nonce) do
+    case Decimal.parse(nonce) do
+      {decimal, ""} -> {:ok, decimal}
+      _ -> {:format, :error}
+    end
+  end
+
+  # Only declared params go into it: CastAndValidate rejects any other query param
+  defp bridge_next_page_params([], _page, _params, _paging_params), do: nil
+
+  defp bridge_next_page_params(_next_page, page, params, paging_params) do
+    params
+    |> Map.take([:address_hash, :limit, :transaction_hash])
+    |> Map.merge(paging_params.(List.last(page)))
   end
 
   operation :interop_message, false
@@ -639,7 +853,8 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
 
   operation :withdrawals,
     summary: "List withdrawals.",
-    description: "Retrieves a paginated list of withdrawals. Optionally filtered by L2 initiator address.",
+    description:
+      "Retrieves a paginated list of withdrawals. Optionally filtered by bridge sender or recipient address.",
     parameters:
       base_params() ++
         [
@@ -648,7 +863,8 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
             in: :query,
             schema: Schemas.General.AddressHash,
             required: false,
-            description: "L2 initiator address to filter the withdrawals by."
+            description:
+              "Bridge sender or recipient address to filter the withdrawals by (the L2 transaction sender until the bridge transfer backfill completes)."
           }
         ] ++
         define_paging_params([
@@ -696,7 +912,7 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
 
   operation :withdrawals_count,
     summary: "Number of withdrawals in the list.",
-    description: "Retrieves a size of the withdrawals list. Optionally filtered by L2 initiator address.",
+    description: "Retrieves a size of the withdrawals list. Optionally filtered by bridge sender or recipient address.",
     parameters:
       base_params() ++
         [
@@ -705,7 +921,8 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
             in: :query,
             schema: Schemas.General.AddressHash,
             required: false,
-            description: "L2 initiator address to filter the withdrawals count by."
+            description:
+              "Bridge sender or recipient address to filter the withdrawals count by (the L2 transaction sender until the bridge transfer backfill completes)."
           }
         ],
     responses: [
@@ -1168,6 +1385,26 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
     conn
     |> put_status(200)
     |> render(:optimism_items_count, %{count: count})
+  end
+
+  # Parses a required `address_hash` query parameter; `{:format, :error}` becomes a 422 response
+  @spec parse_address_hash(String.t()) :: {:ok, Hash.Address.t()} | {:format, :error}
+  defp parse_address_hash(string) do
+    case Chain.string_to_address_hash(string) do
+      {:ok, hash} -> {:ok, hash}
+      :error -> {:format, :error}
+    end
+  end
+
+  # Parses an optional transaction hash query parameter: `{:ok, nil}` when absent, `{:format, :error}` when malformed
+  @spec parse_optional_full_hash(nil | String.t()) :: {:ok, Hash.Full.t() | nil} | {:format, :error}
+  defp parse_optional_full_hash(nil), do: {:ok, nil}
+
+  defp parse_optional_full_hash(string) do
+    case Chain.string_to_full_hash(string) do
+      {:ok, hash} -> {:ok, hash}
+      :error -> {:format, :error}
+    end
   end
 
   # Parses an optional `address_hash` query parameter into `Hash.Address.t()`.

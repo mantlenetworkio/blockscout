@@ -2,11 +2,12 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
   use BlockScoutWeb.ConnCase
   use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
+  import Ecto.Query, only: [from: 2]
   import Mox
 
   alias Explorer.Application.Constants
   alias Explorer.Chain.{Address, Data}
-  alias Explorer.Chain.Optimism.{Deposit, OutputRoot, Withdrawal}
+  alias Explorer.Chain.Optimism.{Deposit, LegacyBridgeTransfer, OutputRoot, Withdrawal}
   alias Explorer.Repo
   alias Explorer.TestHelper
 
@@ -146,6 +147,250 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
         request = get(conn, "/api/v2/optimism/deposits/count", %{"address_hash" => to_string(unrelated.hash)})
 
         assert json_response(request, 200) == 0
+      end
+    end
+  end
+
+  describe "/optimism/bridge/deposits" do
+    if @chain_type == :optimism do
+      test "needs an address and a limit between 1 and 1000", %{conn: conn} do
+        address = to_string(address_hash())
+
+        assert json_response(get(conn, "/api/v2/optimism/bridge/deposits"), 422)
+
+        for limit <- ["0", "1001"] do
+          request = get(conn, "/api/v2/optimism/bridge/deposits", %{"address_hash" => address, "limit" => limit})
+          assert json_response(request, 422)
+        end
+      end
+
+      test "an item carries the bridge transfer with exact decimal amounts", %{conn: conn} do
+        address = address_hash()
+
+        deposit =
+          insert(:op_deposit,
+            transfer_type: :erc20,
+            transfer_from_address_hash: address,
+            transfer_to_address_hash: address_hash(),
+            l1_token_address_hash: address_hash(),
+            l2_token_address_hash: address_hash(),
+            transfer_amount: Decimal.new("1234567890123456789012345"),
+            mnt_value: Decimal.new(0),
+            eth_value: Decimal.new(0)
+          )
+
+        request = get(conn, "/api/v2/optimism/bridge/deposits", %{"address_hash" => to_string(address)})
+        assert %{"items" => [item], "next_page_params" => nil} = json_response(request, 200)
+
+        assert Map.keys(item) |> Enum.sort() ==
+                 Enum.sort(~w(l1_transaction_hash l1_block_number l1_block_timestamp l2_transaction_hash status
+                              transfer_type from_address_hash to_address_hash l1_token_address_hash l2_token_address_hash
+                              amount mnt_value eth_value message_hash relay_transaction_hash msg_data
+                              msg_target_address_hash is_legacy))
+
+        assert %{
+                 "status" => "Relayed",
+                 "transfer_type" => "erc20",
+                 "amount" => "1234567890123456789012345",
+                 "mnt_value" => "0",
+                 "msg_data" => nil,
+                 "is_legacy" => false
+               } = item
+
+        assert item["l2_transaction_hash"] == to_string(deposit.l2_transaction_hash)
+        assert item["from_address_hash"] == to_string(address)
+      end
+
+      test "a relay-failed deposit carries its replay payload", %{conn: conn} do
+        address = address_hash()
+        message_hash = transaction_hash()
+
+        deposit =
+          insert(:op_deposit, transfer_type: :message, transfer_from_address_hash: address, message_hash: message_hash)
+
+        insert(:op_message_relay, message_hash: message_hash, event_type: :FailedRelayedMessage, chain: :l2)
+
+        request = get(conn, "/api/v2/optimism/bridge/deposits", %{"address_hash" => to_string(address)})
+        assert %{"items" => [item]} = json_response(request, 200)
+
+        assert %{"status" => "Relay failed", "msg_target_address_hash" => "0x4200000000000000000000000000000000000007"} =
+                 item
+
+        assert item["msg_data"] == to_string(deposit.l2_transaction.input)
+      end
+
+      test "rejects a paging key that is half given or out of range", %{conn: conn} do
+        params = %{"address_hash" => to_string(address_hash())}
+        l2_transaction_hash = to_string(transaction_hash())
+
+        for paging <- [
+              %{"l1_block_number" => "20"},
+              %{"l2_transaction_hash" => l2_transaction_hash},
+              %{"l1_block_number" => "9223372036854775808", "l2_transaction_hash" => l2_transaction_hash}
+            ] do
+          request = get(conn, "/api/v2/optimism/bridge/deposits", Map.merge(params, paging))
+          assert json_response(request, 422)
+        end
+      end
+
+      test "pages with next_page_params and finds a transaction's deposits", %{conn: conn} do
+        address = address_hash()
+
+        deposits =
+          for block_number <- [30, 20, 10] do
+            insert(:op_deposit, transfer_type: :eth, transfer_from_address_hash: address, l1_block_number: block_number)
+          end
+
+        request = get(conn, "/api/v2/optimism/bridge/deposits", %{"address_hash" => to_string(address), "limit" => "2"})
+        assert %{"items" => first_page, "next_page_params" => next_page_params} = json_response(request, 200)
+        assert length(first_page) == 2
+
+        assert %{"address_hash" => _, "limit" => 2, "l1_block_number" => 20, "l2_transaction_hash" => _} =
+                 next_page_params
+
+        request = get(conn, "/api/v2/optimism/bridge/deposits", next_page_params)
+        assert %{"items" => [last], "next_page_params" => nil} = json_response(request, 200)
+        assert last["l2_transaction_hash"] == to_string(List.last(deposits).l2_transaction_hash)
+
+        filtered =
+          get(conn, "/api/v2/optimism/bridge/deposits", %{
+            "address_hash" => to_string(address),
+            "transaction_hash" => to_string(hd(deposits).l1_transaction_hash)
+          })
+
+        assert %{"items" => [only]} = json_response(filtered, 200)
+        assert only["l2_transaction_hash"] == to_string(hd(deposits).l2_transaction_hash)
+      end
+    end
+  end
+
+  describe "/optimism/bridge/withdrawals" do
+    if @chain_type == :optimism do
+      setup do
+        Explorer.OptimismBridgeFixtures.configure_bridges()
+        :ok
+      end
+
+      test "an item carries the bridge transfer, its status and the replay payload of a failed relay", %{conn: conn} do
+        address = address_hash()
+        withdrawal = insert_bridge_withdrawal(:eth, address)
+        insert(:op_message_relay, message_hash: withdrawal.message_hash, event_type: :FailedRelayedMessage, chain: :l1)
+
+        request = get(conn, "/api/v2/optimism/bridge/withdrawals", %{"address_hash" => to_string(address)})
+        assert %{"items" => [item], "next_page_params" => nil} = json_response(request, 200)
+
+        assert Map.keys(item) |> Enum.sort() ==
+                 Enum.sort(
+                   ~w(l2_transaction_hash l2_block_number l2_timestamp msg_nonce_raw status challenge_period_end
+                              prove_transaction_hash l1_transaction_hash relay_transaction_hash transfer_type
+                              from_address_hash to_address_hash l1_token_address_hash l2_token_address_hash amount
+                              mnt_value eth_value message_hash msg_data msg_target_address_hash msg_gas_limit is_legacy)
+                 )
+
+        assert %{
+                 "status" => "Relay failed",
+                 "transfer_type" => "eth",
+                 "amount" => "100000000000000",
+                 "msg_target_address_hash" => "0x37dac5312e31adb8bb0802fc72ca84da5cdfcb4c",
+                 "is_legacy" => false
+               } = item
+
+        assert item["msg_nonce_raw"] == Decimal.to_string(withdrawal.msg_nonce, :normal)
+        assert "0xff8daf15" <> _ = item["msg_data"]
+        assert is_binary(item["msg_gas_limit"])
+      end
+
+      test "pages by nonce and finds a transaction's withdrawals", %{conn: conn} do
+        address = address_hash()
+        withdrawals = Enum.map([:eth, :mnt, :erc20], &insert_bridge_withdrawal(&1, address))
+
+        request =
+          get(conn, "/api/v2/optimism/bridge/withdrawals", %{"address_hash" => to_string(address), "limit" => "2"})
+
+        assert %{"items" => [_, _], "next_page_params" => %{"nonce" => _} = next_page_params} =
+                 json_response(request, 200)
+
+        request = get(conn, "/api/v2/optimism/bridge/withdrawals", next_page_params)
+        assert %{"items" => [last], "next_page_params" => nil} = json_response(request, 200)
+        lowest = Enum.min_by(withdrawals, & &1.msg_nonce, Decimal)
+        assert last["msg_nonce_raw"] == Decimal.to_string(lowest.msg_nonce, :normal)
+
+        filtered =
+          get(conn, "/api/v2/optimism/bridge/withdrawals", %{
+            "address_hash" => to_string(address),
+            "transaction_hash" => to_string(lowest.l2_transaction_hash)
+          })
+
+        assert %{"items" => [only]} = json_response(filtered, 200)
+        assert only["msg_nonce_raw"] == last["msg_nonce_raw"]
+      end
+    end
+  end
+
+  describe "/optimism/bridge v1 items" do
+    if @chain_type == :optimism do
+      setup do
+        Explorer.OptimismLegacyBridgeFixtures.configure_legacy_bridges("sepolia")
+        Constants.set_constant_value(LegacyBridgeTransfer.validated_constant(), "true")
+        :ok
+      end
+
+      test "a v1 deposit is marked legacy, has no L2 transaction before its relay, and pages by its v0 hash", %{
+        conn: conn
+      } do
+        address = address_hash()
+
+        newer =
+          Explorer.OptimismLegacyBridgeFixtures.insert_legacy(:deposit, :mnt, %{transfer_from_address_hash: address})
+
+        older =
+          Explorer.OptimismLegacyBridgeFixtures.insert_legacy(:deposit, :eth, %{transfer_from_address_hash: address})
+
+        relay = insert(:op_message_relay, message_hash: newer.message_hash, event_type: :RelayedMessage, chain: :l2)
+
+        request = get(conn, "/api/v2/optimism/bridge/deposits", %{"address_hash" => to_string(address), "limit" => "1"})
+        assert %{"items" => [item], "next_page_params" => next_page_params} = json_response(request, 200)
+
+        assert %{"is_legacy" => true, "status" => "Relayed", "transfer_type" => "mnt", "msg_data" => nil} = item
+        assert item["l2_transaction_hash"] == to_string(relay.transaction_hash)
+
+        # the tie of a v1 deposit is its v0 message hash, not the relay transaction
+        assert %{"l1_block_number" => block_number, "l2_transaction_hash" => tie} = next_page_params
+        assert {block_number, tie} == {newer.block_number, to_string(newer.message_hash)}
+
+        request = get(conn, "/api/v2/optimism/bridge/deposits", next_page_params)
+        assert %{"items" => [last], "next_page_params" => nil} = json_response(request, 200)
+
+        assert %{"is_legacy" => true, "status" => "Pending", "l2_transaction_hash" => nil} = last
+        assert last["l1_transaction_hash"] == to_string(older.transaction_hash)
+      end
+
+      test "a relay-failed v1 withdrawal is marked legacy and carries its migrated replay payload", %{conn: conn} do
+        address = address_hash()
+
+        withdrawal =
+          Explorer.OptimismLegacyBridgeFixtures.insert_legacy(:withdrawal, :eth, %{transfer_from_address_hash: address})
+
+        insert(:op_message_relay,
+          message_hash: withdrawal.migrated_message_hash,
+          event_type: :FailedRelayedMessage,
+          chain: :l1
+        )
+
+        request = get(conn, "/api/v2/optimism/bridge/withdrawals", %{"address_hash" => to_string(address)})
+        assert %{"items" => [item], "next_page_params" => nil} = json_response(request, 200)
+
+        assert %{
+                 "is_legacy" => true,
+                 "status" => "Relay failed",
+                 "transfer_type" => "eth",
+                 "msg_target_address_hash" => "0x37dac5312e31adb8bb0802fc72ca84da5cdfcb4c"
+               } = item
+
+        assert item["msg_nonce_raw"] == Decimal.to_string(withdrawal.nonce, :normal)
+        assert item["message_hash"] == to_string(withdrawal.migrated_message_hash)
+        assert item["msg_data"] == to_string(withdrawal.migrated_msg_data)
+        assert item["msg_gas_limit"] == Decimal.to_string(withdrawal.migrated_gas_limit, :normal)
       end
     end
   end
@@ -406,6 +651,29 @@ defmodule BlockScoutWeb.API.V2.OptimismControllerTest do
     assert Address.checksum(deposit.l1_transaction_origin) == Address.checksum(json["l1_transaction_origin"])
     assert to_string(deposit.l2_transaction.hash) == json["l2_transaction_hash"]
     assert to_string(deposit.l2_transaction.gas) == json["l2_transaction_gas_limit"]
+  end
+
+  # A withdrawal with the MessagePassed log of a fixture, decoded as if by the indexer, sent by `address`
+  defp insert_bridge_withdrawal(fixture_name, address) do
+    fixture = Explorer.OptimismBridgeFixtures.withdrawal(fixture_name)
+    expected = Explorer.OptimismBridgeFixtures.expected_transfer(fixture)
+    row = insert_op_withdrawal_with_message(message_passed: fixture["message_passed"])
+
+    {1, [withdrawal]} =
+      Repo.update_all(
+        from(w in Withdrawal, where: w.msg_nonce == ^row.msg_nonce, select: w),
+        set: [
+          message_hash: TestHelper.topic(expected.message_hash),
+          transfer_type: expected.transfer_type,
+          transfer_from_address_hash: address,
+          transfer_to_address_hash: address_hash(),
+          transfer_amount: expected.transfer_amount && Decimal.new(expected.transfer_amount),
+          mnt_value: Decimal.new(expected.mnt_value),
+          eth_value: Decimal.new(expected.eth_value)
+        ]
+      )
+
+    withdrawal
   end
 
   defp insert_withdrawal(opts \\ []) do

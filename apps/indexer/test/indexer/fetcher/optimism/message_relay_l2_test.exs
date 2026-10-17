@@ -155,6 +155,25 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
         assert {:ok, 500} = MessageRelayL2.get_last_block_number(json_rpc_named_arguments)
         assert Repo.aggregate(MessageRelay, :count) == 1
       end
+
+      test "leaves alone the v1 relays the legacy backfill writes, which the node may not serve", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        legacy = Application.get_env(:indexer, Indexer.Fetcher.Optimism.LegacyBridge)
+
+        Application.put_env(
+          :indexer,
+          Indexer.Fetcher.Optimism.LegacyBridge,
+          Keyword.merge(legacy || [], l2_end_block: 1_000, l1_end_block: 10_000)
+        )
+
+        on_exit(fn -> Application.put_env(:indexer, Indexer.Fetcher.Optimism.LegacyBridge, legacy) end)
+        insert(:op_message_relay, chain: :l2, block_number: 900)
+
+        # no eth_getTransactionByHash expected: a v1 relay is never taken for a reorged one
+        assert {:ok, 0} = MessageRelayL2.get_last_block_number(json_rpc_named_arguments)
+        assert Repo.aggregate(MessageRelay, :count) == 1
+      end
     end
   end
 end

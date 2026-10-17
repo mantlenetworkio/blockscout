@@ -191,15 +191,24 @@ defmodule Explorer.Chain.Optimism.MessageRelay do
   @doc """
     Forms a query for the block number and transaction hash of the last relay on the given chain.
     Used by the relay fetchers to resume after a restart or a reorg.
+
+    On a chain whose v1 (pre-Bedrock) history `Indexer.Fetcher.Optimism.LegacyBridge` rebuilds, the relays of that era
+    are left out: they are final, and the node may not serve their transactions, which would read as a reorg.
   """
   @spec last_relay_query(chain()) :: Ecto.Queryable.t()
   def last_relay_query(chain) do
     from(relay in __MODULE__,
       select: {relay.block_number, relay.transaction_hash},
-      where: relay.chain == ^chain,
+      where: relay.chain == ^chain and relay.block_number > ^legacy_end_block(chain),
       order_by: [desc: relay.block_number],
       limit: 1
     )
+  end
+
+  # The last block of the chain's v1 era when its history is rebuilt, -1 otherwise
+  defp legacy_end_block(chain) do
+    env = Application.get_env(:indexer, Indexer.Fetcher.Optimism.LegacyBridge, [])
+    env[if(chain == :l1, do: :l1_end_block, else: :l2_end_block)] || -1
   end
 
   @doc """

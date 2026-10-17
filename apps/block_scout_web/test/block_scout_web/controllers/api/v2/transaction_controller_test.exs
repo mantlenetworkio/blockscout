@@ -557,6 +557,22 @@ defmodule BlockScoutWeb.API.V2.TransactionControllerTest do
         assert %{"op_interop_messages" => [%{"payload" => "0x30787849009c24f10a91a327a9f2ed94ebc49ee9"}]} =
                  json_response(request, 200)
       end
+
+      test "returns the status of the transaction's withdrawals, a relay result first", %{conn: conn} do
+        withdrawal = insert_op_withdrawal_with_message(calldata: op_relay_message_calldata())
+
+        request = get(conn, "/api/v2/transactions/#{withdrawal.l2_transaction_hash}")
+        assert %{"op_withdrawals" => [%{"status" => "Waiting for state root"}]} = json_response(request, 200)
+
+        insert(:op_message_relay,
+          message_hash: Explorer.TestHelper.topic(op_relay_message_hash()),
+          event_type: :FailedRelayedMessage,
+          chain: :l1
+        )
+
+        request = get(conn, "/api/v2/transactions/#{withdrawal.l2_transaction_hash}")
+        assert %{"op_withdrawals" => [%{"status" => "Relay failed"}]} = json_response(request, 200)
+      end
     end
   end
 

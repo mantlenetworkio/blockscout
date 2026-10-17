@@ -101,7 +101,16 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
     properties: %{
       nonce: %Schema{type: :integer},
       status: %Schema{type: :string, nullable: false},
-      l1_transaction_hash: General.FullHashNullable
+      l1_transaction_hash: General.FullHashNullable,
+      # what the Claim button needs; `msg_eth_value` exists in Mantle mode only
+      portal_contract_address_hash: General.AddressHashNullable,
+      msg_nonce_raw: General.IntegerString,
+      msg_sender_address_hash: General.AddressHashNullable,
+      msg_target_address_hash: General.AddressHashNullable,
+      msg_value: General.IntegerStringNullable,
+      msg_eth_value: General.IntegerStringNullable,
+      msg_gas_limit: General.IntegerStringNullable,
+      msg_data: General.HexStringNullable
     },
     required: [:nonce, :status, :l1_transaction_hash],
     additionalProperties: false

@@ -207,12 +207,13 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
         next_page_params: next_page_params,
         conn: conn
       }) do
-    respected_games = Withdrawal.respected_games(@api_true)
     portal_contract_address_hash = Withdrawal.portal_contract_address()
 
     %{
       items:
-        Enum.map(withdrawals, fn w ->
+        withdrawals
+        |> Withdrawal.with_statuses(@api_true)
+        |> Enum.map(fn w ->
           msg_nonce =
             Bitwise.band(
               Decimal.to_integer(w.msg_nonce),
@@ -238,8 +239,6 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
               _ -> {nil, nil}
             end
 
-          {status, challenge_period_end} = Withdrawal.status(w, respected_games, @api_true)
-
           msg_fields = withdrawal_msg_transaction_fields(w)
 
           %{
@@ -249,14 +248,66 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
             "from" => Helper.address_with_info(conn, from_address, from_address_hash, w.from),
             "l2_transaction_hash" => w.l2_transaction_hash,
             "l2_timestamp" => w.l2_timestamp,
-            "status" => status,
+            "status" => w.status,
             "l1_transaction_hash" => w.l1_transaction_hash,
-            "challenge_period_end" => challenge_period_end,
+            "challenge_period_end" => w.challenge_period_end,
             "portal_contract_address_hash" => portal_contract_address_hash,
             "message_hash" => w.message_hash,
             "relay_transaction_hash" => w.relay_transaction_hash
           }
           |> Map.merge(msg_fields)
+        end),
+      next_page_params: next_page_params
+    }
+  end
+
+  @doc """
+    Function to render GET requests to `/api/v2/optimism/bridge/deposits` endpoint.
+  """
+  def render("optimism_bridge_deposits.json", %{deposits: deposits, next_page_params: next_page_params}) do
+    %{
+      items:
+        Enum.map(deposits, fn deposit ->
+          deposit
+          |> bridge_transfer_fields()
+          |> Map.merge(%{
+            "l1_transaction_hash" => deposit.l1_transaction_hash,
+            "l1_block_number" => deposit.l1_block_number,
+            "l1_block_timestamp" => deposit.l1_block_timestamp,
+            "l2_transaction_hash" => deposit.l2_transaction_hash,
+            "status" => deposit.status,
+            "relay_transaction_hash" => deposit.relay_transaction_hash,
+            "msg_data" => deposit.msg_data,
+            "msg_target_address_hash" => deposit.msg_target_address_hash
+          })
+        end),
+      next_page_params: next_page_params
+    }
+  end
+
+  @doc """
+    Function to render GET requests to `/api/v2/optimism/bridge/withdrawals` endpoint.
+  """
+  def render("optimism_bridge_withdrawals.json", %{withdrawals: withdrawals, next_page_params: next_page_params}) do
+    %{
+      items:
+        Enum.map(withdrawals, fn withdrawal ->
+          withdrawal
+          |> bridge_transfer_fields()
+          |> Map.merge(%{
+            "l2_transaction_hash" => withdrawal.l2_transaction_hash,
+            "l2_block_number" => withdrawal.l2_block_number,
+            "l2_timestamp" => withdrawal.l2_timestamp,
+            "msg_nonce_raw" => Decimal.to_string(withdrawal.msg_nonce, :normal),
+            "status" => withdrawal.status,
+            "challenge_period_end" => withdrawal.challenge_period_end,
+            "prove_transaction_hash" => withdrawal.prove_transaction_hash,
+            "l1_transaction_hash" => withdrawal.l1_transaction_hash,
+            "relay_transaction_hash" => withdrawal.relay_transaction_hash,
+            "msg_data" => withdrawal.msg_data,
+            "msg_target_address_hash" => withdrawal.msg_target_address_hash,
+            "msg_gas_limit" => withdrawal.msg_gas_limit && Integer.to_string(withdrawal.msg_gas_limit)
+          })
         end),
       next_page_params: next_page_params
     }
@@ -533,6 +584,25 @@ defmodule BlockScoutWeb.API.V2.OptimismView do
       |> Map.put("op_interop_messages", interop_messages)
     end
   end
+
+  # The bridge transfer of a deposit or withdrawal. Amounts are decimal strings, exact at any size.
+  defp bridge_transfer_fields(item) do
+    %{
+      "transfer_type" => item.transfer_type,
+      "from_address_hash" => item.transfer_from_address_hash,
+      "to_address_hash" => item.transfer_to_address_hash,
+      "l1_token_address_hash" => item.l1_token_address_hash,
+      "l2_token_address_hash" => item.l2_token_address_hash,
+      "amount" => decimal_string(item.transfer_amount),
+      "mnt_value" => decimal_string(item.mnt_value),
+      "eth_value" => decimal_string(item.eth_value),
+      "message_hash" => item.message_hash,
+      "is_legacy" => item.is_legacy
+    }
+  end
+
+  defp decimal_string(nil), do: nil
+  defp decimal_string(%Decimal{} = value), do: Decimal.to_string(value, :normal)
 
   defp maybe_add_chain(msg, chain_key, message) do
     case Map.fetch(message, chain_key) do

@@ -404,8 +404,6 @@ config :explorer, Explorer.Chain.Cache.Counters.Rootstock.LockedBTCCount,
   global_ttl: ConfigHelper.parse_time_env_var("ROOTSTOCK_LOCKED_BTC_CACHE_PERIOD", "10m"),
   locking_cap: ConfigHelper.parse_integer_env_var("ROOTSTOCK_LOCKING_CAP", 21_000_000)
 
-config :explorer, Explorer.Chain.Cache.OptimismFinalizationPeriod, enabled: ConfigHelper.chain_type() == :optimism
-
 config :explorer, Explorer.Chain.Cache.Counters.AddressTransactionsGasUsageSum,
   cache_period: ConfigHelper.parse_time_env_var("CACHE_ADDRESS_TRANSACTIONS_GAS_USAGE_COUNTER_PERIOD", "30m")
 
@@ -853,6 +851,49 @@ config :explorer, Explorer.Migrator.HeavyDbIndexOperation.CreateArbitrumBatchL2B
 
 config :explorer, Explorer.Migrator.HeavyDbIndexOperation.DropTransactionsOperatorFeeConstantIndex,
   enabled: ConfigHelper.chain_type() == :optimism
+
+# A bridge address that is set but malformed, or a wstETH bridge without its counterpart, would silently decode bridge
+# transfers as plain messages for good, so the configuration is rejected instead.
+if ConfigHelper.chain_type() == :optimism do
+  for env_var <-
+        ~w(INDEXER_OPTIMISM_L1_CROSS_DOMAIN_MESSENGER_CONTRACT INDEXER_OPTIMISM_L2_CROSS_DOMAIN_MESSENGER_CONTRACT
+           INDEXER_OPTIMISM_L1_STANDARD_BRIDGE_CONTRACT INDEXER_OPTIMISM_L2_STANDARD_BRIDGE_CONTRACT
+           INDEXER_OPTIMISM_L1_WST_BRIDGE_CONTRACT INDEXER_OPTIMISM_L2_WST_BRIDGE_CONTRACT),
+      value = System.get_env(env_var, ""),
+      value != "" and not Regex.match?(~r/^0x[[:xdigit:]]{40}$/, value) do
+    raise "#{env_var} must be a 0x-prefixed 20-byte address, got #{inspect(value)}"
+  end
+
+  l1_wst_bridge_set? = System.get_env("INDEXER_OPTIMISM_L1_WST_BRIDGE_CONTRACT", "") != ""
+  l2_wst_bridge_set? = System.get_env("INDEXER_OPTIMISM_L2_WST_BRIDGE_CONTRACT", "") != ""
+
+  if l1_wst_bridge_set? != l2_wst_bridge_set? do
+    raise "INDEXER_OPTIMISM_L1_WST_BRIDGE_CONTRACT and INDEXER_OPTIMISM_L2_WST_BRIDGE_CONTRACT must be set together"
+  end
+end
+
+# Bridge transfers can be decoded only with both addresses. Without them the migrations would complete with nothing
+# decoded and switch the explorer's address filters to empty columns.
+optimism_bridge_transfers_enabled? =
+  ConfigHelper.chain_type() == :optimism and
+    Enum.all?(
+      ~w(INDEXER_OPTIMISM_L1_CROSS_DOMAIN_MESSENGER_CONTRACT INDEXER_OPTIMISM_L1_STANDARD_BRIDGE_CONTRACT),
+      &(System.get_env(&1, "") != "")
+    )
+
+config :explorer, Explorer.Migrator.OptimismWithdrawalTransfers,
+  enabled: optimism_bridge_transfers_enabled?,
+  batch_size: ConfigHelper.parse_integer_env_var("MIGRATION_OPTIMISM_WITHDRAWAL_TRANSFERS_BATCH_SIZE", 500),
+  concurrency: ConfigHelper.parse_integer_env_var("MIGRATION_OPTIMISM_WITHDRAWAL_TRANSFERS_CONCURRENCY", 1),
+  retries: ConfigHelper.parse_integer_env_var("MIGRATION_OPTIMISM_WITHDRAWAL_TRANSFERS_RETRIES", 30),
+  retry_interval: ConfigHelper.parse_time_env_var("MIGRATION_OPTIMISM_WITHDRAWAL_TRANSFERS_RETRY_INTERVAL", "1m")
+
+config :explorer, Explorer.Migrator.OptimismDepositTransfers,
+  enabled: optimism_bridge_transfers_enabled?,
+  batch_size: ConfigHelper.parse_integer_env_var("MIGRATION_OPTIMISM_DEPOSIT_TRANSFERS_BATCH_SIZE", 500),
+  concurrency: ConfigHelper.parse_integer_env_var("MIGRATION_OPTIMISM_DEPOSIT_TRANSFERS_CONCURRENCY", 1),
+  retries: ConfigHelper.parse_integer_env_var("MIGRATION_OPTIMISM_DEPOSIT_TRANSFERS_RETRIES", 30),
+  retry_interval: ConfigHelper.parse_time_env_var("MIGRATION_OPTIMISM_DEPOSIT_TRANSFERS_RETRY_INTERVAL", "1m")
 
 config :explorer, Explorer.Migrator.FilecoinPendingAddressOperations,
   enabled: ConfigHelper.chain_type() == :filecoin,
@@ -1432,6 +1473,12 @@ config :indexer, Indexer.Fetcher.Optimism,
   portal: System.get_env("INDEXER_OPTIMISM_L1_PORTAL_CONTRACT"),
   isthmus_timestamp_l2: optimism_l2_isthmus_timestamp,
   mantle_mode: ConfigHelper.parse_bool_env_var("INDEXER_OPTIMISM_MANTLE_MODE"),
+  # Bridge transfers are decoded only for messages between these bridges, sent through the messengers
+  # (INDEXER_OPTIMISM_L1_CROSS_DOMAIN_MESSENGER_CONTRACT is required as well)
+  l1_standard_bridge: System.get_env("INDEXER_OPTIMISM_L1_STANDARD_BRIDGE_CONTRACT"),
+  l2_standard_bridge: System.get_env("INDEXER_OPTIMISM_L2_STANDARD_BRIDGE_CONTRACT"),
+  l1_wst_bridge: System.get_env("INDEXER_OPTIMISM_L1_WST_BRIDGE_CONTRACT"),
+  l2_wst_bridge: System.get_env("INDEXER_OPTIMISM_L2_WST_BRIDGE_CONTRACT"),
   # Skip the Layer-3 Beacon Node sidecars fallback when the configured
   # `INDEXER_BEACON_RPC_URL` doesn't expose `/eth/v1/beacon/blob_sidecars/`
   # (e.g. when it points at a Mantle DA Indexer). Avoids noisy retry+error logs.
@@ -1450,6 +1497,25 @@ config :indexer, Indexer.Fetcher.Optimism.Withdrawal,
 
 config :indexer, Indexer.Fetcher.Optimism.MessageRelayL1,
   l1_cross_domain_messenger: System.get_env("INDEXER_OPTIMISM_L1_CROSS_DOMAIN_MESSENGER_CONTRACT")
+
+# The Mantle v1 (pre-Bedrock) bridge history is rebuilt once per network from these fixed ranges; networks without a v1
+# era set none of them
+optimism_legacy_bridge = [
+  l2_rpc: System.get_env("INDEXER_OPTIMISM_LEGACY_L2_RPC"),
+  l2_start_block: ConfigHelper.parse_integer_or_nil_env_var("INDEXER_OPTIMISM_LEGACY_L2_START_BLOCK"),
+  l2_end_block: ConfigHelper.parse_integer_or_nil_env_var("INDEXER_OPTIMISM_LEGACY_L2_END_BLOCK"),
+  l1_start_block: ConfigHelper.parse_integer_or_nil_env_var("INDEXER_OPTIMISM_LEGACY_L1_START_BLOCK"),
+  l1_end_block: ConfigHelper.parse_integer_or_nil_env_var("INDEXER_OPTIMISM_LEGACY_L1_END_BLOCK"),
+  l2_eth_get_logs_range_size:
+    ConfigHelper.parse_integer_or_nil_env_var("INDEXER_OPTIMISM_LEGACY_L2_ETH_GET_LOGS_RANGE_SIZE")
+]
+
+config :indexer, Indexer.Fetcher.Optimism.LegacyBridge, optimism_legacy_bridge
+
+config :indexer, Indexer.Fetcher.Optimism.LegacyBridge.Supervisor,
+  enabled:
+    optimism_bridge_transfers_enabled? and
+      Enum.all?(~w(l2_start_block l2_end_block l1_start_block l1_end_block)a, &is_integer(optimism_legacy_bridge[&1]))
 
 config :indexer, Indexer.Fetcher.Optimism.MessageRelayL2,
   start_block: ConfigHelper.parse_integer_env_var("INDEXER_OPTIMISM_L2_MESSAGE_RELAYS_START_BLOCK", 1),
