@@ -3,7 +3,7 @@ defmodule Explorer.Chain.Cache.Counters.Helper do
     A helper for caching modules
   """
 
-  alias Explorer.Chain
+  alias Explorer.{Chain, Repo}
   alias Explorer.Chain.Block
   alias Explorer.Chain.Cache.Counters.LastFetchedCounter
 
@@ -160,6 +160,48 @@ defmodule Explorer.Chain.Cache.Counters.Helper do
       )
 
     count
+  end
+
+  @doc """
+    Runs `fun` in a transaction in which the database cancels any statement that runs longer than `timeout`
+    milliseconds.
+
+    A whole-table aggregate over a large table can run for hours. A transaction that long keeps vacuum from cleaning
+    up, and makes a `CREATE INDEX CONCURRENTLY` in a deploy's migrations wait for it, so the counters bound theirs.
+
+    It raises `ArgumentError` inside another transaction: Ecto nests transactions without a savepoint, so a cancelled
+    statement would abort the enclosing one too.
+
+    ## Returns
+    - `{:ok, result}` with what `fun` returned.
+    - `{:error, :timeout}` when the database cancelled a statement for running too long, or because an operator
+      cancelled it (`pg_cancel_backend`), which Postgres reports the same way.
+  """
+  @spec with_statement_timeout(pos_integer() | :infinity, (-> result)) :: {:ok, result} | {:error, :timeout}
+        when result: var
+  def with_statement_timeout(:infinity, fun), do: {:ok, fun.()}
+
+  def with_statement_timeout(timeout, fun) when is_integer(timeout) and timeout > 0 do
+    if Repo.in_transaction?() do
+      raise ArgumentError, "with_statement_timeout/2 runs in a transaction of its own, not inside another one"
+    end
+
+    Repo.transaction(
+      fn ->
+        %{rows: [[previous]]} = Repo.query!("SELECT current_setting('statement_timeout')")
+        Repo.query!("SET LOCAL statement_timeout = #{timeout}")
+        result = fun.()
+        # the test sandbox runs this transaction as a savepoint, past which the setting would last
+        Repo.query!("SELECT set_config('statement_timeout', $1, true)", [previous])
+        result
+      end,
+      timeout: :infinity
+    )
+  rescue
+    error in Postgrex.Error ->
+      if match?(%{postgres: %{code: :query_canceled}}, error),
+        do: {:error, :timeout},
+        else: reraise(error, __STACKTRACE__)
   end
 
   @doc """

@@ -369,8 +369,17 @@ config :explorer, Explorer.Chain.Cache.Counters.AddressesCoinBalanceSum, global_
 
 config :explorer, Explorer.Chain.Cache.Counters.AddressesCoinBalanceSumMinusBurnt, global_ttl: address_sum_global_ttl
 
+# Deploy migrations give up a lock they cannot take within the lock timeout, instead of waiting for as long as a
+# long-running query holds it while new queries on the table queue behind them. It bounds only the wait, not the work
+# that follows. The statement timeout is optional: where a deployment has a startup probe, set it below the probe's
+# budget, so that the database rather than the probe ends a statement that runs too long. 0 turns a timeout off.
+config :explorer, Explorer.ReleaseTasks,
+  lock_timeout: ConfigHelper.parse_time_env_var("DATABASE_MIGRATION_LOCK_TIMEOUT", "10s"),
+  statement_timeout: ConfigHelper.parse_time_env_var("DATABASE_MIGRATION_STATEMENT_TIMEOUT")
+
 config :explorer, Explorer.Chain.Cache.Counters.GasUsageSum,
   global_ttl: ConfigHelper.parse_time_env_var("CACHE_TOTAL_GAS_USAGE_PERIOD", "2h"),
+  query_timeout: ConfigHelper.parse_time_env_var("CACHE_TOTAL_GAS_USAGE_QUERY_TIMEOUT", "30m"),
   enabled: ConfigHelper.parse_bool_env_var("CACHE_TOTAL_GAS_USAGE_COUNTER_ENABLED")
 
 config :explorer, Explorer.Chain.Cache.Counters.BlocksCount,
@@ -380,7 +389,8 @@ config :explorer, Explorer.Chain.Cache.Counters.AddressesCount,
   update_interval_in_milliseconds: ConfigHelper.parse_time_env_var("CACHE_ADDRESS_COUNT_PERIOD", "30m")
 
 config :explorer, Explorer.Chain.Cache.Counters.TransactionsCount,
-  global_ttl: ConfigHelper.parse_time_env_var("CACHE_TXS_COUNT_PERIOD", "2h")
+  global_ttl: ConfigHelper.parse_time_env_var("CACHE_TXS_COUNT_PERIOD", "2h"),
+  query_timeout: ConfigHelper.parse_time_env_var("CACHE_TXS_COUNT_QUERY_TIMEOUT", "30m")
 
 config :explorer, Explorer.Chain.Cache.Counters.PendingBlockOperationCount,
   global_ttl: ConfigHelper.parse_time_env_var("CACHE_PENDING_OPERATIONS_COUNT_PERIOD", "5m")

@@ -58,7 +58,35 @@ defmodule Explorer.ReleaseTasks do
     IO.puts("Starting repos..")
 
     # Switch pool_size to 2 for ecto > 3.0
-    Enum.each(repos(), & &1.start_link(pool_size: 2))
+    Enum.each(repos(), fn repo -> repo.start_link(pool_size: 2, after_connect: &bound_migration_session/1) end)
+  end
+
+  @doc """
+    Bounds how long a migration on this connection may wait for a lock, and optionally how long a statement may run:
+    Postgres `lock_timeout` and `statement_timeout`, set with DATABASE_MIGRATION_LOCK_TIMEOUT (10s by default) and
+    DATABASE_MIGRATION_STATEMENT_TIMEOUT (unset by default). 0 turns a timeout off.
+
+    Without a lock timeout a migration queued behind a long-running query waits as long as that query runs, and while
+    it waits for its lock every new query on the table queues behind it. A startup probe then kills the container
+    mid-migration, while the database keeps the abandoned session waiting with its locks, which blocks the next
+    attempt. With it the migration fails, is rolled back, and the next start tries again. The lock timeout bounds only
+    the wait: once a migration holds its locks, it runs for as long as its work takes.
+
+    A statement timeout below a startup probe's budget lets the database, not the probe, end a statement that runs too
+    long. Without a probe a long migration is better left to finish, so there is none by default.
+  """
+  @spec bound_migration_session(DBConnection.conn()) :: :ok
+  def bound_migration_session(conn) do
+    config = Application.get_env(:explorer, __MODULE__, [])
+
+    for setting <- [:lock_timeout, :statement_timeout], milliseconds = config[setting], is_integer(milliseconds) do
+      Postgrex.query!(conn, "SELECT set_config($1, $2, false)", [
+        Atom.to_string(setting),
+        Integer.to_string(milliseconds)
+      ])
+    end
+
+    :ok
   end
 
   defp stop_services do

@@ -47,16 +47,7 @@ defmodule Explorer.Chain.Cache.Counters.TransactionsCount do
     {:ok, task} =
       Task.start_link(fn ->
         try do
-          result = Repo.aggregate(Transaction, :count, :hash, timeout: :infinity)
-
-          params = %{
-            counter_type: @cache_key,
-            value: result
-          }
-
-          LastFetchedCounter.upsert(params)
-
-          set_count(%ConCache.Item{ttl: CacheCountersHelper.ttl(__MODULE__, "CACHE_TXS_COUNT_PERIOD"), value: result})
+          update_count()
         rescue
           e ->
             Logger.debug([
@@ -69,6 +60,36 @@ defmodule Explorer.Chain.Cache.Counters.TransactionsCount do
       end)
 
     {:update, task}
+  end
+
+  # The exact count reads the whole table, which on a large chain takes hours (CACHE_TXS_COUNT_QUERY_TIMEOUT bounds
+  # it). Past the bound the table estimate is cached for the period instead, so the next read does not start another
+  # count, and nothing is stored as the last exact count.
+  defp update_count do
+    case CacheCountersHelper.with_statement_timeout(query_timeout(), fn ->
+           Repo.aggregate(Transaction, :count, :hash, timeout: :infinity)
+         end) do
+      {:ok, result} ->
+        LastFetchedCounter.upsert(%{counter_type: @cache_key, value: result})
+        set_count(%ConCache.Item{ttl: ttl(), value: result})
+
+      {:error, :timeout} ->
+        Logger.warning(
+          "Counting all transactions was cancelled, by its #{query_timeout()} ms timeout or by an operator; the " <>
+            "table estimate is served until the next count."
+        )
+
+        set_count(%ConCache.Item{ttl: ttl(), value: CacheCountersHelper.estimated_transactions_count()})
+    end
+  end
+
+  defp ttl, do: CacheCountersHelper.ttl(__MODULE__, "CACHE_TXS_COUNT_PERIOD")
+
+  defp query_timeout do
+    case Application.get_env(:explorer, __MODULE__)[:query_timeout] do
+      timeout when is_integer(timeout) and timeout > 0 -> timeout
+      _ -> :infinity
+    end
   end
 
   # By setting this as a `callback` an async task will be started each time the

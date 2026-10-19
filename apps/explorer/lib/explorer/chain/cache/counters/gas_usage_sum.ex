@@ -47,19 +47,7 @@ defmodule Explorer.Chain.Cache.Counters.GasUsageSum do
       {:ok, task} =
         Task.start_link(fn ->
           try do
-            result = fetch_sum_gas_used()
-
-            params = %{
-              counter_type: @cache_key,
-              value: result
-            }
-
-            LastFetchedCounter.upsert(params)
-
-            set_sum(%ConCache.Item{
-              ttl: CacheCountersHelper.ttl(__MODULE__, "CACHE_TOTAL_GAS_USAGE_PERIOD"),
-              value: result
-            })
+            update_sum()
           rescue
             e ->
               Logger.debug([
@@ -82,6 +70,35 @@ defmodule Explorer.Chain.Cache.Counters.GasUsageSum do
   defp async_task_on_deletion({:delete, _, :sum}), do: safe_get_async_task()
 
   defp async_task_on_deletion(_data), do: nil
+
+  # The sum reads the whole table, which on a large chain takes hours (CACHE_TOTAL_GAS_USAGE_QUERY_TIMEOUT bounds it).
+  # Past the bound the last stored sum is cached for the period instead, so the next read does not start another sum.
+  defp update_sum do
+    case CacheCountersHelper.with_statement_timeout(query_timeout(), &fetch_sum_gas_used/0) do
+      {:ok, result} ->
+        LastFetchedCounter.upsert(%{counter_type: @cache_key, value: result})
+        set_sum(%ConCache.Item{ttl: ttl(), value: result})
+
+      {:error, :timeout} ->
+        Logger.warning(
+          "Summing the gas used by all transactions was cancelled, by its #{query_timeout()} ms timeout or by an " <>
+            "operator; the last stored sum is served until the next sum."
+        )
+
+        set_sum(%ConCache.Item{ttl: ttl(), value: last_stored_sum()})
+    end
+  end
+
+  defp last_stored_sum, do: @cache_key |> LastFetchedCounter.get() |> Decimal.to_integer()
+
+  defp ttl, do: CacheCountersHelper.ttl(__MODULE__, "CACHE_TOTAL_GAS_USAGE_PERIOD")
+
+  defp query_timeout do
+    case Application.get_env(:explorer, __MODULE__)[:query_timeout] do
+      timeout when is_integer(timeout) and timeout > 0 -> timeout
+      _ -> :infinity
+    end
+  end
 
   @spec fetch_sum_gas_used() :: non_neg_integer
   defp fetch_sum_gas_used do
