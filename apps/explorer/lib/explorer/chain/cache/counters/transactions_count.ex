@@ -63,8 +63,9 @@ defmodule Explorer.Chain.Cache.Counters.TransactionsCount do
   end
 
   # The exact count reads the whole table, which on a large chain takes hours (CACHE_TXS_COUNT_QUERY_TIMEOUT bounds
-  # it). Past the bound the table estimate is cached for the period instead, so the next read does not start another
-  # count, and nothing is stored as the last exact count.
+  # it). Past the bound it caches for the period what a read serves while a count runs: the last exact count, or the
+  # table estimate before the first one. The next read starts no count, and the number does not alternate between the
+  # estimate and the last exact count.
   defp update_count do
     case CacheCountersHelper.with_statement_timeout(query_timeout(), fn ->
            Repo.aggregate(Transaction, :count, :hash, timeout: :infinity)
@@ -75,11 +76,14 @@ defmodule Explorer.Chain.Cache.Counters.TransactionsCount do
 
       {:error, :timeout} ->
         Logger.warning(
-          "Counting all transactions was cancelled, by its #{query_timeout()} ms timeout or by an operator; the " <>
-            "table estimate is served until the next count."
+          "Counting all transactions was cancelled, by its #{query_timeout()} ms timeout or by an operator; the last " <>
+            "exact count, or the table estimate before there is one, is served until the next count."
         )
 
-        set_count(%ConCache.Item{ttl: ttl(), value: CacheCountersHelper.estimated_transactions_count()})
+        set_count(%ConCache.Item{
+          ttl: ttl(),
+          value: CacheCountersHelper.evaluate_count(@cache_key, nil, :estimated_transactions_count)
+        })
     end
   end
 
