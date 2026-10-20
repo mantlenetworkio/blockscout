@@ -80,38 +80,11 @@ defmodule Explorer.Chain.Cache.Counters.Transactions24hCount do
   Consolidates the info by populating the `last_fetched_counters` table with the current database information.
   """
   def consolidate do
-    fee_query =
-      dynamic(
-        [transaction, block],
-        fragment(
-          "COALESCE(?, ? + LEAST(?, ?))",
-          transaction.gas_price,
-          block.base_fee_per_gas,
-          transaction.max_priority_fee_per_gas,
-          transaction.max_fee_per_gas - block.base_fee_per_gas
-        ) * transaction.gas_used
-      )
-
-    sum_query = dynamic([_, _], sum(^fee_query))
-    avg_query = dynamic([_, _], avg(^fee_query))
-
-    base_query =
-      from(transaction in Transaction,
-        join: block in assoc(transaction, :block),
-        select: %{count: count(transaction.hash)},
-        select_merge: ^%{fee_sum: sum_query},
-        select_merge: ^%{fee_average: avg_query}
-      )
-
-    query =
-      base_query
-      |> where_block_timestamp_in_last_24_hours()
-
     %{
       count: count,
       fee_sum: fee_sum,
       fee_average: fee_average
-    } = Repo.one!(query, timeout: :infinity)
+    } = Repo.one!(last_24_hours_query(), timeout: :infinity)
 
     LastFetchedCounter.upsert(%{
       counter_type: @transaction_count_name,
@@ -129,11 +102,50 @@ defmodule Explorer.Chain.Cache.Counters.Transactions24hCount do
     })
   end
 
-  defp where_block_timestamp_in_last_24_hours(query) do
+  # Once transactions carry their block timestamp, a transaction reads its block only for a fee without a gas price:
+  # COALESCE leaves the subquery unevaluated otherwise, and a mined transaction has a gas price. Joining every
+  # transaction of the day to its block cost a random read per block. The foreign key on block_hash keeps the join's
+  # count.
+  defp last_24_hours_query do
     if DenormalizationHelper.transactions_denormalization_finished?() do
-      where(query, [transaction, _block], transaction.block_timestamp >= ago(24, "hour"))
+      fee_query =
+        dynamic(
+          [transaction],
+          fragment(
+            "COALESCE(?, (SELECT b.base_fee_per_gas + LEAST(?, ? - b.base_fee_per_gas) FROM blocks AS b WHERE b.hash = ?))",
+            transaction.gas_price,
+            transaction.max_priority_fee_per_gas,
+            transaction.max_fee_per_gas,
+            transaction.block_hash
+          ) * transaction.gas_used
+        )
+
+      from(transaction in Transaction,
+        where: not is_nil(transaction.block_hash) and transaction.block_timestamp >= ago(24, "hour"),
+        select: %{count: count(transaction.hash)},
+        select_merge: ^%{fee_sum: dynamic([_], sum(^fee_query))},
+        select_merge: ^%{fee_average: dynamic([_], avg(^fee_query))}
+      )
     else
-      where(query, [_transaction, block], block.timestamp >= ago(24, "hour"))
+      fee_query =
+        dynamic(
+          [transaction, block],
+          fragment(
+            "COALESCE(?, ? + LEAST(?, ?))",
+            transaction.gas_price,
+            block.base_fee_per_gas,
+            transaction.max_priority_fee_per_gas,
+            transaction.max_fee_per_gas - block.base_fee_per_gas
+          ) * transaction.gas_used
+        )
+
+      from(transaction in Transaction,
+        join: block in assoc(transaction, :block),
+        where: block.timestamp >= ago(24, "hour"),
+        select: %{count: count(transaction.hash)},
+        select_merge: ^%{fee_sum: dynamic([_, _], sum(^fee_query))},
+        select_merge: ^%{fee_average: dynamic([_, _], avg(^fee_query))}
+      )
     end
   end
 
