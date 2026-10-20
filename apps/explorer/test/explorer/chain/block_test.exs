@@ -176,13 +176,43 @@ defmodule Explorer.Chain.BlockTest do
       Repo.insert!(%EIP1559ConfigUpdate{
         l2_block_number: block_number,
         l2_block_hash:
-          "0x00000000000000000000000000000000000000000000000000000000000000bb" |> Explorer.Chain.Hash.Full.cast() |> elem(1),
+          "0x00000000000000000000000000000000000000000000000000000000000000bb"
+          |> Explorer.Chain.Hash.Full.cast()
+          |> elem(1),
         base_fee_max_change_denominator: 8,
         elasticity_multiplier: 2,
         min_base_fee: 5_000
       })
 
       assert Block.next_block_base_fee_per_gas() == Decimal.new(5_000)
+    end
+
+    test "returns nil when the elasticity multiplier leaves no gas target to divide by" do
+      # Holocene carries the multiplier as any uint32; one above the gas limit makes the integer gas target zero.
+      old_chain_type = Application.get_env(:explorer, :chain_type)
+      Application.put_env(:explorer, :chain_type, :optimism)
+      on_exit(fn -> Application.put_env(:explorer, :chain_type, old_chain_type) end)
+
+      insert(:block,
+        consensus: true,
+        number: 100,
+        base_fee_per_gas: Wei.from(Decimal.new(1_000), :wei),
+        gas_limit: Decimal.new(30_000_000),
+        gas_used: Decimal.new(15_000_000)
+      )
+
+      Repo.insert!(%EIP1559ConfigUpdate{
+        l2_block_number: 100,
+        l2_block_hash:
+          "0x00000000000000000000000000000000000000000000000000000000000000bb"
+          |> Explorer.Chain.Hash.Full.cast()
+          |> elem(1),
+        base_fee_max_change_denominator: 8,
+        elasticity_multiplier: 4_294_967_295,
+        min_base_fee: 5_000
+      })
+
+      assert Block.next_block_base_fee_per_gas() == nil
     end
   end
 

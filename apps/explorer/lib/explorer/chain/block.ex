@@ -596,6 +596,13 @@ defmodule Explorer.Chain.Block do
 
     gas_target = Decimal.div_int(block.gas_limit, elasticity_multiplier)
 
+    # Holocene carries the multiplier as any uint32: one above the gas limit leaves no gas target to divide by
+    if Decimal.gt?(gas_target, 0) do
+      base_fee_after(block, gas_target, base_fee_max_change_denominator, min_base_fee)
+    end
+  end
+
+  defp base_fee_after(block, gas_target, base_fee_max_change_denominator, min_base_fee) do
     env_lower_bound = Application.get_env(:explorer, :base_fee_lower_bound)
     lower_bound = max(env_lower_bound || 0, min_base_fee || 0)
 
