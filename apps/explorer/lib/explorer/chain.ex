@@ -1691,6 +1691,8 @@ defmodule Explorer.Chain do
     to_block_number = to || BlockNumber.get_max()
 
     if to_block_number > 0 do
+      # The bound on b2 repeats what b2.number = b1.number implies: without it Postgres hashes every block of the chain
+      # to look a batch's numbers up.
       query =
         from(b in Block,
           right_join:
@@ -1699,8 +1701,11 @@ defmodule Explorer.Chain do
                 (SELECT b1.number
                 FROM generate_series((?)::integer, (?)::integer) AS b1(number)
                 WHERE NOT EXISTS
-                  (SELECT 1 FROM blocks b2 WHERE b2.number=b1.number AND b2.consensus AND NOT b2.refetch_needed))
+                  (SELECT 1 FROM blocks b2 WHERE b2.number=b1.number AND b2.number BETWEEN (?)::integer AND (?)::integer
+                    AND b2.consensus AND NOT b2.refetch_needed))
               """,
+              ^from_block_number,
+              ^to_block_number,
               ^from_block_number,
               ^to_block_number
             ),
@@ -1778,6 +1783,8 @@ defmodule Explorer.Chain do
     range_min = min(range_start, range_end)
     range_max = max(range_start, range_end)
 
+    # The bound on b2 repeats what b2.number = b1.number implies: without it Postgres hashes every block of the chain
+    # to look a batch's numbers up.
     ordered_missing_query =
       if Application.get_env(:explorer, :chain_type) == :filecoin do
         from(b in Block,
@@ -1788,11 +1795,14 @@ defmodule Explorer.Chain do
                 SELECT distinct b1.number
                 FROM generate_series((?)::integer, (?)::integer) AS b1(number)
                 WHERE NOT EXISTS
-                  (SELECT 1 FROM blocks b2 WHERE b2.number=b1.number AND b2.consensus AND NOT b2.refetch_needed)
+                  (SELECT 1 FROM blocks b2 WHERE b2.number=b1.number AND b2.number BETWEEN (?)::integer AND (?)::integer
+                    AND b2.consensus AND NOT b2.refetch_needed)
                 AND NOT EXISTS (SELECT 1 FROM null_round_heights nrh where nrh.height=b1.number)
                 ORDER BY b1.number DESC
               )
               """,
+              ^range_min,
+              ^range_max,
               ^range_min,
               ^range_max
             ),
@@ -1810,10 +1820,13 @@ defmodule Explorer.Chain do
                 SELECT distinct b1.number
                 FROM generate_series((?)::integer, (?)::integer) AS b1(number)
                 WHERE NOT EXISTS
-                  (SELECT 1 FROM blocks b2 WHERE b2.number=b1.number AND b2.consensus AND NOT b2.refetch_needed)
+                  (SELECT 1 FROM blocks b2 WHERE b2.number=b1.number AND b2.number BETWEEN (?)::integer AND (?)::integer
+                    AND b2.consensus AND NOT b2.refetch_needed)
                 ORDER BY b1.number DESC
               )
               """,
+              ^range_min,
+              ^range_max,
               ^range_min,
               ^range_max
             ),

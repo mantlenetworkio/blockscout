@@ -2099,6 +2099,59 @@ defmodule Explorer.ChainTest do
 
       assert Chain.missing_block_number_ranges(0..2) == [0..0, 2..2]
     end
+
+    # Unbounded, the lookup made Postgres hash every block of the chain (6.8M rows) for a 100,000-number batch, which the
+    # catch-up collector repeats every minute; bounded, it reads the batch's own blocks through blocks_number_index.
+    test "bounds the block lookup to the range in its SQL" do
+      query = capture_query("generate_series", fn -> Chain.missing_block_number_ranges(10..0//-1) end)
+
+      assert query =~ ~r/b2\.number BETWEEN/
+    end
+  end
+
+  describe "fetch_min_missing_block_cache/2" do
+    test "finds the lowest number without a consensus block that needs no refetch" do
+      insert(:block, number: 0)
+      insert(:block, number: 1, consensus: false)
+      insert(:block, number: 2)
+
+      assert Chain.fetch_min_missing_block_cache(0, 2) == 1
+      assert Chain.fetch_min_missing_block_cache(2, 2) == nil
+
+      insert(:block, number: 3, refetch_needed: true)
+
+      assert Chain.fetch_min_missing_block_cache(2, 3) == 3
+    end
+
+    test "bounds the block lookup to the range in its SQL" do
+      query = capture_query("generate_series", fn -> Chain.fetch_min_missing_block_cache(0, 10) end)
+
+      assert query =~ ~r/b2\.number BETWEEN/
+    end
+  end
+
+  # The SQL of the first query that `fun` runs and that contains `fragment`
+  defp capture_query(fragment, fun) do
+    test = self()
+    handler = "capture-query-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:explorer, :repo, :query],
+      fn _event, _measurements, %{query: query}, _config ->
+        if query =~ fragment, do: send(test, {:captured_query, query})
+      end,
+      nil
+    )
+
+    try do
+      fun.()
+    after
+      :telemetry.detach(handler)
+    end
+
+    assert_received {:captured_query, query}
+    query
   end
 
   describe "smart_contract_bytecode/1" do
