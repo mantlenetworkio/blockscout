@@ -98,15 +98,12 @@ defmodule Explorer.Chain.Cache.Counters.NewContractsCount do
   def enable_consolidation?, do: @enable_consolidation
 
   defp count_new_contracts do
+    # the bare column comparison lets the count read the index on created_contract_code_indexed_at; an expression of
+    # the column would read every transaction
     query =
       from(transaction in Transaction,
         select: transaction,
-        where:
-          transaction.status == ^:ok and
-            fragment(
-              "NOW() - ? at time zone 'UTC' <= interval '24 hours'",
-              transaction.created_contract_code_indexed_at
-            )
+        where: transaction.status == ^:ok and transaction.created_contract_code_indexed_at >= ago(24, "hour")
       )
 
     query
