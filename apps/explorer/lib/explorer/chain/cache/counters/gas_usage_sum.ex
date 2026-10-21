@@ -17,9 +17,9 @@ defmodule Explorer.Chain.Cache.Counters.GasUsageSum do
     ttl_check_interval: :timer.seconds(1),
     callback: &async_task_on_deletion(&1)
 
+  alias Explorer.Chain.Block
   alias Explorer.Chain.Cache.Counters.Helper, as: CacheCountersHelper
   alias Explorer.Chain.Cache.Counters.LastFetchedCounter
-  alias Explorer.Chain.Transaction
   alias Explorer.Repo
 
   @cache_key "gas_usage_sum"
@@ -71,8 +71,9 @@ defmodule Explorer.Chain.Cache.Counters.GasUsageSum do
 
   defp async_task_on_deletion(_data), do: nil
 
-  # The sum reads the whole table, which on a large chain takes hours (CACHE_TOTAL_GAS_USAGE_QUERY_TIMEOUT bounds it).
-  # Past the bound the last stored sum is cached for the period instead, so the next read does not start another sum.
+  # The sum reads the whole blocks table, which on a large chain takes minutes (CACHE_TOTAL_GAS_USAGE_QUERY_TIMEOUT
+  # bounds it). Past the bound the last stored sum is cached for the period instead, so the next read does not start
+  # another sum.
   defp update_sum do
     case CacheCountersHelper.with_statement_timeout(query_timeout(), &fetch_sum_gas_used/0) do
       {:ok, result} ->
@@ -81,7 +82,7 @@ defmodule Explorer.Chain.Cache.Counters.GasUsageSum do
 
       {:error, :timeout} ->
         Logger.warning(
-          "Summing the gas used by all transactions was cancelled, by its #{query_timeout()} ms timeout or by an " <>
+          "Summing the gas used by the consensus blocks was cancelled, by its #{query_timeout()} ms timeout or by an " <>
             "operator; the last stored sum is served until the next sum."
         )
 
@@ -100,12 +101,16 @@ defmodule Explorer.Chain.Cache.Counters.GasUsageSum do
     end
   end
 
+  # The total is the gas the consensus blocks used, as their headers report it: the gas used by their transactions,
+  # read from one row per block instead of one per transaction. It runs ahead of the transactions' own sum while a
+  # block's transactions are still being imported, and it leaves out the transactions of blocks that lost consensus.
   @spec fetch_sum_gas_used() :: non_neg_integer
   defp fetch_sum_gas_used do
     query =
       from(
-        t0 in Transaction,
-        select: fragment("SUM(t0.gas_used)")
+        block in Block,
+        where: block.consensus == true,
+        select: sum(block.gas_used)
       )
 
     Repo.one!(query, timeout: :infinity) || 0
