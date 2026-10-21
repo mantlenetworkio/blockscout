@@ -57,6 +57,20 @@ defmodule Explorer.Chain.Cache.Counters.TransactionsTest do
     assert 0 == TransactionsCount.get()
   end
 
+  # count(hash) needs each row's hash, and on a chain with 164M transactions the planner read the whole 75 GB table for
+  # it, past the 30-minute timeout; count(*) needs no column, and the planner counts a 1.9 GB index instead (an
+  # index-only scan of about 11 minutes). The plan depends on statistics a test database does not have, so the test
+  # pins the aggregate.
+  test "counts with count(*), so that the count can read an index instead of the table" do
+    :telemetry.attach("transactions-count-query", [:explorer, :repo, :query], &__MODULE__.report_count_query/4, self())
+    on_exit(fn -> :telemetry.detach("transactions-count-query") end)
+
+    assert TransactionsCount.get_count() == nil
+    assert_receive {:count_query, query}, 5_000
+
+    assert query == ~s|SELECT count(*) FROM "transactions" AS t0|
+  end
+
   describe "an exact count that runs past its timeout" do
     setup do
       config = Application.get_env(:explorer, TransactionsCount)
@@ -84,8 +98,17 @@ defmodule Explorer.Chain.Cache.Counters.TransactionsTest do
     end
   end
 
+  # a query of the count task that the test started (through the read) was cancelled
   def report_cancel(_event, _measurements, %{result: result}, test) do
-    if match?({:error, %Postgrex.Error{postgres: %{code: :query_canceled}}}, result), do: send(test, :query_canceled)
+    if test in Process.get(:"$callers", []) and
+         match?({:error, %Postgrex.Error{postgres: %{code: :query_canceled}}}, result),
+       do: send(test, :query_canceled)
+  end
+
+  # a whole-table count of transactions by the count task that the test started, whatever it counts
+  def report_count_query(_event, _measurements, %{query: query}, test) do
+    if test in Process.get(:"$callers", []) and query =~ ~r/^SELECT count\(.*\) FROM "transactions" AS t0$/,
+      do: send(test, {:count_query, query})
   end
 
   # Starts a count that a query elsewhere holds past the timeout, as a long count does on a live database, and returns

@@ -62,13 +62,14 @@ defmodule Explorer.Chain.Cache.Counters.TransactionsCount do
     {:update, task}
   end
 
-  # The exact count reads the whole table, which on a large chain takes hours (CACHE_TXS_COUNT_QUERY_TIMEOUT bounds
-  # it). Past the bound it caches for the period what a read serves while a count runs: the last exact count, or the
-  # table estimate before the first one. The next read starts no count, and the number does not alternate between the
-  # estimate and the last exact count.
+  # The exact count is count(*). It needs no column, so the planner can count the entries of a small index, while
+  # count(hash) needs each row's hash, and the planner read the whole table for it. On a large chain the count still
+  # takes minutes (CACHE_TXS_COUNT_QUERY_TIMEOUT bounds it). Past the bound it caches for the period what a read serves
+  # while a count runs: the last exact count, or the table estimate before the first one. The next read starts no
+  # count, and the number does not alternate between the estimate and the last exact count.
   defp update_count do
     case CacheCountersHelper.with_statement_timeout(query_timeout(), fn ->
-           Repo.aggregate(Transaction, :count, :hash, timeout: :infinity)
+           Repo.aggregate(Transaction, :count, timeout: :infinity)
          end) do
       {:ok, result} ->
         LastFetchedCounter.upsert(%{counter_type: @cache_key, value: result})
