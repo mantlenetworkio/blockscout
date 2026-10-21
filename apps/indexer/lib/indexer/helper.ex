@@ -294,7 +294,7 @@ defmodule Indexer.Helper do
     ## Parameters
     - `from_block`: The starting block number (integer or hexadecimal string) for the log search.
     - `to_block`: The ending block number (integer or hexadecimal string) for the log search.
-    - `address`: The address of the contract to filter logs from.
+    - `address`: The address of the contract to filter logs from, or a list of such addresses.
     - `topics`: List of topics to filter the logs. The list represents each topic as follows:
                 [topic0, topic1, topic2, topic3]. The `topicN` can be either some value or
                 a list of possible values, e.g.: [[topic0_1, topic0_2], topic1, topic2, topic3].
@@ -310,14 +310,14 @@ defmodule Indexer.Helper do
   @spec get_logs(
           non_neg_integer() | binary(),
           non_neg_integer() | binary(),
-          binary(),
+          binary() | [binary()],
           [binary()] | [list()],
           EthereumJSONRPC.json_rpc_named_arguments()
         ) :: {:error, atom() | binary() | map()} | {:ok, any()}
   @spec get_logs(
           non_neg_integer() | binary(),
           non_neg_integer() | binary(),
-          binary(),
+          binary() | [binary()],
           [binary()] | [list()],
           EthereumJSONRPC.json_rpc_named_arguments(),
           integer()
@@ -325,7 +325,7 @@ defmodule Indexer.Helper do
   @spec get_logs(
           non_neg_integer() | binary(),
           non_neg_integer() | binary(),
-          binary(),
+          binary() | [binary()],
           [binary()] | [list()],
           EthereumJSONRPC.json_rpc_named_arguments(),
           integer(),

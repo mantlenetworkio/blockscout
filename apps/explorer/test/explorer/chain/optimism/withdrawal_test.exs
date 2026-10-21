@@ -19,7 +19,9 @@ defmodule Explorer.Chain.Optimism.WithdrawalTest do
         l2_transaction_hash: transaction.hash,
         l2_block_number: opts[:l2_block_number] || transaction.block_number || 1,
         transfer_from_address_hash: opts[:transfer_from],
-        transfer_to_address_hash: opts[:transfer_to]
+        transfer_to_address_hash: opts[:transfer_to],
+        transfer_type: opts[:transfer_type],
+        message_hash: opts[:message_hash]
       })
     end
 
@@ -377,6 +379,34 @@ defmodule Explorer.Chain.Optimism.WithdrawalTest do
         assert to_string(withdrawal.message_hash) == op_relay_message_hash()
         assert {withdrawal.relay_status, withdrawal.relay_transaction_hash} == {nil, nil}
         assert status_of(withdrawal) == {"Relayed", nil}
+      end
+
+      # The withdrawal fetcher reads the L2 events from the node, so a withdrawal can be stored, with its bridge transfer
+      # decoded, before the block fetcher indexes the MessagePassed log
+      test "a decoded withdrawal takes its relay result from the stored message hash, without its MessagePassed log" do
+        finalize = transaction_hash()
+        message_hash = TestHelper.topic(op_relay_message_hash())
+        withdrawal = insert_withdrawal(transfer_type: :message, message_hash: message_hash)
+
+        Repo.insert!(%WithdrawalEvent{
+          withdrawal_hash: withdrawal.hash,
+          l1_event_type: :WithdrawalFinalized,
+          l1_timestamp: DateTime.utc_now(),
+          l1_transaction_hash: finalize,
+          l1_block_number: 1
+        })
+
+        insert(:op_message_relay,
+          message_hash: message_hash,
+          event_type: :FailedRelayedMessage,
+          transaction_hash: finalize,
+          chain: :l1
+        )
+
+        assert [listed] = Withdrawal.list()
+        assert listed.message_hash == message_hash
+        assert status_of(listed) == {"Relay failed", nil}
+        assert [{_nonce, "Relay failed", _withdrawal}] = Withdrawal.transaction_statuses(withdrawal.l2_transaction_hash)
       end
 
       test "a message not sent through the L2CrossDomainMessenger has no message hash" do

@@ -5,7 +5,7 @@ defmodule Explorer.Chain.Optimism.MessageRelayTest do
     use Explorer.DataCase, async: false
 
     alias Explorer.Chain
-    alias Explorer.Chain.Optimism.MessageRelay
+    alias Explorer.Chain.Optimism.{MessageRelay, WithdrawalEvent}
     alias Explorer.{QueryPlanHelper, Repo, TestHelper}
 
     @relayed "0x4641df4a962071e12719d8c8c8e5ac7fc4d97b927346a3d7a335b1f7517e133c"
@@ -27,6 +27,14 @@ defmodule Explorer.Chain.Optimism.MessageRelayTest do
     end
 
     defp bytes("0x" <> hex), do: Base.decode16!(hex, case: :lower)
+
+    defmodule RecordingRepo do
+      @moduledoc false
+      def all(_queryable, _options) do
+        send(self(), :recording_repo_read)
+        []
+      end
+    end
 
     describe "events_to_relays/2" do
       test "maps both events and drops duplicates and unrelated topics" do
@@ -90,6 +98,13 @@ defmodule Explorer.Chain.Optimism.MessageRelayTest do
         assert %{^message_hash => %{status: :relayed}} = MessageRelay.summaries([message_hash], :l2)
       end
 
+      # A page reads its rows and their relays with two queries; with the replica, a choice made for each could read
+      # the relays from a replica behind the rows
+      test "reads from the repo it is given" do
+        assert MessageRelay.summaries([TestHelper.topic(hash(1))], :l1, repo: RecordingRepo) == %{}
+        assert_received :recording_repo_read
+      end
+
       test "returns an empty map for no hashes" do
         assert MessageRelay.summaries([], :l1) == %{}
       end
@@ -150,6 +165,39 @@ defmodule Explorer.Chain.Optimism.MessageRelayTest do
 
         later = insert(:op_message_relay, chain: :l2, block_number: 1_001)
         assert Repo.one(MessageRelay.last_relay_query(:l2)) == {1_001, later.transaction_hash}
+      end
+    end
+
+    describe "last_relay_query/1 with relays imported by the withdrawal event fetcher" do
+      # That fetcher imports the relay of a finalizing transaction with the finalization, ahead of the relay fetcher,
+      # so such a relay does not show how far the relay fetcher scanned
+      test "leaves out the L1 relays of finalizing transactions" do
+        replay = insert(:op_message_relay, chain: :l1, block_number: 120)
+        finalization = insert(:op_message_relay, chain: :l1, block_number: 150)
+
+        Repo.insert!(%WithdrawalEvent{
+          withdrawal_hash: transaction_hash(),
+          l1_event_type: :WithdrawalFinalized,
+          l1_timestamp: DateTime.utc_now(),
+          l1_transaction_hash: finalization.transaction_hash,
+          l1_block_number: 150
+        })
+
+        assert Repo.one(MessageRelay.last_relay_query(:l1)) == {120, replay.transaction_hash}
+      end
+
+      test "is nil when every L1 relay is in a finalizing transaction, so that the relay fetcher scans from its start" do
+        finalization = insert(:op_message_relay, chain: :l1, block_number: 150)
+
+        Repo.insert!(%WithdrawalEvent{
+          withdrawal_hash: transaction_hash(),
+          l1_event_type: :WithdrawalFinalized,
+          l1_timestamp: DateTime.utc_now(),
+          l1_transaction_hash: finalization.transaction_hash,
+          l1_block_number: 150
+        })
+
+        assert Repo.one(MessageRelay.last_relay_query(:l1)) == nil
       end
     end
 

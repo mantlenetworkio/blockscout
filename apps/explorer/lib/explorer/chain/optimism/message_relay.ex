@@ -14,6 +14,7 @@ defmodule Explorer.Chain.Optimism.MessageRelay do
 
   alias Explorer.Chain
   alias Explorer.Chain.Hash
+  alias Explorer.Chain.Optimism.WithdrawalEvent
 
   @required_attrs ~w(message_hash event_type transaction_hash chain block_number)a
 
@@ -140,17 +141,20 @@ defmodule Explorer.Chain.Optimism.MessageRelay do
     ## Parameters
     - `message_hashes`: The versioned message hashes.
     - `chain`: `:l1` for withdrawals, `:l2` for deposits.
-    - `options`: `api?: true` reads from the replica.
+    - `options`: `api?: true` reads from the replica. `repo:` reads from the given repo instead: the one the messages
+      were read from, since a repo chosen again could be a replica behind them, which would miss their relays.
 
     ## Returns
     - A map `message_hash => %{status: :relayed | :failed, transaction_hash: delivering transaction or nil}`.
   """
-  @spec summaries([Hash.Full.t()], chain(), [Chain.api?()]) :: %{Hash.Full.t() => summary()}
+  @spec summaries([Hash.Full.t()], chain(), [Chain.api?() | {:repo, module()}]) :: %{Hash.Full.t() => summary()}
   def summaries(message_hashes, chain, options \\ [])
 
   def summaries([], _chain, _options), do: %{}
 
   def summaries(message_hashes, chain, options) do
+    repo = Keyword.get_lazy(options, :repo, fn -> select_repo(options) end)
+
     # the messenger delivers a message at most once, after any number of failures
     delivery =
       from(relay in __MODULE__,
@@ -181,7 +185,7 @@ defmodule Explorer.Chain.Optimism.MessageRelay do
       where: not is_nil(delivered.transaction_hash) or not is_nil(failed.block_number),
       select: {type(message.message_hash, Hash.Full), delivered.transaction_hash}
     )
-    |> select_repo(options).all(timeout: :infinity)
+    |> repo.all(timeout: :infinity)
     |> Map.new(fn
       {message_hash, nil} -> {message_hash, %{status: :failed, transaction_hash: nil}}
       {message_hash, transaction_hash} -> {message_hash, %{status: :relayed, transaction_hash: transaction_hash}}
@@ -194,16 +198,39 @@ defmodule Explorer.Chain.Optimism.MessageRelay do
 
     On a chain whose v1 (pre-Bedrock) history `Indexer.Fetcher.Optimism.LegacyBridge` rebuilds, the relays of that era
     are left out: they are final, and the node may not serve their transactions, which would read as a reorg.
+
+    On L1 the relays of finalizing transactions are left out as well: `Indexer.Fetcher.Optimism.WithdrawalEvent`
+    imports them with the finalizations, ahead of the relay fetcher, so they do not show how far that fetcher scanned.
   """
   @spec last_relay_query(chain()) :: Ecto.Queryable.t()
   def last_relay_query(chain) do
     from(relay in __MODULE__,
+      as: :relay,
       select: {relay.block_number, relay.transaction_hash},
       where: relay.chain == ^chain and relay.block_number > ^legacy_end_block(chain),
       order_by: [desc: relay.block_number],
       limit: 1
     )
+    |> scanned_by_relay_fetcher(chain)
   end
+
+  # A finalization is in the block of its relay, so its lookup reads the l1_block_number index
+  defp scanned_by_relay_fetcher(query, :l1) do
+    from(relay in query,
+      where:
+        not exists(
+          from(we in WithdrawalEvent,
+            where:
+              we.l1_block_number == parent_as(:relay).block_number and
+                we.l1_transaction_hash == parent_as(:relay).transaction_hash and
+                we.l1_event_type == :WithdrawalFinalized,
+            select: 1
+          )
+        )
+    )
+  end
+
+  defp scanned_by_relay_fetcher(query, :l2), do: query
 
   # The last block of the chain's v1 era when its history is rebuilt, -1 otherwise
   defp legacy_end_block(chain) do

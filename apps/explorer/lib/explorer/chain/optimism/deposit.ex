@@ -125,12 +125,14 @@ defmodule Explorer.Chain.Optimism.Deposit do
             order_by: [desc: d.l1_block_number, desc: d.l2_transaction_hash]
           )
 
+        repo = select_repo(options)
+
         base_query
         |> filter_by_origin(address_filter)
         |> page_deposits(paging_options)
         |> limit(^paging_options.page_size)
-        |> select_repo(options).all(timeout: :infinity)
-        |> with_relays(options)
+        |> repo.all(timeout: :infinity)
+        |> with_relays(repo)
     end
   end
 
@@ -207,10 +209,11 @@ defmodule Explorer.Chain.Optimism.Deposit do
 
   defp filter_by_origin(query, _address_filter), do: query
 
-  # Adds the L2 relay result of each deposit (one query for the page) and, for deposits relayed by the
-  # L2CrossDomainMessenger, the replay transaction data: the L2 transaction input and its target.
-  @spec with_relays([map()], keyword()) :: [map()]
-  defp with_relays(deposits, options) do
+  # Adds the L2 relay result of each deposit (one query for the page, from `repo`, the one the deposits were read from)
+  # and, for deposits relayed by the L2CrossDomainMessenger, the replay transaction data: the L2 transaction input and
+  # its target.
+  @spec with_relays([map()], module()) :: [map()]
+  defp with_relays(deposits, repo) do
     messenger = MessageRelay.l2_cross_domain_messenger()
     message_hashes = Enum.map(deposits, &relay_message_hash(&1, messenger))
 
@@ -218,7 +221,7 @@ defmodule Explorer.Chain.Optimism.Deposit do
       message_hashes
       |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
-      |> MessageRelay.summaries(:l2, options)
+      |> MessageRelay.summaries(:l2, repo: repo)
 
     deposits
     |> Enum.zip(message_hashes)

@@ -1,6 +1,14 @@
 defmodule Indexer.Fetcher.Optimism.WithdrawalEvent do
   @moduledoc """
   Fills op_withdrawal_events DB table.
+
+  The transaction that finalizes a withdrawal also holds its relay result: the portal calls the
+  L1CrossDomainMessenger, which emits `RelayedMessage` or `FailedRelayedMessage`. When
+  INDEXER_OPTIMISM_L1_CROSS_DOMAIN_MESSENGER_CONTRACT is set, those events are imported into op_message_relays in the
+  same transaction as the `WithdrawalFinalized` event. The portal emits `WithdrawalFinalized` with `success = true`
+  even when the relay fails, so a finalization indexed alone would read as delivered until
+  `Indexer.Fetcher.Optimism.MessageRelayL1`, which scans the same blocks on its own, reached the transaction. Relays
+  in other transactions (replays) are left to that fetcher.
   """
 
   use GenServer
@@ -13,8 +21,9 @@ defmodule Indexer.Fetcher.Optimism.WithdrawalEvent do
   import EthereumJSONRPC, only: [quantity_to_integer: 1]
 
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.Optimism.WithdrawalEvent
+  alias Explorer.Chain.Optimism.{MessageRelay, WithdrawalEvent}
   alias Indexer.Fetcher.Optimism
+  alias Indexer.Fetcher.Optimism.MessageRelayL1
   alias Indexer.Helper
   alias Indexer.RollupReorgMonitorQueue
 
@@ -79,6 +88,8 @@ defmodule Indexer.Fetcher.Optimism.WithdrawalEvent do
     chunks_number = ceil((end_block - start_block + 1) / eth_get_logs_range_size)
     chunk_range = Range.new(0, max(chunks_number - 1, 0), 1)
 
+    messenger = MessageRelayL1.l1_cross_domain_messenger()
+
     last_written_block =
       chunk_range
       |> Enum.reduce_while(start_block - 1, fn current_chunk, _ ->
@@ -92,25 +103,28 @@ defmodule Indexer.Fetcher.Optimism.WithdrawalEvent do
             Helper.get_logs(
               chunk_start,
               chunk_end,
-              optimism_portal,
+              if(is_nil(messenger), do: optimism_portal, else: [optimism_portal, messenger]),
               [
                 [
                   @withdrawal_proven_event,
                   @withdrawal_proven_event_blast,
                   @withdrawal_finalized_event,
                   @withdrawal_finalized_event_blast
-                ]
+                ] ++ if(is_nil(messenger), do: [], else: MessageRelay.relay_events())
               ],
               json_rpc_named_arguments,
               0,
               Helper.infinite_retries_number()
             )
 
-          withdrawal_events = prepare_events(result, json_rpc_named_arguments)
+          {relay_logs, withdrawal_logs} = Enum.split_with(result, &relay_log?/1)
+          withdrawal_events = prepare_events(withdrawal_logs, json_rpc_named_arguments)
+          relays = finalization_relays(relay_logs, withdrawal_events)
 
           {:ok, _} =
             Chain.import(%{
               optimism_withdrawal_events: %{params: withdrawal_events},
+              optimism_message_relays: %{params: relays},
               timeout: :infinity
             })
 
@@ -119,7 +133,8 @@ defmodule Indexer.Fetcher.Optimism.WithdrawalEvent do
             chunk_end,
             start_block,
             end_block,
-            "#{Enum.count(withdrawal_events)} WithdrawalProven/WithdrawalFinalized event(s)",
+            "#{Enum.count(withdrawal_events)} WithdrawalProven/WithdrawalFinalized event(s) and " <>
+              "#{Enum.count(relays)} relay(s) in the finalizing transactions",
             :L1
           )
         end
@@ -127,6 +142,7 @@ defmodule Indexer.Fetcher.Optimism.WithdrawalEvent do
         reorg_block = RollupReorgMonitorQueue.pop(__MODULE__)
 
         if !is_nil(reorg_block) && reorg_block > 0 do
+          remove_finalization_relays(dynamic([relay], relay.block_number >= ^reorg_block))
           {deleted_count, _} = Repo.delete_all(from(we in WithdrawalEvent, where: we.l1_block_number >= ^reorg_block))
 
           log_deleted_rows_count(reorg_block, deleted_count)
@@ -164,6 +180,35 @@ defmodule Indexer.Fetcher.Optimism.WithdrawalEvent do
   def handle_info({ref, _result}, state) do
     Process.demonitor(ref, [:flush])
     {:noreply, state}
+  end
+
+  defp relay_log?(%{"topics" => [signature | _]}), do: String.downcase(signature) in MessageRelay.relay_events()
+  defp relay_log?(_log), do: false
+
+  # The relay events emitted in the transactions that finalized a withdrawal
+  defp finalization_relays(relay_logs, withdrawal_events) do
+    finalizing_transactions =
+      for %{l1_event_type: :WithdrawalFinalized, l1_transaction_hash: transaction_hash} <- withdrawal_events,
+          into: MapSet.new(),
+          do: transaction_hash
+
+    relay_logs
+    |> Enum.filter(&MapSet.member?(finalizing_transactions, &1["transactionHash"]))
+    |> MessageRelay.events_to_relays(:l1)
+  end
+
+  # Removes the relays imported with the finalizations in the blocks that `block_condition` selects, before their
+  # events. The relay fetcher removes the relays of reorged blocks too, but it may do so before this fetcher imports
+  # relays from the old fork. A relay is in the block of its finalization.
+  defp remove_finalization_relays(block_condition) do
+    Repo.delete_all(
+      from(relay in MessageRelay,
+        join: we in WithdrawalEvent,
+        on: we.l1_block_number == relay.block_number and we.l1_transaction_hash == relay.transaction_hash,
+        where: relay.chain == :l1 and we.l1_event_type == :WithdrawalFinalized,
+        where: ^block_condition
+      )
+    )
   end
 
   defp log_deleted_rows_count(reorg_block, count) do
@@ -278,7 +323,11 @@ defmodule Indexer.Fetcher.Optimism.WithdrawalEvent do
     Optimism.get_last_item(
       :L1,
       &WithdrawalEvent.last_event_l1_block_number_query/0,
-      &WithdrawalEvent.remove_events_query/1,
+      # the events of a block whose transaction is gone after a reorg, with the relays imported with them
+      fn l1_block_number ->
+        remove_finalization_relays(dynamic([relay], relay.block_number == ^l1_block_number))
+        WithdrawalEvent.remove_events_query(l1_block_number)
+      end,
       json_rpc_named_arguments,
       @counter_type
     )

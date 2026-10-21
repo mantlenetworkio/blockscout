@@ -56,12 +56,14 @@ defmodule Explorer.Chain.Optimism.BridgeHistory do
   """
   @spec deposits(Hash.Address.t(), keyword()) :: [map()]
   def deposits(address_hash, options) do
+    repo = select_repo(options)
+
     rows =
       address_hash
       |> deposits_query(legacy_served?(options), options)
-      |> select_repo(options).all(timeout: :infinity)
+      |> repo.all(timeout: :infinity)
 
-    relays = relay_summaries(Enum.map(rows, & &1.message_hash), :l2, options)
+    relays = relay_summaries(Enum.map(rows, & &1.message_hash), :l2, repo)
 
     rows
     |> Enum.map(fn row ->
@@ -101,12 +103,14 @@ defmodule Explorer.Chain.Optimism.BridgeHistory do
   """
   @spec withdrawals(Hash.Address.t(), keyword()) :: [map()]
   def withdrawals(address_hash, options) do
+    repo = select_repo(options)
+
     rows =
       address_hash
       |> withdrawals_query(legacy_served?(options), options)
-      |> select_repo(options).all(timeout: :infinity)
+      |> repo.all(timeout: :infinity)
 
-    relays = relay_summaries(Enum.flat_map(rows, &[&1.message_hash, &1.legacy_message_hash]), :l1, options)
+    relays = relay_summaries(Enum.flat_map(rows, &[&1.message_hash, &1.legacy_message_hash]), :l1, repo)
 
     rows
     |> Enum.map(&with_relay(&1, relays))
@@ -120,11 +124,12 @@ defmodule Explorer.Chain.Optimism.BridgeHistory do
     Constants.get_constant_value(LegacyBridgeTransfer.validated_constant(), options) == "true"
   end
 
-  defp relay_summaries(message_hashes, chain, options) do
+  # Reads the relays from `repo`, the one the rows were read from
+  defp relay_summaries(message_hashes, chain, repo) do
     message_hashes
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
-    |> MessageRelay.summaries(chain, options)
+    |> MessageRelay.summaries(chain, repo: repo)
   end
 
   # The page of deposits is cut to its size in a subquery, so that only its rows are joined to their L2 transactions

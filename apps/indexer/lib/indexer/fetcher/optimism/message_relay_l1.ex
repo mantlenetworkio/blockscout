@@ -48,17 +48,28 @@ defmodule Indexer.Fetcher.Optimism.MessageRelayL1 do
   def handle_continue(:ok, _state) do
     Logger.metadata(fetcher: @fetcher_name)
 
-    messenger = Application.get_all_env(:indexer)[__MODULE__][:l1_cross_domain_messenger]
+    case l1_cross_domain_messenger() do
+      nil ->
+        Logger.error(
+          "L1CrossDomainMessenger address is invalid or not defined (INDEXER_OPTIMISM_L1_CROSS_DOMAIN_MESSENGER_CONTRACT). Withdrawal relay results are not indexed."
+        )
 
-    if Helper.address_correct?(messenger) do
-      Optimism.init_continue(messenger, __MODULE__)
-    else
-      Logger.error(
-        "L1CrossDomainMessenger address is invalid or not defined (INDEXER_OPTIMISM_L1_CROSS_DOMAIN_MESSENGER_CONTRACT). Withdrawal relay results are not indexed."
-      )
+        {:stop, :normal, %{}}
 
-      {:stop, :normal, %{}}
+      messenger ->
+        Optimism.init_continue(messenger, __MODULE__)
     end
+  end
+
+  @doc """
+    Returns the L1CrossDomainMessenger address set by INDEXER_OPTIMISM_L1_CROSS_DOMAIN_MESSENGER_CONTRACT, or `nil`
+    when it is not set or not an address. `Indexer.Fetcher.Optimism.WithdrawalEvent` reads it too, to import the
+    relay result of a finalizing transaction with the finalization.
+  """
+  @spec l1_cross_domain_messenger() :: String.t() | nil
+  def l1_cross_domain_messenger do
+    messenger = Application.get_all_env(:indexer)[__MODULE__][:l1_cross_domain_messenger]
+    if Helper.address_correct?(messenger), do: messenger
   end
 
   @impl GenServer

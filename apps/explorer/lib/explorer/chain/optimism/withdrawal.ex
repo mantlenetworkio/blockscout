@@ -125,18 +125,22 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
               l2_transaction_hash: w.l2_transaction_hash,
               l1_transaction_hash: we.l1_transaction_hash,
               from: l2_transaction.from_address_hash,
+              message_hash: w.message_hash,
+              transfer_type: w.transfer_type,
               msg_log_sender_address_hash: log.third_topic,
               msg_log_target_address_hash: log.fourth_topic,
               msg_log_data: log.data
             }
           )
 
+        repo = select_repo(options)
+
         base_query
         |> filter_by_initiator(address_filter)
         |> page_optimism_withdrawals(paging_options)
         |> limit(^paging_options.page_size)
-        |> select_repo(options).all(timeout: :infinity)
-        |> with_relays(options)
+        |> repo.all(timeout: :infinity)
+        |> with_relays(repo)
     end
   end
 
@@ -287,15 +291,19 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
           l2_block_number: w.l2_block_number,
           l1_transaction_hash: we.l1_transaction_hash,
           msg_nonce: w.msg_nonce,
+          message_hash: w.message_hash,
+          transfer_type: w.transfer_type,
           msg_log_sender_address_hash: log.third_topic,
           msg_log_target_address_hash: log.fourth_topic,
           msg_log_data: log.data
         }
       )
 
+    repo = Repo.replica()
+
     query
-    |> Repo.replica().all(timeout: :infinity)
-    |> with_relays(@api_true)
+    |> repo.all(timeout: :infinity)
+    |> with_relays(repo)
     |> with_statuses(@api_true)
     |> Enum.map(fn w ->
       msg_nonce =
@@ -368,6 +376,10 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
   defp status(%{relay_status: :relayed}, _events, _context), do: {@withdrawal_status_relayed, nil}
   defp status(%{relay_status: :failed}, _events, _context), do: {@withdrawal_status_relay_failed, nil}
 
+  # Finalized without a known relay. `Indexer.Fetcher.Optimism.WithdrawalEvent` imports the relay of the finalizing
+  # transaction together with the finalization, so this is a withdrawal not sent through the messenger, one finalized
+  # before the relays were indexed or on a chain without the L1 messenger configured, or one whose message hash is not
+  # known yet: its bridge transfer is not decoded and its `MessagePassed` log not indexed.
   defp status(%{l1_transaction_hash: l1_transaction_hash}, _events, _context) when not is_nil(l1_transaction_hash),
     do: {@withdrawal_status_relayed, nil}
 
@@ -586,20 +598,21 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
     end
   end
 
-  # Adds the messenger relay result of each withdrawal, reading all of them with one query: `message_hash` (nil when
-  # the message was not sent through the L2CrossDomainMessenger), `relay_status` (`:relayed`, `:failed`, or nil when no
-  # relay is indexed) and `relay_transaction_hash` (the delivering L1 transaction, a replay if the first relay failed).
-  @spec with_relays([map()], [Chain.api?()]) :: [map()]
-  defp with_relays(withdrawals, options) do
+  # Adds the messenger relay result of each withdrawal, reading all of them with one query from `repo`, the one the
+  # withdrawals were read from: `message_hash` (nil when the message was not sent through the L2CrossDomainMessenger),
+  # `relay_status` (`:relayed`, `:failed`, or nil when no relay is indexed) and `relay_transaction_hash` (the
+  # delivering L1 transaction, a replay if the first relay failed).
+  @spec with_relays([map()], module()) :: [map()]
+  defp with_relays(withdrawals, repo) do
     messenger = MessageRelay.l2_cross_domain_messenger()
     mantle_mode = mantle_mode?()
-    message_hashes = Enum.map(withdrawals, &relay_message_hash(&1, messenger, mantle_mode))
+    message_hashes = Enum.map(withdrawals, &message_hash(&1, messenger, mantle_mode))
 
     summaries =
       message_hashes
       |> Enum.reject(&is_nil/1)
       |> Enum.uniq()
-      |> MessageRelay.summaries(:l1, options)
+      |> MessageRelay.summaries(:l1, repo: repo)
 
     withdrawals
     |> Enum.zip(message_hashes)
@@ -613,6 +626,14 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
       })
     end)
   end
+
+  # The stored hash once the bridge transfer is decoded. Until then the hash of the `MessagePassed` log, which the block
+  # fetcher may not have indexed yet: the withdrawal fetcher reads the event from the node. Without its hash, a
+  # finalized withdrawal would read as `Relayed` whatever its relay.
+  defp message_hash(%{transfer_type: type, message_hash: message_hash}, _messenger, _mantle_mode) when not is_nil(type),
+    do: message_hash
+
+  defp message_hash(withdrawal, messenger, mantle_mode), do: relay_message_hash(withdrawal, messenger, mantle_mode)
 
   # Only the L2CrossDomainMessenger emits `MessagePassed` with itself as the sender, so `data` is then the
   # `relayMessage` calldata whose keccak256 the L1CrossDomainMessenger emits when relaying.
