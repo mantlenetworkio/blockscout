@@ -493,8 +493,10 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
   end
 
   operation :deposits_count,
-    summary: "Number of deposits in the list.",
-    description: "Retrieves a size of the deposits list. Optionally filtered by bridge sender or recipient address.",
+    summary: "Number of deposits.",
+    description:
+      "Retrieves the number of deposits, including those whose L2 transaction failed or is not indexed yet, which the " <>
+        "deposits list leaves out. Optionally filtered by bridge sender or recipient address.",
     parameters:
       base_params() ++
         [
@@ -508,7 +510,7 @@ defmodule BlockScoutWeb.API.V2.OptimismController do
           }
         ],
     responses: [
-      ok: {"Number of items in the deposits list.", "application/json", %Schema{type: :integer, nullable: false}},
+      ok: {"Number of deposits.", "application/json", %Schema{type: :integer, nullable: false}},
       unprocessable_entity: JsonErrorResponse.response()
     ]
 

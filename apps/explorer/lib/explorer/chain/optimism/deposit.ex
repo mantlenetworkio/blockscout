@@ -137,14 +137,14 @@ defmodule Explorer.Chain.Optimism.Deposit do
   end
 
   @doc """
-    Returns total number of displayed deposits.
+    Returns the number of deposits. Unlike `list/1`, it includes the deposits whose L2 transaction failed or is not
+    indexed yet: leaving them out would take a lookup in `transactions` for each deposit.
 
     ## Parameters
     - `options`: A keyword list of options:
       - `:api?` - Whether the function is being called from an API context.
       - `:address_hash` - An optional `Hash.Address.t()` to restrict the count to the address's deposits, as
-        `list/1` matches them. Once the bridge transfers are backfilled this also counts the address's deposits whose
-        L2 transaction is pending or failed, which `list/1` leaves out.
+        `list/1` matches them.
 
     ## Returns
     - A total number of deposits.
@@ -158,19 +158,16 @@ defmodule Explorer.Chain.Optimism.Deposit do
     |> select_repo(options).aggregate(:count)
   end
 
-  # Once the transfers are backfilled, an address's deposits are counted from the two transfer address indexes alone,
-  # without probing `transactions` once per deposit, so a heavy address stays cheap to count. Unlike `list/1`, the
-  # count then includes deposits whose L2 transaction is pending or failed.
+  # The count reads `op_deposits` alone. Probing `transactions` for each deposit, to leave out the ones `list/1` does
+  # not show, took 7.8 s for 1,030 deposits with a cold cache. An address's deposits are counted from the two transfer
+  # address indexes once the transfers are backfilled, and from the origin index until then.
   defp count_query({:transfer, address_hash}) do
     from(d in __MODULE__,
       where: d.transfer_from_address_hash == ^address_hash or d.transfer_to_address_hash == ^address_hash
     )
   end
 
-  defp count_query(address_filter) do
-    from(d in __MODULE__, inner_join: t in Transaction, on: t.hash == d.l2_transaction_hash and t.status == :ok)
-    |> filter_by_origin(address_filter)
-  end
+  defp count_query(address_filter), do: filter_by_origin(__MODULE__, address_filter)
 
   # An address matches the deposits it sent or received through the bridge once their transfers are backfilled, and the
   # deposits it originated on L1 until then. Read once per call, so that a call never mixes the two.

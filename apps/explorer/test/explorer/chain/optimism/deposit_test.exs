@@ -103,6 +103,27 @@ defmodule Explorer.Chain.Optimism.DepositTest do
 
         assert Deposit.count(address_hash: other_address.hash) == 0
       end
+
+      # Counting only the deposits the list shows would probe `transactions` once per deposit
+      test "counts the deposits whose L2 transaction failed or is not indexed yet, which the list leaves out" do
+        insert(:op_deposit)
+        insert_deposit(failed_l2_transaction_hash())
+        insert_deposit(transaction_hash())
+
+        assert length(Deposit.list()) == 1
+        assert Deposit.count() == 3
+      end
+
+      test "the count of an L1 origin includes its deposits whose L2 transaction failed or is not indexed yet" do
+        origin = address_hash()
+        insert(:op_deposit, l1_transaction_origin: origin)
+        insert_deposit(failed_l2_transaction_hash(), origin)
+        insert_deposit(transaction_hash(), origin)
+        insert_deposit(transaction_hash())
+
+        assert length(Deposit.list(address_hash: origin)) == 1
+        assert Deposit.count(address_hash: origin) == 3
+      end
     end
 
     describe "query plans" do
@@ -122,6 +143,13 @@ defmodule Explorer.Chain.Optimism.DepositTest do
                  ~r/op_deposits_l1_transaction_origin_index[^\n]*\n\s*Index Cond: [^\n]*ROW\(l1_block_number, l2_transaction_hash\) < ROW/
 
         assert count_plan =~ "op_deposits_l1_transaction_origin_index"
+      end
+
+      # With a cold cache, probing `transactions` for each of 1,030 deposits took 7.8 s
+      test "the total count reads op_deposits alone" do
+        insert_unrelated_deposits(1_000)
+
+        refute QueryPlanHelper.plan("op_deposits", fn -> Deposit.count() end) =~ "transactions"
       end
     end
 
@@ -296,6 +324,20 @@ defmodule Explorer.Chain.Optimism.DepositTest do
         assert_received :relay_query
         refute_received :relay_query
       end
+    end
+
+    defp insert_deposit(l2_transaction_hash, origin \\ address_hash()) do
+      Repo.insert!(%Deposit{
+        l1_block_number: 1,
+        l1_block_timestamp: DateTime.utc_now(),
+        l1_transaction_hash: transaction_hash(),
+        l1_transaction_origin: origin,
+        l2_transaction_hash: l2_transaction_hash
+      })
+    end
+
+    defp failed_l2_transaction_hash do
+      :transaction |> insert() |> with_block(status: :error, error: "Reverted") |> Map.fetch!(:hash)
     end
 
     # Deposits of other addresses, so that the planner weighs the address indexes against a table that is not empty
