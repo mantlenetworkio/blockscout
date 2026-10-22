@@ -431,7 +431,8 @@ defmodule Explorer.Chain.Optimism.WithdrawalTest do
         withdrawal =
           insert_op_withdrawal_with_message(
             calldata: op_relay_message_calldata(),
-            emitter: "0x00000000000000000000000000000000000000cc",
+            # a fresh address: a fixed one can collide with an address the factories generate afterwards
+            emitter: to_string(insert(:address).hash),
             finalized_in: transaction_hash()
           )
 

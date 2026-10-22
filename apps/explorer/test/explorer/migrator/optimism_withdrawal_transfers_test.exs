@@ -57,7 +57,8 @@ defmodule Explorer.Migrator.OptimismWithdrawalTransfersTest do
     end
 
     test "a withdrawal without its MessagePassed log stays undecoded and the migration completes" do
-      %{msg_nonce: nonce} = insert_op_withdrawal_with_message(emitter: "0x00000000000000000000000000000000000000aa")
+      # a fresh address: a fixed one can collide with an address the factories generate afterwards
+      %{msg_nonce: nonce} = insert_op_withdrawal_with_message(emitter: to_string(insert(:address).hash))
 
       run_migration()
 

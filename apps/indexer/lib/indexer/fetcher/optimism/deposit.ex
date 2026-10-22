@@ -14,6 +14,7 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
   import Explorer.Helper, only: [decode_data: 2]
 
   alias Explorer.{Chain, Repo}
+  alias Explorer.Chain.Cache.Counters.LastFetchedCounter
   alias Explorer.Chain.Events.Publisher
   alias Explorer.Chain.Optimism.{BridgeMessage, Deposit}
   alias Indexer.Fetcher.Optimism
@@ -25,7 +26,10 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
 
   @fetcher_name :optimism_deposits
   @address_prefix "0x000000000000000000000000"
-  @counter_type "optimism_deposits_fetcher_last_l1_block_hash"
+  # The fetcher's checkpoint: the hash of the last L1 block it handled. Deposits indexed before creation deposits and
+  # Mantle v0 events were derived the way op-node derives them are checkpointed under the previous name,
+  # `optimism_deposits_fetcher_last_l1_block_hash`, so the fetcher derives them again (see `get_last_l1_item/1`).
+  @counter_type "optimism_deposits_fetcher_last_l1_block_hash_v2"
   @empty_hash "0x0000000000000000000000000000000000000000000000000000000000000000"
 
   def child_spec(start_link_arguments) do
@@ -103,6 +107,8 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
               timeout: :infinity
             })
 
+          remove_stale_deposits(chunk_start, chunk_end, deposit_events)
+
           Publisher.broadcast(%{new_optimism_deposits: deposit_events}, :realtime)
 
           Helper.log_blocks_chunk_handling(
@@ -165,6 +171,28 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
     end
   end
 
+  # Removes the rows of the L1 blocks just handled that their deposits do not include. While a deployment rolls over,
+  # a fetcher of an earlier version can import rows after this one removed the rows it derived (`get_last_l1_item/1`).
+  defp remove_stale_deposits(chunk_start, chunk_end, deposit_events) do
+    l2_transaction_hashes = Enum.map(deposit_events, & &1.l2_transaction_hash)
+
+    {count, _} =
+      Repo.delete_all(
+        from(d in Deposit,
+          where:
+            d.l1_block_number >= ^chunk_start and d.l1_block_number <= ^chunk_end and
+              d.l2_transaction_hash not in ^l2_transaction_hashes
+        ),
+        timeout: :infinity
+      )
+
+    if count > 0 do
+      Logger.warning(
+        "Removed #{count} row(s) of the op_deposits table in L1 blocks #{chunk_start}..#{chunk_end} that the deposits of these blocks do not include."
+      )
+    end
+  end
+
   # Prepares `TransactionDeposited` events to be imported to database.
   #
   # ## Parameters
@@ -174,7 +202,8 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
   #                               Used to get blocks info by their numbers from the RPC node.
   #
   # ## Returns
-  # - A list of prepared events. Each list item is a map outlining a deposit event.
+  # - A list of prepared events. Each list item is a map outlining a deposit event. The events that cannot be parsed
+  #   are left out (see `event_to_deposit/5`).
   @spec prepare_events(list(), non_neg_integer(), EthereumJSONRPC.json_rpc_named_arguments()) :: [map()]
   defp prepare_events(events, transaction_type, json_rpc_named_arguments) do
     {timestamps, origins} =
@@ -198,11 +227,17 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
 
     bridges = BridgeMessage.bridges()
 
-    Enum.map(events, &event_to_deposit(&1, timestamps, origins, transaction_type, bridges))
+    events
+    |> Enum.map(&event_to_deposit(&1, timestamps, origins, transaction_type, bridges))
+    |> Enum.reject(&is_nil/1)
   end
 
   @doc """
     Prepares a `TransactionDeposited` event to be imported to database, with the bridge transfer its message carries.
+
+    The L2 transaction is derived the way op-node derives it: the event's version (`topics[3]`) selects the opaqueData
+    layout, and a contract creation has no `to`. An event op-node would refuse as well (an unknown version, or
+    opaqueData too short for its version) is logged and skipped.
 
     ## Parameters
     - An event map outlining a `TransactionDeposited` event got from `eth_getLogs` response.
@@ -213,23 +248,51 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
       is not decoded.
 
     ## Returns
-    - A map with the event info ready to be imported to database.
+    - A map with the event info ready to be imported to database, or `nil` when the event cannot be parsed.
   """
-  @spec event_to_deposit(map(), map(), map(), non_neg_integer(), BridgeMessage.bridges() | nil) :: map()
+  @spec event_to_deposit(map(), map(), map(), non_neg_integer(), BridgeMessage.bridges() | nil) :: map() | nil
   def event_to_deposit(
         %{
-          "blockHash" => "0x" <> stripped_block_hash,
-          "blockNumber" => block_number_quantity,
           "transactionHash" => transaction_hash,
-          "logIndex" => "0x" <> stripped_log_index,
-          "topics" => [_, @address_prefix <> from_stripped, @address_prefix <> to_stripped, _],
+          "logIndex" => log_index,
+          "topics" => [_, _, _, version_topic],
           "data" => opaque_data
-        },
+        } = event,
         timestamps,
         origins,
         transaction_type,
         bridges
       ) do
+    [raw_opaque_data] = decode_data(opaque_data, [:bytes])
+    version = quantity_to_integer(version_topic)
+
+    case parse_opaque_data(raw_opaque_data, version, mantle_mode?()) do
+      {:ok, opaque} ->
+        derive_deposit(event, opaque, timestamps, origins, transaction_type, bridges)
+
+      :error ->
+        Logger.error(
+          "Skipped the TransactionDeposited event #{quantity_to_integer(log_index)} of the L1 transaction #{transaction_hash}: its opaqueData does not parse as version #{version}."
+        )
+
+        nil
+    end
+  end
+
+  defp derive_deposit(
+         %{
+           "blockHash" => "0x" <> stripped_block_hash,
+           "blockNumber" => block_number_quantity,
+           "transactionHash" => transaction_hash,
+           "logIndex" => "0x" <> stripped_log_index,
+           "topics" => [_, @address_prefix <> from_stripped, @address_prefix <> to_stripped, _]
+         },
+         opaque,
+         timestamps,
+         origins,
+         transaction_type,
+         bridges
+       ) do
     {_, prefixed_block_hash} = (String.pad_leading("", 64, "0") <> stripped_block_hash) |> String.split_at(-64)
     {_, prefixed_log_index} = (String.pad_leading("", 64, "0") <> stripped_log_index) |> String.split_at(-64)
 
@@ -246,61 +309,66 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
 
     is_system = <<0>>
 
+    # op-node leaves `To` nil for a contract creation, and a nil `To` (`rlp:"nil"`) is an empty string in the RLP
+    to = if opaque.creation?, do: <<>>, else: Base.decode16!(to_stripped, case: :mixed)
+
     # `message` holds what the L2 transaction delivers to `to`: its calldata and the values it transfers (`Mint` and
     # `EthValue` are minted to `from` first)
     {rlp_encoded, message} =
-      if mantle_mode?() do
-        {mnt_mint, mnt_value, eth_mint, eth_tx_value, gas_limit, data} = parse_opaque_data_mantle(opaque_data)
+      case opaque do
+        %{mnt_mint: mnt_mint, mnt_value: mnt_value, eth_mint: eth_mint, eth_tx_value: eth_tx_value} ->
+          # Mantle DepositTx RLP (from op-geth deposit_tx.go):
+          #   [SourceHash, From, To, Mint, Value, Gas, IsSystemTx, EthValue, Data, EthTxValue?]
+          #
+          # Go RLP encoding rules:
+          #   IsSystemTx false → <<>> (empty bytes, RLP 0x80)
+          #   EthValue *big.Int rlp:"nil": non-nil 0 → <<>> (RLP 0x80)
+          #   EthTxValue *big.Int rlp:"optional": nil/zero → field OMITTED entirely
+          base_fields = [
+            source_hash,
+            from_stripped |> Base.decode16!(case: :mixed),
+            to,
+            mnt_mint |> String.replace_leading(<<0>>, <<>>),
+            mnt_value |> String.replace_leading(<<0>>, <<>>),
+            opaque.gas_limit |> String.replace_leading(<<0>>, <<>>),
+            is_system |> String.replace_leading(<<0>>, <<>>),
+            eth_mint |> String.replace_leading(<<0>>, <<>>),
+            opaque.data
+          ]
 
-        # Mantle DepositTx RLP (from op-geth deposit_tx.go):
-        #   [SourceHash, From, To, Mint, Value, Gas, IsSystemTx, EthValue, Data, EthTxValue?]
-        #
-        # Go RLP encoding rules:
-        #   IsSystemTx false → <<>> (empty bytes, RLP 0x80)
-        #   EthValue *big.Int rlp:"nil": non-nil 0 → <<>> (RLP 0x80)
-        #   EthTxValue *big.Int rlp:"optional": nil/zero → field OMITTED entirely
-        base_fields = [
-          source_hash,
-          from_stripped |> Base.decode16!(case: :mixed),
-          to_stripped |> Base.decode16!(case: :mixed),
-          mnt_mint |> String.replace_leading(<<0>>, <<>>),
-          mnt_value |> String.replace_leading(<<0>>, <<>>),
-          gas_limit |> String.replace_leading(<<0>>, <<>>),
-          is_system |> String.replace_leading(<<0>>, <<>>),
-          eth_mint |> String.replace_leading(<<0>>, <<>>),
-          data
-        ]
+          # EthTxValue: only include if non-zero (Go rlp:"optional" omits zero/nil)
+          eth_tx_value_stripped = eth_tx_value |> String.replace_leading(<<0>>, <<>>)
 
-        # EthTxValue: only include if non-zero (Go rlp:"optional" omits zero/nil)
-        eth_tx_value_stripped = eth_tx_value |> String.replace_leading(<<0>>, <<>>)
+          fields =
+            if eth_tx_value_stripped != <<>> do
+              base_fields ++ [eth_tx_value_stripped]
+            else
+              base_fields
+            end
 
-        fields =
-          if eth_tx_value_stripped != <<>> do
-            base_fields ++ [eth_tx_value_stripped]
-          else
-            base_fields
-          end
+          {ExRLP.encode(fields, encoding: :hex),
+           %{
+             data: opaque.data,
+             mnt_value: :binary.decode_unsigned(mnt_value),
+             eth_value: :binary.decode_unsigned(eth_tx_value)
+           }}
 
-        {ExRLP.encode(fields, encoding: :hex),
-         %{data: data, mnt_value: :binary.decode_unsigned(mnt_value), eth_value: :binary.decode_unsigned(eth_tx_value)}}
-      else
-        {msg_value, value, gas_limit, data} = parse_opaque_data_standard(opaque_data)
-
-        # Standard OP DepositTx RLP (8 fields):
-        #   [SourceHash, From, To, Mint, Value, Gas, IsSystemTx, Data]
-        {ExRLP.encode(
-           [
-             source_hash,
-             from_stripped |> Base.decode16!(case: :mixed),
-             to_stripped |> Base.decode16!(case: :mixed),
-             msg_value |> String.replace_leading(<<0>>, <<>>),
-             value |> String.replace_leading(<<0>>, <<>>),
-             gas_limit |> String.replace_leading(<<0>>, <<>>),
-             is_system |> String.replace_leading(<<0>>, <<>>),
-             data
-           ],
-           encoding: :hex
-         ), %{data: data, mnt_value: nil, eth_value: :binary.decode_unsigned(value)}}
+        %{msg_value: msg_value, value: value} ->
+          # Standard OP DepositTx RLP (8 fields):
+          #   [SourceHash, From, To, Mint, Value, Gas, IsSystemTx, Data]
+          {ExRLP.encode(
+             [
+               source_hash,
+               from_stripped |> Base.decode16!(case: :mixed),
+               to,
+               msg_value |> String.replace_leading(<<0>>, <<>>),
+               value |> String.replace_leading(<<0>>, <<>>),
+               opaque.gas_limit |> String.replace_leading(<<0>>, <<>>),
+               is_system |> String.replace_leading(<<0>>, <<>>),
+               opaque.data
+             ],
+             encoding: :hex
+           ), %{data: opaque.data, mnt_value: nil, eth_value: :binary.decode_unsigned(value)}}
       end
 
     transaction_type =
@@ -319,7 +387,10 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
 
     transfer =
       message
-      |> Map.merge(%{from: "0x" <> String.downcase(from_stripped), to: "0x" <> String.downcase(to_stripped)})
+      |> Map.merge(%{
+        from: "0x" <> String.downcase(from_stripped),
+        to: if(opaque.creation?, do: nil, else: "0x" <> String.downcase(to_stripped))
+      })
       |> BridgeMessage.decode_deposit(bridges)
 
     Map.merge(
@@ -334,46 +405,77 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
     )
   end
 
-  # Parses Mantle opaqueData (4×uint256) → returns all 6 values for 10-field RLP.
-  # opaqueData layout: [mnt_value(32), mnt_tx_value(32), msg_value(32), eth_tx_value(32), gas_limit(8), is_creation(1), data]
+  # Parses opaqueData by the event's version, as op-node does (`unmarshalDepositVersion0/1` in
+  # op-node/rollup/derive/deposit_log.go), and returns `:error` for a version or a length op-node refuses.
+  #
+  # Mantle opaqueData (version 0 has no `eth_tx_value`: the Mantle Sepolia portal emitted it until July 2024):
+  #   v0: [mnt_mint(32), mnt_value(32), eth_mint(32), gas_limit(8), is_creation(1), data]
+  #   v1: [mnt_mint(32), mnt_value(32), eth_mint(32), eth_tx_value(32), gas_limit(8), is_creation(1), data]
   #
   # Mantle DepositTx RLP field mapping (from op-geth deposit_tx.go):
-  #   Mint       = mnt_value    (position 0) — MNT to mint on L2
-  #   Value      = mnt_tx_value (position 1) — MNT to transfer
-  #   EthValue   = msg_value    (position 2) — ETH/BVM_ETH to mint
-  #   EthTxValue = eth_tx_value (position 3) — ETH to transfer
-  @spec parse_opaque_data_mantle(binary()) :: {binary(), binary(), binary(), binary(), binary(), binary()}
-  defp parse_opaque_data_mantle(opaque_data) do
-    [raw] = decode_data(opaque_data, [:bytes])
-
-    <<
-      mnt_mint::binary-size(32),
-      mnt_value::binary-size(32),
-      eth_mint::binary-size(32),
-      eth_tx_value::binary-size(32),
-      gas_limit::binary-size(8),
-      _is_creation::binary-size(1),
-      data::binary
-    >> = raw
-
-    {mnt_mint, mnt_value, eth_mint, eth_tx_value, gas_limit, data}
+  #   Mint       = mnt_mint     — MNT to mint on L2
+  #   Value      = mnt_value    — MNT to transfer
+  #   EthValue   = eth_mint     — ETH/BVM_ETH to mint
+  #   EthTxValue = eth_tx_value — ETH to transfer
+  #
+  # Standard OP opaqueData, version 0 only:
+  #   v0: [msg_value(32), value(32), gas_limit(8), is_creation(1), data]
+  #
+  # A non-zero is_creation byte makes the deposit a contract creation.
+  @spec parse_opaque_data(binary() | nil, non_neg_integer(), boolean()) :: {:ok, map()} | :error
+  defp parse_opaque_data(
+         <<mnt_mint::binary-size(32), mnt_value::binary-size(32), eth_mint::binary-size(32),
+           eth_tx_value::binary-size(32), gas_limit::binary-size(8), is_creation::binary-size(1), data::binary>>,
+         1,
+         true
+       ) do
+    {:ok,
+     %{
+       mnt_mint: mnt_mint,
+       mnt_value: mnt_value,
+       eth_mint: eth_mint,
+       eth_tx_value: eth_tx_value,
+       gas_limit: gas_limit,
+       creation?: is_creation != <<0>>,
+       data: data
+     }}
   end
 
-  # Standard OP opaqueData (2×uint256) → 4 values for 8-field RLP.
-  @spec parse_opaque_data_standard(binary()) :: {binary(), binary(), binary(), binary()}
-  defp parse_opaque_data_standard(opaque_data) do
-    [raw] = decode_data(opaque_data, [:bytes])
-
-    <<
-      msg_value::binary-size(32),
-      value::binary-size(32),
-      gas_limit::binary-size(8),
-      _is_creation::binary-size(1),
-      data::binary
-    >> = raw
-
-    {msg_value, value, gas_limit, data}
+  defp parse_opaque_data(
+         <<mnt_mint::binary-size(32), mnt_value::binary-size(32), eth_mint::binary-size(32), gas_limit::binary-size(8),
+           is_creation::binary-size(1), data::binary>>,
+         0,
+         true
+       ) do
+    {:ok,
+     %{
+       mnt_mint: mnt_mint,
+       mnt_value: mnt_value,
+       eth_mint: eth_mint,
+       eth_tx_value: <<>>,
+       gas_limit: gas_limit,
+       creation?: is_creation != <<0>>,
+       data: data
+     }}
   end
+
+  defp parse_opaque_data(
+         <<msg_value::binary-size(32), value::binary-size(32), gas_limit::binary-size(8), is_creation::binary-size(1),
+           data::binary>>,
+         0,
+         false
+       ) do
+    {:ok,
+     %{
+       msg_value: msg_value,
+       value: value,
+       gas_limit: gas_limit,
+       creation?: is_creation != <<0>>,
+       data: data
+     }}
+  end
+
+  defp parse_opaque_data(_raw_opaque_data, _version, _mantle_mode?), do: :error
 
   defp mantle_mode? do
     Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:mantle_mode] == true
@@ -384,6 +486,9 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
 
     Used by the `Indexer.Fetcher.Optimism` module to start fetching from a correct block number
     after reorg has occurred.
+
+    Without a checkpoint of its own, the fetcher removes every deposit and starts over from the start block: the
+    deposits were derived the way earlier versions of this fetcher derived them, or there are none yet.
 
     ## Parameters
     - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection.
@@ -399,13 +504,32 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
   @spec get_last_l1_item(EthereumJSONRPC.json_rpc_named_arguments()) ::
           {non_neg_integer(), binary() | nil, map() | nil} | {:error, any()}
   def get_last_l1_item(json_rpc_named_arguments) do
-    Optimism.get_last_item(
-      :L1,
-      &Deposit.last_deposit_l1_block_number_query/0,
-      &Deposit.remove_deposits_query/1,
-      json_rpc_named_arguments,
-      @counter_type
-    )
+    if is_nil(LastFetchedCounter.get(@counter_type, nullable: true)) do
+      # the same check again in the statement, so that it never removes the rows of a fetcher that checkpointed since
+      {deleted_count, _} =
+        Repo.delete_all(
+          from(d in Deposit,
+            where: not exists(from(c in LastFetchedCounter, where: c.counter_type == ^@counter_type, select: 1))
+          ),
+          timeout: :infinity
+        )
+
+      if deleted_count > 0 do
+        Logger.warning(
+          "Removed all #{deleted_count} rows of the op_deposits table, indexed without a checkpoint of this fetcher, to derive them again from the start block."
+        )
+      end
+
+      {0, nil, nil}
+    else
+      Optimism.get_last_item(
+        :L1,
+        &Deposit.last_deposit_l1_block_number_query/0,
+        &Deposit.remove_deposits_query/1,
+        json_rpc_named_arguments,
+        @counter_type
+      )
+    end
   end
 
   @doc """

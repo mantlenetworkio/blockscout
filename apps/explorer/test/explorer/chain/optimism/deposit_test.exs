@@ -285,7 +285,8 @@ defmodule Explorer.Chain.Optimism.DepositTest do
       test "a deposit not sent to the messenger has no message fields" do
         insert_op_deposit_with_message(
           calldata: op_relay_message_calldata(),
-          to: "0x00000000000000000000000000000000000000bb"
+          # a fresh address: a fixed one can collide with an address the factories generate afterwards
+          to: to_string(insert(:address).hash)
         )
 
         assert [item] = Deposit.list()
