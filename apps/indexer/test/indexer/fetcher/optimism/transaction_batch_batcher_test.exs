@@ -6,9 +6,11 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
     import ExUnit.CaptureLog
     import Mox
 
+    alias Explorer.Chain.Optimism.TransactionBatch, as: OptimismTransactionBatch
     alias Indexer.Fetcher.Optimism
     alias Indexer.Fetcher.Optimism.{BatcherTimeline, BlobRetryQueue, TransactionBatch}
     alias Indexer.RollupReorgMonitorQueue
+    alias Varint.LEB128
 
     @counter_type "optimism_batches_fetcher_last_l1_block_hash"
     @l1_url "http://l1.example"
@@ -205,6 +207,24 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
       end
     end
 
+    describe "handle_info(:continue, state) with a span batch" do
+      # The rollup genesis time precedes the genesis block, L2 block 10, by 1803 seconds. The span batch starts at L2
+      # block 50 and follows block 49.
+      test "imports the L2 blocks of a span batch counted from the rollup genesis time", ctx do
+        input = span_batch_frame(1803 + 2 * (50 - 10), canonical_hash(Agent.get(ctx.chain, & &1), 49), 3)
+        add_transactions(ctx, [transaction(104, 1, @a, input: input)])
+
+        assert {:noreply, _state} =
+                 TransactionBatch.handle_info(
+                   :continue,
+                   state(ctx, 103, 106, [], genesis_block_l2: 10, genesis_time_offset: 1803)
+                 )
+
+        assert [50, 51, 52] ==
+                 Repo.all(from(b in OptimismTransactionBatch, select: b.l2_block_number, order_by: b.l2_block_number))
+      end
+    end
+
     describe "handle_info(:init_with_delay, state)" do
       setup ctx do
         # like Mantle's SystemConfig 1.4.0: no startBlock() and batchInbox() getters, and an unusable
@@ -254,30 +274,72 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
         assert state.batcher_timeline.first_block == 101
         assert BatcherTimeline.address_at(state.batcher_timeline, 101) == @b
       end
+
+      # The first L1 blocks of a rollup can carry batches in a format the fetcher cannot read (Mantle's, before it
+      # posted blobs), so the scan can start later than the rollup's start block
+      test "starts at INDEXER_OPTIMISM_L1_BATCH_START_BLOCK, with the batcher there", ctx do
+        configure(submitter: nil, start_block: 101)
+
+        assert {:noreply, state} =
+                 TransactionBatch.handle_info(:init_with_delay, %{json_rpc_named_arguments_l2: ctx.rpc})
+
+        assert state.start_block == 101
+        assert BatcherTimeline.address_at(state.batcher_timeline, 101) == @b
+      end
+
+      # Span batches count their timestamps from the rollup's genesis time, which can precede the genesis block. Here
+      # L2 block 5, with the timestamp 1,700,000,060, is the genesis block.
+      test "measures how long the rollup genesis time precedes the genesis block", ctx do
+        configure(submitter: @a, genesis_block_l2: 5, genesis_l2_time: 1_700_000_060 - 1803)
+
+        assert {:noreply, %{genesis_block_l2: 5, genesis_time_offset: 1803}} =
+                 TransactionBatch.handle_info(:init_with_delay, %{json_rpc_named_arguments_l2: ctx.rpc})
+      end
+
+      test "takes up from INDEXER_OPTIMISM_L1_BATCH_START_BLOCK above the last processed L1 block", ctx do
+        configure(submitter: nil, start_block: 101)
+        Optimism.set_last_block_hash(canonical_hash(Agent.get(ctx.chain, & &1), 100), @counter_type)
+
+        assert {:noreply, state} =
+                 TransactionBatch.handle_info(:init_with_delay, %{json_rpc_named_arguments_l2: ctx.rpc})
+
+        assert state.start_block == 101
+      end
+
+      test "takes the genesis block's timestamp as the rollup genesis time by default", ctx do
+        configure(submitter: @a)
+
+        assert {:noreply, %{genesis_time_offset: 0}} =
+                 TransactionBatch.handle_info(:init_with_delay, %{json_rpc_named_arguments_l2: ctx.rpc})
+      end
     end
 
-    defp state(ctx, start_block, end_block, opts \\ []) do
+    defp state(ctx, start_block, end_block, opts \\ [], overrides \\ []) do
       {:ok, timeline} = BatcherTimeline.init(@contract, @start, nil, 10, ctx.rpc, Keyword.put(opts, :retries, 1))
 
-      %{
-        batch_inbox: @inbox,
-        batcher_timeline: timeline,
-        eip4844_blobs_api_url: "",
-        eip4844_blobs_api_fallback_url: "",
-        celestia_blobs_api_url: "",
-        eigenda_blobs_api_url: "",
-        alt_da_server_url: "",
-        block_check_interval: 60_000,
-        start_block: start_block,
-        end_block: end_block,
-        chunk_size: 4,
-        incomplete_channels: %{},
-        genesis_block_l2: 0,
-        block_duration: 2,
-        json_rpc_named_arguments: ctx.rpc,
-        json_rpc_named_arguments_l2: ctx.rpc,
-        chain_id_l1: 1
-      }
+      Map.merge(
+        %{
+          batch_inbox: @inbox,
+          batcher_timeline: timeline,
+          eip4844_blobs_api_url: "",
+          eip4844_blobs_api_fallback_url: "",
+          celestia_blobs_api_url: "",
+          eigenda_blobs_api_url: "",
+          alt_da_server_url: "",
+          block_check_interval: 60_000,
+          start_block: start_block,
+          end_block: end_block,
+          chunk_size: 4,
+          incomplete_channels: %{},
+          genesis_block_l2: 0,
+          block_duration: 2,
+          genesis_time_offset: 0,
+          json_rpc_named_arguments: ctx.rpc,
+          json_rpc_named_arguments_l2: ctx.rpc,
+          chain_id_l1: 1
+        },
+        Map.new(overrides)
+      )
     end
 
     defp channels(state) do
@@ -296,19 +358,51 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
     defp add_transactions(ctx, transactions),
       do: Agent.update(ctx.chain, &%{&1 | transactions: &1.transactions ++ transactions})
 
-    defp transaction(block, id, from, opts \\ []),
-      do: %{block: block, id: id, from: from, to: Keyword.get(opts, :to, @inbox), fork: Keyword.get(opts, :fork, 0)}
+    # `opts`: `to` (the inbox by default), `fork`, and `input` (one frame of channel `id` that is not the last one by
+    # default)
+    defp transaction(block, id, from, opts \\ []) do
+      %{
+        block: block,
+        id: id,
+        from: from,
+        to: Keyword.get(opts, :to, @inbox),
+        fork: Keyword.get(opts, :fork, 0),
+        input: Keyword.get(opts, :input, encode(<<0::8, id::128, 0::16, 1::32, 7::8, 0::8>>))
+      }
+    end
 
-    defp configure(submitter: submitter) do
+    # Calldata carrying a whole channel in one frame: a span batch (version 1) starting at `rel_timestamp` with
+    # `block_count` blocks, after the block whose hash is `parent_hash`. The rest of the span batch is not read.
+    defp span_batch_frame(rel_timestamp, "0x" <> parent_hash, block_count) do
+      <<parent_check::binary-size(20), _::binary>> = Base.decode16!(parent_hash, case: :lower)
+
+      batch =
+        <<1>> <>
+          LEB128.encode(rel_timestamp) <>
+          LEB128.encode(104) <> parent_check <> <<0::160>> <> LEB128.encode(block_count)
+
+      channel = :zlib.compress(ExRLP.encode(batch))
+      encode(<<0::8, 0xC0FFEE::128, 0::16, byte_size(channel)::32>> <> channel <> <<1::8>>)
+    end
+
+    # `options` holds the submitter, and other settings of the fetcher to override
+    defp configure(options) do
+      {submitter, batch_options} = Keyword.pop!(options, :submitter)
+
       for {module, config} <- [
             {TransactionBatch,
-             [
-               genesis_block_l2: 0,
-               blocks_chunk_size: 4,
-               inbox: @inbox,
-               submitter: submitter,
-               submitter_updates_range_size: 10
-             ]},
+             Keyword.merge(
+               [
+                 genesis_block_l2: 0,
+                 genesis_l2_time: nil,
+                 start_block: nil,
+                 blocks_chunk_size: 4,
+                 inbox: @inbox,
+                 submitter: submitter,
+                 submitter_updates_range_size: 10
+               ],
+               batch_options
+             )},
             {Indexer.Fetcher.Optimism,
              [
                optimism_l1_rpc: @l1_url,
@@ -420,8 +514,7 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
         "gas" => "0x186a0",
         "gasPrice" => "0x1",
         "hash" => encode(<<block::128, id::128>>),
-        # derivation version 0 and one frame of channel `id` that is not the last one
-        "input" => encode(<<0::8, id::128, 0::16, 1::32, 7::8, 0::8>>),
+        "input" => transaction.input,
         "nonce" => EthereumJSONRPC.integer_to_quantity(id),
         "r" => "0x1",
         "s" => "0x1",
