@@ -38,7 +38,6 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
   alias EthereumJSONRPC.Blocks
   alias Explorer.Chain
   alias Explorer.Chain.{Block, Hash}
-  alias Explorer.Chain.Block.Reader.General, as: BlockGeneralReader
   alias Explorer.Chain.Cache.Counters.LastFetchedCounter
   alias Explorer.Chain.Events.Subscriber
   alias Explorer.Chain.Optimism.EIP1559ConfigUpdate
@@ -105,7 +104,6 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
     :timer.sleep(2000)
 
     env = Application.get_all_env(:indexer)[__MODULE__]
-    optimism_env = Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism]
     timestamp_holocene = env[:holocene_timestamp_l2]
     timestamp_jovian = env[:jovian_timestamp_l2]
 
@@ -115,15 +113,14 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
          Subscriber.to(:blocks, :realtime),
          {:ok, latest_block_number} =
            Helper.get_block_number_by_tag("latest", json_rpc_named_arguments, Helper.infinite_retries_number()),
-         l2_block_number =
-           block_number_by_timestamp(timestamp_holocene, optimism_env[:block_duration], json_rpc_named_arguments),
+         l2_block_number = block_number_by_timestamp(timestamp_holocene, json_rpc_named_arguments),
          EIP1559ConfigUpdate.remove_invalid_updates(l2_block_number, latest_block_number),
          # if we set INDEXER_OPTIMISM_L2_JOVIAN_TIMESTAMP for the first time after Jovian activation,
          # we reset the last handled block hash to the activation block hash to continue
          # the `extraData` handling from that block
          (if jovian_first_time_defined?(timestamp_jovian) and timestamp_jovian <= timestamp_latest do
             timestamp_jovian
-            |> block_number_by_timestamp(optimism_env[:block_duration], json_rpc_named_arguments)
+            |> block_number_by_timestamp(json_rpc_named_arguments)
             |> block_hash_by_number(json_rpc_named_arguments)
             |> Optimism.set_last_block_hash(@counter_type_last_l2_block_hash)
           end),
@@ -439,38 +436,46 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
       })
   end
 
-  # Determines a block number by its timestamp. The function firstly tries to get the nearest block
-  # number to the specified timestamp using the database. If the block is not found, the RPC is used.
+  # Determines the activation block of an upgrade: the first block whose timestamp is at or after the activation time.
+  # The time need not be the timestamp of any block. The chain is searched over RPC rather than in the indexed blocks:
+  # those can be far from the time, as a new database is indexed from the head of the chain down.
   #
   # ## Parameters
-  # - `timestamp`: The timestamp for which the block number is being determined.
-  # - `block_duration`: The average block duration, seconds. Used for RPC approach.
-  # - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection. Used for RPC approach.
+  # - `timestamp`: The activation time of the upgrade, which the latest block has reached.
+  # - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection.
   #
   # ## Returns
-  # - The block number corresponding to the given timestamp.
-  @spec block_number_by_timestamp(non_neg_integer(), non_neg_integer(), EthereumJSONRPC.json_rpc_named_arguments()) ::
-          non_neg_integer()
-  defp block_number_by_timestamp(timestamp, block_duration, json_rpc_named_arguments)
+  # - The number of the activation block.
+  @spec block_number_by_timestamp(non_neg_integer(), EthereumJSONRPC.json_rpc_named_arguments()) :: non_neg_integer()
+  defp block_number_by_timestamp(timestamp, json_rpc_named_arguments)
 
-  defp block_number_by_timestamp(0, _block_duration, _json_rpc_named_arguments), do: 0
+  defp block_number_by_timestamp(0, _json_rpc_named_arguments), do: 0
 
-  defp block_number_by_timestamp(timestamp, block_duration, json_rpc_named_arguments) do
-    {:ok, timestamp_dt} = DateTime.from_unix(timestamp)
+  defp block_number_by_timestamp(timestamp, json_rpc_named_arguments) do
+    {:ok, latest_block_number} =
+      Helper.get_block_number_by_tag("latest", json_rpc_named_arguments, Helper.infinite_retries_number())
 
-    Logger.info("Trying to detect Holocene block number by its timestamp using indexed L2 blocks...")
+    block_number = first_block_at_or_after(timestamp, 0, latest_block_number, json_rpc_named_arguments)
 
-    case BlockGeneralReader.timestamp_to_block_number(timestamp_dt, :after, false) do
-      {:ok, block_number} ->
-        Logger.info("Holocene block number is detected using indexed L2 blocks. The block number is #{block_number}")
-        block_number
+    Logger.info("The first block at or after the timestamp #{timestamp} is #{block_number}.")
 
-      _ ->
-        Logger.info(
-          "Cannot detect Holocene block number using indexed L2 blocks. Trying to calculate the number using RPC requests..."
-        )
+    block_number
+  end
 
-        block_number_by_timestamp_from_rpc(timestamp, block_duration, json_rpc_named_arguments)
+  # Binary search for the first block of `low..high` whose timestamp is at or after `timestamp`. The timestamp of
+  # block `high` is.
+  defp first_block_at_or_after(_timestamp, low, high, _json_rpc_named_arguments) when low >= high, do: high
+
+  defp first_block_at_or_after(timestamp, low, high, json_rpc_named_arguments) do
+    middle = div(low + high, 2)
+
+    {:ok, middle_timestamp} =
+      Helper.get_block_timestamp_by_number_or_tag(middle, json_rpc_named_arguments, Helper.infinite_retries_number())
+
+    if middle_timestamp >= timestamp do
+      first_block_at_or_after(timestamp, low, middle, json_rpc_named_arguments)
+    else
+      first_block_at_or_after(timestamp, middle + 1, high, json_rpc_named_arguments)
     end
   end
 
@@ -520,116 +525,6 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
       end
     else
       {:ok, last_l2_block_number}
-    end
-  end
-
-  # Determines a block number by its timestamp using RPC. The function uses the average block
-  # duration and the latest block timestamp to calculate the required block number
-  # by the specified timestamp.
-  #
-  # If the found block was created later or earlier than the given timestamp
-  # (that can happen if the average block timestamp is not constant), the function
-  # additionally clarifies the block duration using the next block's timestamp
-  # and tries to calculate the block number again.
-  #
-  # ## Parameters
-  # - `timestamp`: The timestamp for which the block number is being determined.
-  # - `block_duration`: The average block duration, seconds.
-  # - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection.
-  # - `ref_block_number`: The reference block number for the calculation. If nil, the latest block is used.
-  # - `ref_block_timestamp`: The timestamp of the reference block number. If nil, the latest block timestamp is used.
-  #
-  # ## Returns
-  # - The block number corresponding to the given timestamp.
-  @spec block_number_by_timestamp_from_rpc(
-          non_neg_integer(),
-          non_neg_integer(),
-          EthereumJSONRPC.json_rpc_named_arguments(),
-          non_neg_integer() | nil,
-          non_neg_integer() | nil
-        ) :: non_neg_integer()
-  defp block_number_by_timestamp_from_rpc(
-         timestamp,
-         block_duration,
-         json_rpc_named_arguments,
-         ref_block_number \\ nil,
-         ref_block_timestamp \\ nil
-       ) do
-    ref_number =
-      if is_nil(ref_block_number) do
-        {:ok, latest_block_number} =
-          Helper.get_block_number_by_tag("latest", json_rpc_named_arguments, Helper.infinite_retries_number())
-
-        latest_block_number
-      else
-        ref_block_number
-      end
-
-    ref_timestamp =
-      if is_nil(ref_block_timestamp) do
-        {:ok, block_timestamp} =
-          Helper.get_block_timestamp_by_number_or_tag(
-            ref_number,
-            json_rpc_named_arguments,
-            Helper.infinite_retries_number()
-          )
-
-        block_timestamp
-      else
-        ref_block_timestamp
-      end
-
-    gap = div(abs(ref_timestamp - timestamp), block_duration)
-
-    block_number =
-      if ref_timestamp > timestamp do
-        ref_number - gap
-      else
-        ref_number + gap
-      end
-
-    {:ok, block_timestamp} =
-      Helper.get_block_timestamp_by_number_or_tag(
-        block_number,
-        json_rpc_named_arguments,
-        Helper.infinite_retries_number()
-      )
-
-    if block_timestamp == timestamp do
-      Logger.info("Holocene block number was successfully calculated using RPC. The block number is #{block_number}")
-      block_number
-    else
-      next_block_number = block_number + 1
-
-      {:ok, next_block_timestamp} =
-        Helper.get_block_timestamp_by_number_or_tag(
-          next_block_number,
-          json_rpc_named_arguments,
-          Helper.infinite_retries_number()
-        )
-
-      if next_block_timestamp == timestamp do
-        Logger.info(
-          "Holocene block number was successfully calculated using RPC. The block number is #{next_block_number}"
-        )
-
-        next_block_number
-      else
-        :timer.sleep(1000)
-        Logger.info("Another try for Holocene block number calculation using RPC...")
-
-        Logger.info(
-          "block_number = #{block_number}, next_block_number = #{next_block_number}, block_timestamp = #{block_timestamp}, next_block_timestamp = #{next_block_timestamp}"
-        )
-
-        block_number_by_timestamp_from_rpc(
-          timestamp,
-          next_block_timestamp - block_timestamp,
-          json_rpc_named_arguments,
-          block_number,
-          block_timestamp
-        )
-      end
     end
   end
 
