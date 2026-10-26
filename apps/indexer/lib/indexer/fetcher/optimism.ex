@@ -149,6 +149,7 @@ defmodule Indexer.Fetcher.Optimism do
        %{
          contract_address: contract_address,
          block_check_interval: block_check_interval,
+         start_block_l1: start_block_l1,
          start_block: start_block,
          end_block: last_safe_block,
          json_rpc_named_arguments: json_rpc_named_arguments,

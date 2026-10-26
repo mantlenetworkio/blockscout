@@ -14,7 +14,6 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
   import Explorer.Helper, only: [decode_data: 2]
 
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.Cache.Counters.LastFetchedCounter
   alias Explorer.Chain.Events.Publisher
   alias Explorer.Chain.Optimism.{BridgeMessage, Deposit}
   alias Indexer.Fetcher.Optimism
@@ -31,6 +30,11 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
   # `optimism_deposits_fetcher_last_l1_block_hash`, so the fetcher derives them again (see `get_last_l1_item/1`).
   @counter_type "optimism_deposits_fetcher_last_l1_block_hash_v2"
   @empty_hash "0x0000000000000000000000000000000000000000000000000000000000000000"
+  # How many L1 blocks before a reported reorg the deposits are derived again: three epochs, which no reorg of
+  # unfinalized blocks goes deeper than while the chain finalizes
+  @reorg_depth 96
+  # The default pause before the fetcher handles again a chunk with an event it cannot parse
+  @stall_retry_interval :timer.minutes(1)
 
   def child_spec(start_link_arguments) do
     spec = %{
@@ -63,7 +67,6 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
   def handle_info(
         :continue,
         %{
-          contract_address: optimism_portal,
           block_check_interval: block_check_interval,
           start_block: start_block,
           end_block: end_block,
@@ -79,65 +82,17 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
     chunks_number = ceil((end_block - start_block + 1) / eth_get_logs_range_size)
     chunk_range = Range.new(0, max(chunks_number - 1, 0), 1)
 
-    last_written_block =
+    {last_written_block, stalled?} =
       chunk_range
-      |> Enum.reduce_while(start_block - 1, fn current_chunk, _ ->
+      |> Enum.reduce_while({start_block - 1, false}, fn current_chunk, _ ->
         chunk_start = start_block + eth_get_logs_range_size * current_chunk
         chunk_end = min(chunk_start + eth_get_logs_range_size - 1, end_block)
 
-        if chunk_end >= chunk_start do
-          Helper.log_blocks_chunk_handling(chunk_start, chunk_end, start_block, end_block, nil, :L1)
-
-          {:ok, result} =
-            Helper.get_logs(
-              chunk_start,
-              chunk_end,
-              optimism_portal,
-              [@transaction_deposited_event],
-              json_rpc_named_arguments,
-              0,
-              Helper.infinite_retries_number()
-            )
-
-          deposit_events = prepare_events(result, transaction_type, json_rpc_named_arguments)
-
-          {:ok, _} =
-            Chain.import(%{
-              optimism_deposits: %{params: deposit_events},
-              timeout: :infinity
-            })
-
-          remove_stale_deposits(chunk_start, chunk_end, deposit_events)
-
-          Publisher.broadcast(%{new_optimism_deposits: deposit_events}, :realtime)
-
-          Helper.log_blocks_chunk_handling(
-            chunk_start,
-            chunk_end,
-            start_block,
-            end_block,
-            "#{Enum.count(deposit_events)} TransactionDeposited event(s)",
-            :L1
-          )
-        end
-
-        reorg_block = RollupReorgMonitorQueue.pop(__MODULE__)
-
-        if !is_nil(reorg_block) && reorg_block > 0 do
-          {deleted_count, _} = Repo.delete_all(from(d in Deposit, where: d.l1_block_number >= ^reorg_block))
-
-          log_deleted_rows_count(reorg_block, deleted_count)
-
-          Optimism.set_last_block_hash(@empty_hash, @counter_type)
-
-          {:halt, if(reorg_block <= chunk_end, do: reorg_block - 1, else: chunk_end)}
+        if chunk_end < chunk_start or import_chunk(chunk_start, chunk_end, state, transaction_type) == :ok do
+          {action, last_block} = handle_reorg_or_checkpoint(chunk_start, chunk_end, state)
+          {action, {last_block, false}}
         else
-          # credo:disable-for-next-line Credo.Check.Refactor.Nesting
-          if chunk_end >= chunk_start do
-            Optimism.set_last_block_hash_by_number(chunk_end, @counter_type, json_rpc_named_arguments)
-          end
-
-          {:cont, chunk_end}
+          {:halt, {chunk_start - 1, true}}
         end
       end)
 
@@ -145,11 +100,16 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
     new_end_block = Helper.fetch_latest_l1_block_number(json_rpc_named_arguments)
 
     delay =
-      if new_end_block == last_written_block do
-        # there is no new block, so wait for some time to let the chain issue the new block
-        max(block_check_interval - Timex.diff(Timex.now(), time_before, :milliseconds), 0)
-      else
-        0
+      cond do
+        stalled? ->
+          stall_retry_interval()
+
+        new_end_block == last_written_block ->
+          # there is no new block, so wait for some time to let the chain issue the new block
+          max(block_check_interval - Timex.diff(Timex.now(), time_before, :milliseconds), 0)
+
+        true ->
+          0
       end
 
     Process.send_after(self(), :continue, delay)
@@ -163,6 +123,133 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
     {:noreply, state}
   end
 
+  # Imports the deposits of L1 blocks chunk_start..chunk_end and removes the rows of these blocks that they do not
+  # include. Returns `:error`, importing nothing, when an event of the chunk does not parse (see `prepare_events/3`).
+  @spec import_chunk(non_neg_integer(), non_neg_integer(), map(), non_neg_integer()) :: :ok | :error
+  defp import_chunk(
+         chunk_start,
+         chunk_end,
+         %{
+           contract_address: optimism_portal,
+           start_block: start_block,
+           end_block: end_block,
+           json_rpc_named_arguments: json_rpc_named_arguments
+         },
+         transaction_type
+       ) do
+    Helper.log_blocks_chunk_handling(chunk_start, chunk_end, start_block, end_block, nil, :L1)
+
+    {:ok, result} =
+      Helper.get_logs(
+        chunk_start,
+        chunk_end,
+        optimism_portal,
+        [@transaction_deposited_event],
+        json_rpc_named_arguments,
+        0,
+        Helper.infinite_retries_number()
+      )
+
+    case prepare_events(result, transaction_type, json_rpc_named_arguments) do
+      {:ok, deposit_events} ->
+        {:ok, _} =
+          Chain.import(%{
+            optimism_deposits: %{params: deposit_events},
+            timeout: :infinity
+          })
+
+        remove_stale_deposits(chunk_start, chunk_end, deposit_events)
+
+        Publisher.broadcast(%{new_optimism_deposits: deposit_events}, :realtime)
+
+        Helper.log_blocks_chunk_handling(
+          chunk_start,
+          chunk_end,
+          start_block,
+          end_block,
+          "#{Enum.count(deposit_events)} TransactionDeposited event(s)",
+          :L1
+        )
+
+        :ok
+
+      :error ->
+        Logger.error(
+          "The deposits of L1 blocks #{chunk_start}..#{chunk_end} are not imported, as an event of these blocks does not parse. Retrying in #{div(stall_retry_interval(), 1000)} seconds..."
+        )
+
+        :error
+    end
+  end
+
+  # The block after the finalized one, or `fallback` when the L1 node cannot tell
+  defp first_unfinalized_block(fallback, json_rpc_named_arguments) do
+    case Helper.get_block_number_by_tag("finalized", json_rpc_named_arguments) do
+      {:ok, finalized_block} -> finalized_block + 1
+      {:error, _} -> fallback
+    end
+  end
+
+  defp stall_retry_interval do
+    Application.get_all_env(:indexer)[__MODULE__][:stall_retry_interval] || @stall_retry_interval
+  end
+
+  # Handles the L1 reorg found meanwhile, if any, or else checkpoints the chunk. Returns the reduce action and the last
+  # block handled.
+  #
+  # The reorg monitor reports the block whose hash changed, which can be above the first block the reorg replaced, and
+  # its report can be handled after the replacing blocks are finalized. So the deposits are derived again from
+  # `@reorg_depth` blocks before the reported block, or from the first block that is not finalized if that is earlier
+  # (not before the start block). The checkpoint names the block before it, as the fetcher does not take up from its
+  # last row on a restart (see `get_last_l1_item/1`).
+  defp handle_reorg_or_checkpoint(
+         chunk_start,
+         chunk_end,
+         %{start_block_l1: start_block_l1, json_rpc_named_arguments: json_rpc_named_arguments}
+       ) do
+    reorg_block = RollupReorgMonitorQueue.pop(__MODULE__)
+
+    if !is_nil(reorg_block) && reorg_block > 0 do
+      earliest_reorg_block = reorg_block - @reorg_depth
+
+      from_block =
+        earliest_reorg_block
+        |> min(first_unfinalized_block(earliest_reorg_block, json_rpc_named_arguments))
+        |> max(start_block_l1)
+
+      last_block = min(from_block - 1, chunk_end)
+
+      # No checkpoint before the start block, which `Optimism.init_continue/2` would refuse on a restart, nor one the
+      # L1 node does not resolve: without a checkpoint the fetcher takes up from the start block.
+      checkpoint_hash =
+        with true <- last_block >= start_block_l1,
+             [%{"hash" => hash}] <-
+               Optimism.get_blocks_by_numbers([last_block], json_rpc_named_arguments, Helper.infinite_retries_number()) do
+          hash
+        else
+          _ -> nil
+        end
+
+      # together, so that no checkpoint stays after the rows it covers are removed
+      {:ok, deleted_count} =
+        Repo.transaction(fn ->
+          {deleted_count, _} = Repo.delete_all(from(d in Deposit, where: d.l1_block_number >= ^from_block))
+          Optimism.set_last_block_hash(checkpoint_hash || @empty_hash, @counter_type)
+          deleted_count
+        end)
+
+      log_deleted_rows_count(from_block, deleted_count)
+
+      {:halt, last_block}
+    else
+      if chunk_end >= chunk_start do
+        Optimism.set_last_block_hash_by_number(chunk_end, @counter_type, json_rpc_named_arguments)
+      end
+
+      {:cont, chunk_end}
+    end
+  end
+
   defp log_deleted_rows_count(reorg_block, count) do
     if count > 0 do
       Logger.warning(
@@ -171,8 +258,9 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
     end
   end
 
-  # Removes the rows of the L1 blocks just handled that their deposits do not include. While a deployment rolls over,
-  # a fetcher of an earlier version can import rows after this one removed the rows it derived (`get_last_l1_item/1`).
+  # Removes the rows of the L1 blocks just handled that their deposits do not include: rows derived the way earlier
+  # versions of this fetcher derived them (see `get_last_l1_item/1`), including those a fetcher of an earlier version
+  # keeps importing while a deployment rolls over.
   defp remove_stale_deposits(chunk_start, chunk_end, deposit_events) do
     l2_transaction_hashes = Enum.map(deposit_events, & &1.l2_transaction_hash)
 
@@ -202,9 +290,11 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
   #                               Used to get blocks info by their numbers from the RPC node.
   #
   # ## Returns
-  # - A list of prepared events. Each list item is a map outlining a deposit event. The events that cannot be parsed
-  #   are left out (see `event_to_deposit/5`).
-  @spec prepare_events(list(), non_neg_integer(), EthereumJSONRPC.json_rpc_named_arguments()) :: [map()]
+  # - `{:ok, deposits}` with a map outlining each deposit event.
+  # - `:error` when an event does not parse (see `event_to_deposit/5`). op-node halts on such an event, so the chain
+  #   has none: the derivation is wrong or misconfigured, and the deposit's L2 transaction exists, so the caller must
+  #   not leave the deposit out.
+  @spec prepare_events(list(), non_neg_integer(), EthereumJSONRPC.json_rpc_named_arguments()) :: {:ok, [map()]} | :error
   defp prepare_events(events, transaction_type, json_rpc_named_arguments) do
     {timestamps, origins} =
       events
@@ -227,17 +317,17 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
 
     bridges = BridgeMessage.bridges()
 
-    events
-    |> Enum.map(&event_to_deposit(&1, timestamps, origins, transaction_type, bridges))
-    |> Enum.reject(&is_nil/1)
+    deposits = Enum.map(events, &event_to_deposit(&1, timestamps, origins, transaction_type, bridges))
+
+    if Enum.any?(deposits, &is_nil/1), do: :error, else: {:ok, deposits}
   end
 
   @doc """
     Prepares a `TransactionDeposited` event to be imported to database, with the bridge transfer its message carries.
 
     The L2 transaction is derived the way op-node derives it: the event's version (`topics[3]`) selects the opaqueData
-    layout, and a contract creation has no `to`. An event op-node would refuse as well (an unknown version, or
-    opaqueData too short for its version) is logged and skipped.
+    layout, and a contract creation has no `to`. An event op-node cannot derive either (an unknown version, or
+    opaqueData too short for its version) is logged and gives `nil`; op-node halts on such an event.
 
     ## Parameters
     - An event map outlining a `TransactionDeposited` event got from `eth_getLogs` response.
@@ -272,7 +362,7 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
 
       :error ->
         Logger.error(
-          "Skipped the TransactionDeposited event #{quantity_to_integer(log_index)} of the L1 transaction #{transaction_hash}: its opaqueData does not parse as version #{version}."
+          "Cannot derive the L2 transaction of the TransactionDeposited event #{quantity_to_integer(log_index)} of the L1 transaction #{transaction_hash}: its opaqueData does not parse as version #{version}."
         )
 
         nil
@@ -482,53 +572,29 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
   end
 
   @doc """
-    Determines the last saved L1 block number, the last saved transaction hash, and the transaction info for L1 Deposit events.
+    Determines the last L1 block the fetcher handled, for the `Indexer.Fetcher.Optimism` module to start fetching from
+    the block after it.
 
-    Used by the `Indexer.Fetcher.Optimism` module to start fetching from a correct block number
-    after reorg has occurred.
-
-    Without a checkpoint of its own, the fetcher removes every deposit and starts over from the start block: the
-    deposits were derived the way earlier versions of this fetcher derived them, or there are none yet.
+    The fetcher takes up after the block its checkpoint names. Without a checkpoint of its own (the deposits were
+    derived the way earlier versions of this fetcher derived them, or there are none yet), or with one the L1 node no
+    longer resolves, it derives every deposit again from the start block. It does not take up from its last row: while
+    a deployment rolls over, a fetcher of the previous version can import rows ahead of this one. The rows stay until
+    the chunk of their L1 block replaces them (see `remove_stale_deposits/3`), so the deposits stay visible meanwhile
+    and a rollback to an earlier version finds them all.
 
     ## Parameters
     - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection.
-                                  Used to get transaction info by its hash from the RPC node.
+                                  Used to get the checkpoint block by its hash from the RPC node.
 
     ## Returns
-    - A tuple `{last_block_number, last_transaction_hash, last_transaction}` where
-      `last_block_number` is the last block number found in the corresponding table (0 if not found),
-      `last_transaction_hash` is the last transaction hash found in the corresponding table (nil if not found),
-      `last_transaction` is the transaction info got from the RPC (nil if not found).
-    - A tuple `{:error, message}` in case the `eth_getTransactionByHash` RPC request failed.
+    - A tuple `{last_block_number, nil, nil}`, where `last_block_number` is the block the checkpoint names, or 0 to start
+      from the start block.
   """
-  @spec get_last_l1_item(EthereumJSONRPC.json_rpc_named_arguments()) ::
-          {non_neg_integer(), binary() | nil, map() | nil} | {:error, any()}
+  @spec get_last_l1_item(EthereumJSONRPC.json_rpc_named_arguments()) :: {non_neg_integer(), nil, nil}
   def get_last_l1_item(json_rpc_named_arguments) do
-    if is_nil(LastFetchedCounter.get(@counter_type, nullable: true)) do
-      # the same check again in the statement, so that it never removes the rows of a fetcher that checkpointed since
-      {deleted_count, _} =
-        Repo.delete_all(
-          from(d in Deposit,
-            where: not exists(from(c in LastFetchedCounter, where: c.counter_type == ^@counter_type, select: 1))
-          ),
-          timeout: :infinity
-        )
-
-      if deleted_count > 0 do
-        Logger.warning(
-          "Removed all #{deleted_count} rows of the op_deposits table, indexed without a checkpoint of this fetcher, to derive them again from the start block."
-        )
-      end
-
-      {0, nil, nil}
-    else
-      Optimism.get_last_item(
-        :L1,
-        &Deposit.last_deposit_l1_block_number_query/0,
-        &Deposit.remove_deposits_query/1,
-        json_rpc_named_arguments,
-        @counter_type
-      )
+    case Optimism.get_last_block_number_from_last_fetched_counter(json_rpc_named_arguments, @counter_type) do
+      nil -> {0, nil, nil}
+      last_block_number -> {last_block_number, nil, nil}
     end
   end
 

@@ -23,6 +23,7 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
     @op_sepolia_deposits @op_sepolia_path |> File.read!() |> Jason.decode!() |> Map.fetch!("deposits")
 
     @portal "0xb3db4bd5bc225930ed674494f9a4f6a11b8efbc8"
+    @counter_type "optimism_deposits_fetcher_last_l1_block_hash_v2"
 
     # opaqueData of the synthetic contract creations (see their tests)
     @mantle_v0_creation_data "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000006e000000000000000000000000000000000000000000000000000000000000123400000000000000000000000000000000000000000000000000000000000056780000000000000000000000000000000000000000000000000000000000009abc0000000000030d40016080604052000000000000000000000000000000000000"
@@ -61,7 +62,7 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
         refute Map.has_key?(deposit, :transfer_type)
       end
 
-      test "skips an event of an unknown version" do
+      test "returns nil for an event of an unknown version" do
         configure_bridges()
         event = with_version(deposit(:eth)["l1_event"], 2)
 
@@ -71,7 +72,7 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
         assert log =~ event["transactionHash"]
       end
 
-      test "skips an event whose opaqueData is too short for its version" do
+      test "returns nil for an event whose opaqueData is too short for its version" do
         configure_bridges()
         event = with_version(deposit(:v0_no_calldata)["l1_event"], 1)
 
@@ -130,7 +131,7 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
       end
 
       # the OP Stack portal emits version 0 events only
-      test "skips a Mantle version 1 event" do
+      test "returns nil for a Mantle version 1 event" do
         event = deposit(:creation)["l1_event"]
 
         log = capture_log(fn -> assert Deposit.event_to_deposit(event, %{}, %{}, 126, nil) == nil end)
@@ -146,19 +147,51 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
         on_exit(fn -> ConCache.delete(LatestL1BlockNumber.cache_name(), :block_number) end)
       end
 
-      # An event the derivation cannot parse used to raise, so the fetcher fetched the same chunk again on every
-      # restart and never got past it
-      test "imports the deposits of a chunk and skips the events it cannot parse", %{
+      # op-node halts on a deposit it cannot derive, so the chain has no such event: a failure to parse one is a
+      # derivation bug or a configuration error (such as Mantle mode off on a Mantle chain), and the deposit's L2
+      # transaction exists. Leaving the event out would lose the deposit for good, as the checkpoint moves on.
+      test "imports nothing of a chunk with an event it cannot parse, and retries the chunk later", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
-        index_chunk_with_unparsable_event(json_rpc_named_arguments)
+        creation = deposit(:creation)["l1_event"]
 
-        assert [l2_transaction_hash] = Repo.all(from(d in DepositSchema, select: d.l2_transaction_hash))
-        assert to_string(l2_transaction_hash) == deposit(:creation)["l2_transaction_hash"]
+        unparsable =
+          deposit(:v0_no_calldata)["l1_event"]
+          |> with_version(1)
+          |> Map.merge(%{
+            "blockHash" => creation["blockHash"],
+            "blockNumber" => creation["blockNumber"],
+            "logIndex" => "0x5c"
+          })
+
+        %{l2_transaction_hash: before_chunk} = insert(:op_deposit, l1_block_number: 11_014_700)
+        %{l2_transaction_hash: in_chunk} = insert(:op_deposit, l1_block_number: 11_014_805)
+        Optimism.set_last_block_hash(hash(11_014_799), @counter_type)
+        put_stall_retry_interval(500)
+
+        expect_chunk_requests([creation, unparsable])
+        stub_checkpoint_request()
+
+        log =
+          capture_log(fn ->
+            assert {:noreply, %{start_block: 11_014_800, end_block: 11_014_900}} =
+                     Deposit.handle_info(:continue, state(json_rpc_named_arguments, 11_014_800, 11_014_810))
+          end)
+
+        # not right away: the chunk fails the same way until the fetcher or its configuration changes
+        refute_received :continue
+
+        assert [before_chunk, in_chunk] ==
+                 Repo.all(from(d in DepositSchema, select: d.l2_transaction_hash, order_by: d.l1_block_number))
+
+        assert String.downcase(Optimism.get_last_block_hash(@counter_type)) == hash(11_014_799)
+        assert log =~ unparsable["transactionHash"]
+
+        assert_receive :continue, 2_000
       end
 
-      # While a deployment rolls over, a fetcher of the previous version keeps importing after this one removed the
-      # deposits it derived. Its rows of the blocks of a chunk give way to the chunk's deposits; other rows stay.
+      # While a deployment rolls over, a fetcher of the previous version keeps importing rows derived the previous way.
+      # Its rows of the blocks of a chunk give way to the chunk's deposits; other rows stay.
       test "replaces the rows of the chunk's blocks that its deposits do not include", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
@@ -168,7 +201,7 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
         %{l2_transaction_hash: before_chunk} = insert(:op_deposit, l1_block_number: 11_014_799)
         %{l2_transaction_hash: after_chunk} = insert(:op_deposit, l1_block_number: 11_014_811)
 
-        index_chunk_with_unparsable_event(json_rpc_named_arguments)
+        index_creation_chunk(json_rpc_named_arguments)
 
         assert [{11_014_799, ^before_chunk}, {11_014_804, creation}, {11_014_811, ^after_chunk}] =
                  Repo.all(
@@ -184,7 +217,7 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
       test "resumes from the last block of the chunk after a restart", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
-        index_chunk_with_unparsable_event(json_rpc_named_arguments)
+        index_creation_chunk(json_rpc_named_arguments)
 
         # the checkpoint goes out in upper-case hex (`Optimism.get_last_block_hash/1`)
         expect(EthereumJSONRPC.Mox, :json_rpc, fn %{method: "eth_getBlockByHash", params: [block_hash, false]},
@@ -205,81 +238,132 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
       end
 
       # The deposits indexed before creation deposits and Mantle v0 events were derived the way op-node derives them
-      # are checkpointed under the previous counter name only
-      test "derives every deposit again when it has no checkpoint of its own", %{
+      # are checkpointed under the previous counter name only. They stay until the chunk of their L1 block replaces
+      # them: the history stays visible meanwhile, and a rollback to the previous version finds it all.
+      test "derives every deposit again from the start block, keeping the rows, without a checkpoint of its own", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
         insert(:op_deposit, l1_block_number: 110)
         insert(:op_deposit, l1_block_number: 150)
         Optimism.set_last_block_hash(hash(150), "optimism_deposits_fetcher_last_l1_block_hash")
 
-        stub(EthereumJSONRPC.Mox, :json_rpc, fn
-          %{method: "eth_getBlockByHash"}, _options -> {:ok, block_response(150)}
-          %{method: "eth_getTransactionByHash", params: [hash]}, _options -> {:ok, %{"hash" => to_string(hash)}}
-        end)
-
-        log = capture_log(fn -> assert {0, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments) end)
-
-        assert [] == Repo.all(DepositSchema)
-        assert log =~ "2 rows"
+        assert {0, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+        assert [110, 150] == Repo.all(from(d in DepositSchema, select: d.l1_block_number, order_by: d.l1_block_number))
       end
 
-      # An L1 reorg resets the checkpoint to the empty hash, and the fetcher resumes from the last deposit left. Here the
-      # fetcher handles blocks 200..299 when it learns of a reorg from block 120.
-      test "keeps the deposits once an L1 reorg has reset its checkpoint", %{
+      # The reorg monitor reports the block whose hash changed, which can be above the first block the reorg replaced,
+      # and its report can be handled after the replacing blocks are finalized. So the fetcher derives the deposits
+      # again from 96 blocks (three epochs) before the reported block, or from the first block that is not finalized
+      # if that is earlier, and the checkpoint names the block before. Without one, a restart would take up from the
+      # last row, which a fetcher of the previous version can import beyond the reorg while a deployment rolls over.
+      # Here the fetcher handles blocks 300..399 when the monitor reports a reorg at block 380, and block 370 is
+      # finalized.
+      test "derives the deposits again from three epochs before an L1 reorg, also after a restart", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
-        kept = insert(:op_deposit, l1_block_number: 110)
-        insert(:op_deposit, l1_block_number: 150)
-        RollupReorgMonitorQueue.push(120, Deposit)
-
-        expect(EthereumJSONRPC.Mox, :json_rpc, fn %{method: "eth_getLogs"}, _options -> {:ok, []} end)
+        %{l2_transaction_hash: kept} = insert(:op_deposit, l1_block_number: 270)
+        insert(:op_deposit, l1_block_number: 290)
+        insert(:op_deposit, l1_block_number: 350)
+        RollupReorgMonitorQueue.push(380, Deposit)
+        expect_reorg_requests(370, %{283 => block_response(283)})
 
         capture_log(fn ->
-          assert {:noreply, %{start_block: 120}} =
-                   Deposit.handle_info(:continue, state(json_rpc_named_arguments, 200, 299))
+          assert {:noreply, %{start_block: 284}} =
+                   Deposit.handle_info(:continue, state(json_rpc_named_arguments, 300, 399))
         end)
 
-        expect(EthereumJSONRPC.Mox, :json_rpc, fn %{method: "eth_getTransactionByHash", params: [hash]}, _options ->
-          {:ok, %{"hash" => to_string(hash)}}
+        assert [kept] == Repo.all(from(d in DepositSchema, select: d.l2_transaction_hash))
+
+        # the previous version imports a deposit of a later block before the restart
+        insert(:op_deposit, l1_block_number: 450)
+        expect_checkpoint_lookup(283)
+
+        assert {283, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+      end
+
+      # Finality can lag far behind, as on a testnet that does not finalize: the deposits are derived again from the
+      # first block that is not finalized
+      test "derives the deposits again from the first unfinalized block after an L1 reorg deeper than three epochs", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        %{l2_transaction_hash: kept} = insert(:op_deposit, l1_block_number: 190)
+        insert(:op_deposit, l1_block_number: 210)
+        RollupReorgMonitorQueue.push(380, Deposit)
+        expect_reorg_requests(200, %{200 => block_response(200)})
+
+        capture_log(fn ->
+          assert {:noreply, %{start_block: 201}} =
+                   Deposit.handle_info(:continue, state(json_rpc_named_arguments, 300, 399))
         end)
 
-        assert {110, last_transaction_hash, %{}} = Deposit.get_last_l1_item(json_rpc_named_arguments)
-        assert last_transaction_hash == kept.l1_transaction_hash
-        assert [110] == Repo.all(from(d in DepositSchema, select: d.l1_block_number))
+        assert [kept] == Repo.all(from(d in DepositSchema, select: d.l2_transaction_hash))
+      end
+
+      # The rows are removed with the checkpoint written, so a checkpoint the L1 node cannot resolve leaves no earlier
+      # checkpoint behind it: the fetcher takes up from the start block, not after the removed rows
+      test "takes up from the start block after an L1 reorg whose checkpoint block the L1 node does not return", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        insert(:op_deposit, l1_block_number: 290)
+        Optimism.set_last_block_hash(hash(350), @counter_type)
+        RollupReorgMonitorQueue.push(380, Deposit)
+        expect_reorg_requests(370, %{283 => nil})
+
+        capture_log(fn -> Deposit.handle_info(:continue, state(json_rpc_named_arguments, 300, 399)) end)
+
+        assert {0, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+      end
+
+      # A checkpoint before the start block would stop the fetcher on a restart (`Optimism.init_continue/2`), so after a
+      # reorg at the start block of a new deployment the fetcher takes up from the start block again, whatever rows a
+      # fetcher of the previous version imports meanwhile
+      test "takes up from the start block after an L1 reorg at it, also after a restart", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        RollupReorgMonitorQueue.push(200, Deposit)
+        expect_reorg_requests(150, %{})
+
+        capture_log(fn ->
+          assert {:noreply, %{start_block: 200}} =
+                   Deposit.handle_info(:continue, state(json_rpc_named_arguments, 200, 299, 200))
+        end)
+
+        insert(:op_deposit, l1_block_number: 250)
+
+        assert {0, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
       end
     end
 
-    # Runs the fetcher over L1 blocks 11,014,800..11,014,810, where the Sepolia creation deposit sits, with a second
-    # event in its block that the derivation cannot parse: the v0_no_calldata opaqueData under version 1.
-    defp index_chunk_with_unparsable_event(json_rpc_named_arguments) do
-      creation = deposit(:creation)["l1_event"]
+    # The requests of a chunk without deposits that handles an L1 reorg: the logs, the finalized block, and the block of
+    # each checkpoint in `checkpoint_blocks` (`nil` for a block the node does not return)
+    defp expect_reorg_requests(finalized_block, checkpoint_blocks) do
+      expect(EthereumJSONRPC.Mox, :json_rpc, 2 + map_size(checkpoint_blocks), fn
+        %{method: "eth_getLogs"}, _options ->
+          {:ok, []}
 
-      unparsable =
-        deposit(:v0_no_calldata)["l1_event"]
-        |> with_version(1)
-        |> Map.merge(%{
-          "blockHash" => creation["blockHash"],
-          "blockNumber" => creation["blockNumber"],
-          "logIndex" => "0x5c"
-        })
+        [%{id: id, method: "eth_getBlockByNumber", params: ["finalized", false]}], _options ->
+          {:ok, [%{id: id, result: block_response(finalized_block)}]}
 
-      # Block numbers from events go out as they came; the others through EthereumJSONRPC.integer_to_quantity/1, which
-      # writes upper-case hex.
-      expect(EthereumJSONRPC.Mox, :json_rpc, 3, fn
-        %{method: "eth_getLogs", params: [%{address: @portal, fromBlock: "0xA81290", toBlock: "0xA8129A"}]}, _options ->
-          {:ok, [creation, unparsable]}
+        [%{id: id, method: "eth_getBlockByNumber", params: [quantity, false]}], _options ->
+          {:ok, [%{id: id, result: Map.fetch!(checkpoint_blocks, EthereumJSONRPC.quantity_to_integer(quantity))}]}
+      end)
+    end
 
-        [%{id: id, method: "eth_getBlockByNumber", params: ["0xa81294", true]}], _options ->
-          transactions = [
-            transaction_response(creation["transactionHash"], "0x7466be349b17a0f966f97ddeefe393894b9faf06"),
-            transaction_response(unparsable["transactionHash"], "0x25b903c548436f3b563a5f6396071df82df560b5")
-          ]
+    defp expect_checkpoint_lookup(number) do
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn %{method: "eth_getBlockByHash", params: [block_hash, false]},
+                                                _options ->
+        assert String.downcase(block_hash) == hash(number)
+        {:ok, block_response(number)}
+      end)
+    end
 
-          {:ok, [%{id: id, result: block_response(11_014_804, transactions)}]}
+    # Runs the fetcher over L1 blocks 11,014,800..11,014,810, where the Sepolia creation deposit sits.
+    defp index_creation_chunk(json_rpc_named_arguments) do
+      expect_chunk_requests([deposit(:creation)["l1_event"]])
 
-        [%{id: id, method: "eth_getBlockByNumber", params: ["0xA8129A", false]}], _options ->
-          {:ok, [%{id: id, result: block_response(11_014_810)}]}
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn [%{id: id, method: "eth_getBlockByNumber", params: ["0xA8129A", false]}],
+                                                _options ->
+        {:ok, [%{id: id, result: block_response(11_014_810)}]}
       end)
 
       capture_log(fn ->
@@ -288,10 +372,41 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
       end)
     end
 
-    defp state(json_rpc_named_arguments, start_block, end_block) do
+    # The logs of L1 blocks 11,014,800..11,014,810 and their block, 11,014,804. Block numbers from events go out as
+    # they came; the others through EthereumJSONRPC.integer_to_quantity/1, which writes upper-case hex.
+    defp expect_chunk_requests(events) do
+      expect(EthereumJSONRPC.Mox, :json_rpc, 2, fn
+        %{method: "eth_getLogs", params: [%{address: @portal, fromBlock: "0xA81290", toBlock: "0xA8129A"}]}, _options ->
+          {:ok, events}
+
+        [%{id: id, method: "eth_getBlockByNumber", params: ["0xa81294", true]}], _options ->
+          transactions =
+            Enum.map(events, &transaction_response(&1["transactionHash"], "0x7466be349b17a0f966f97ddeefe393894b9faf06"))
+
+          {:ok, [%{id: id, result: block_response(11_014_804, transactions)}]}
+      end)
+    end
+
+    defp put_stall_retry_interval(milliseconds) do
+      previous = Application.get_env(:indexer, Deposit)
+      Application.put_env(:indexer, Deposit, Keyword.put(previous || [], :stall_retry_interval, milliseconds))
+      on_exit(fn -> Application.put_env(:indexer, Deposit, previous) end)
+    end
+
+    # The checkpoint of block 11,014,810, for a test that expects none.
+    defp stub_checkpoint_request do
+      stub(EthereumJSONRPC.Mox, :json_rpc, fn [%{id: id, method: "eth_getBlockByNumber", params: ["0xA8129A", false]}],
+                                              _options ->
+        {:ok, [%{id: id, result: block_response(11_014_810)}]}
+      end)
+    end
+
+    # `start_block_l1` is the configured start block of the fetcher
+    defp state(json_rpc_named_arguments, start_block, end_block, start_block_l1 \\ 1) do
       %{
         contract_address: @portal,
         block_check_interval: 12_000,
+        start_block_l1: start_block_l1,
         start_block: start_block,
         end_block: end_block,
         json_rpc_named_arguments: json_rpc_named_arguments,
