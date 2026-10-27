@@ -16,62 +16,6 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
       %{json_rpc_named_arguments: mocked_json_rpc_named_arguments}
     end
 
-    describe "get_block_numbers_by_hashes/2" do
-      test "processes empty list" do
-        assert TransactionBatch.get_block_numbers_by_hashes([], %{}) == %{}
-      end
-
-      test "processes list of hashes", %{json_rpc_named_arguments: json_rpc_named_arguments} do
-        hashA = <<1::256>>
-
-        hashB =
-          <<48, 120, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32,
-            32, 32, 32, 32, 32>>
-
-        hashes = [
-          hashA,
-          hashB
-        ]
-
-        expect(EthereumJSONRPC.Mox, :json_rpc, 1, fn [
-                                                       %{
-                                                         id: id1,
-                                                         method: "eth_getBlockByHash",
-                                                         params: [
-                                                           %Explorer.Chain.Hash{byte_count: 32, bytes: ^hashA},
-                                                           false
-                                                         ]
-                                                       },
-                                                       %{
-                                                         id: id2,
-                                                         method: "eth_getBlockByHash",
-                                                         params: [
-                                                           %Explorer.Chain.Hash{byte_count: 32, bytes: ^hashB},
-                                                           false
-                                                         ]
-                                                       }
-                                                     ],
-                                                     _options ->
-          {:ok,
-           [
-             %{
-               id: id1,
-               jsonrpc: "2.0",
-               result: %{"number" => 1, "hash" => "0x0000000000000000000000000000000000000000000000000000000000000001"}
-             },
-             %{
-               id: id2,
-               jsonrpc: "2.0",
-               result: %{"number" => 2, "hash" => "0x3078202020202020202020202020202020202020202020202020202020202020"}
-             }
-           ]}
-        end)
-
-        assert %{hashA => 1, hashB => 2} ==
-                 TransactionBatch.get_block_numbers_by_hashes(hashes, json_rpc_named_arguments)
-      end
-    end
-
     describe "unwrap_mantle_blob_inputs/3" do
       @blob_a "0x01" <> String.duplicate("aa", 31)
       @blob_b "0x01" <> String.duplicate("bb", 31)
@@ -379,9 +323,9 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
         assert [36_438_664, 36_438_665, 36_438_666] == parse_sepolia_span(json_rpc_named_arguments)
       end
 
-      # Two span batches of a channel: the first one's parent comes at once and stays checked, the second one's parent
-      # is asked for again alone
-      test "checks again only the span batches whose parent the L2 node does not return yet", %{
+      # Two span batches of a channel: the first one's parent comes at once, the second one's is waited for, and then
+      # both are checked again, as the L2 node can replace the first one's meanwhile
+      test "checks every span batch of a channel again after waiting for one of them", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
         first_parent = "0x" <> String.duplicate("aa", 32)
@@ -397,17 +341,66 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
            ]}
         end)
 
-        expect_block_hash(19, second_parent)
+        expect_block_hashes(%{9 => first_parent, 19 => second_parent})
 
         channel =
           :zlib.compress(
             ExRLP.encode(span_batch(20, first_parent, 10)) <> ExRLP.encode(span_batch(40, second_parent, 2))
           )
 
-        assert Enum.to_list(10..19) ++ [20, 21] ==
-                 channel
-                 |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {0, 2, 0}, json_rpc_named_arguments)
-                 |> Enum.map(& &1.l2_block_number)
+        capture_log(fn ->
+          send(
+            self(),
+            {:blocks,
+             channel
+             |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {0, 2, 0}, json_rpc_named_arguments)
+             |> Enum.map(& &1.l2_block_number)}
+          )
+        end)
+
+        assert_received {:blocks, blocks}
+        assert Enum.to_list(10..19) ++ [20, 21] == blocks
+      end
+
+      # The block before the first span batch, which it matched while not safe yet, is replaced while the second span batch
+      # waits: the first span batch no longer follows it once it is safe
+      test "leaves out a span batch whose block before is replaced while another span batch waits", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        first_parent = "0x" <> String.duplicate("aa", 32)
+        second_parent = "0x" <> String.duplicate("bb", 32)
+        replacing = "0x" <> String.duplicate("33", 32)
+
+        expect(EthereumJSONRPC.Mox, :json_rpc, fn requests, _options ->
+          {:ok,
+           [
+             %{id: Enum.at(requests, 1).id, result: nil},
+             %{id: Enum.at(requests, 0).id, result: %{"number" => "0x9", "hash" => first_parent}}
+           ]}
+        end)
+
+        expect_block_hashes(%{9 => replacing, 19 => second_parent})
+        expect_safe_block(100)
+        expect_block_hash(9, replacing)
+
+        channel =
+          :zlib.compress(
+            ExRLP.encode(span_batch(20, first_parent, 10)) <> ExRLP.encode(span_batch(40, second_parent, 2))
+          )
+
+        log =
+          capture_log(fn ->
+            send(
+              self(),
+              {:blocks,
+               channel
+               |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {0, 2, 0}, json_rpc_named_arguments)
+               |> Enum.map(& &1.l2_block_number)}
+            )
+          end)
+
+        assert_received {:blocks, [20, 21]}
+        assert log =~ "10..19 does not follow the safe L2 block 9"
       end
 
       # Two span batches of a channel start at the same block with different parents: only the one following the safe
@@ -508,8 +501,9 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
         assert_received {:blocks, [36_438_664, 36_438_665, 36_438_666]}
       end
 
-      # The checks of a span batch also end with their time budget, `attempts` × `interval`, when the L2 node is slow
-      test "stops checking a span batch when its time budget is spent", %{
+      # A span batch left out would not be checked again, as the fetcher moves on to the next L1 blocks: it is waited for,
+      # and a wait beyond `attempts` × `interval` is reported as stalling the fetcher, once a minute at most
+      test "keeps checking a span batch past its time budget, reporting the stall", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
         expect(EthereumJSONRPC.Mox, :json_rpc, fn [%{id: id, method: "eth_getBlockByNumber"}], _options ->
@@ -517,76 +511,199 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
           {:ok, [%{id: id, result: nil}]}
         end)
 
-        log = capture_log(fn -> assert [] == parse_sepolia_span(json_rpc_named_arguments) end)
+        expect(EthereumJSONRPC.Mox, :json_rpc, 3, fn [%{id: id, method: "eth_getBlockByNumber"}], _options ->
+          {:ok, [%{id: id, result: nil}]}
+        end)
 
-        assert log =~ "36438663"
+        expect_block_hash(36_438_663, @sepolia_parent)
+
+        log = capture_log(fn -> send(self(), {:blocks, parse_sepolia_span(json_rpc_named_arguments)}) end)
+
+        assert_received {:blocks, [36_438_664, 36_438_665, 36_438_666]}
+        assert 2 == length(String.split(log, "importing no batches meanwhile"))
       end
 
+      # A singular batch is checked by the number of its block, counted back from the latest block by the batch timestamp
       test "maps a singular batch to the block after its parent", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
         parent = :crypto.strong_rand_bytes(32)
-        expect_block_numbers(%{parent => 41})
+        expect_latest_l2_block(100)
+        expect_block_hash(41, "0x" <> Base.encode16(parent, case: :lower))
 
-        assert [42] ==
-                 [parent]
+        assert [%{l2_block_number: 42, frame_sequence_id: 7, l1_timestamp: @l1_timestamp} = block] =
+                 [{parent, l2_timestamp(42)}]
                  |> singular_batches_channel()
                  |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {0, 2, 0}, json_rpc_named_arguments)
-                 |> Enum.map(& &1.l2_block_number)
+
+        assert map_size(block) == 3
       end
 
-      test "waits for the parent of a singular batch that the L2 node does not return yet", %{
+      # The first batch is for the block after the rollup genesis
+      test "maps a singular batch to the block after the rollup genesis", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
         parent = :crypto.strong_rand_bytes(32)
-        expect_block_numbers(%{parent => nil})
-        expect_block_numbers(%{parent => 41})
+        expect_latest_l2_block(100)
+        expect_block_hash(41, "0x" <> Base.encode16(parent, case: :lower))
 
         assert [42] ==
-                 [parent]
+                 [{parent, l2_timestamp(42)}]
                  |> singular_batches_channel()
-                 |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {0, 2, 0}, json_rpc_named_arguments)
+                 |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {41, 2, 0}, json_rpc_named_arguments)
                  |> Enum.map(& &1.l2_block_number)
       end
 
-      # A singular batch whose parent never comes is left out alone, not with the whole channel
-      test "leaves out a singular batch whose parent stays unavailable, and keeps the other batches", %{
+      # Unlike the parent check of a span batch, the parent hash of a singular batch is compared whole
+      test "leaves out a singular batch whose parent differs from the safe block before only after 20 bytes", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
-        found = :crypto.strong_rand_bytes(32)
-        missing = :crypto.strong_rand_bytes(32)
-        expect_block_numbers(%{found => 41, missing => nil})
-        expect_block_numbers(%{missing => nil})
-        expect_block_numbers(%{missing => nil})
+        <<prefix::binary-size(20), _::binary>> = parent = :crypto.strong_rand_bytes(32)
+        other = "0x" <> Base.encode16(prefix <> :crypto.strong_rand_bytes(12), case: :lower)
+        expect_latest_l2_block(100)
+        expect_block_hash(41, other)
+        expect_safe_block(60)
+        expect_block_hash(41, other)
 
         log =
           capture_log(fn ->
-            assert [42] ==
-                     [found, missing]
+            assert [] ==
+                     [{parent, l2_timestamp(42)}]
                      |> singular_batches_channel()
                      |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {0, 2, 0}, json_rpc_named_arguments)
-                     |> Enum.map(& &1.l2_block_number)
           end)
 
-        assert log =~ Base.encode16(missing, case: :lower)
+        assert log =~ "42..42 does not follow the safe L2 block 41"
       end
 
-      test "waits for an L2 node that does not answer, without spending the checks of a singular batch", %{
+      # An L2 node that lags behind the block before a singular batch is waited for
+      test "waits for the block before a singular batch that the L2 node does not return yet", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
         parent = :crypto.strong_rand_bytes(32)
+        expect_latest_l2_block(100)
 
-        expect(EthereumJSONRPC.Mox, :json_rpc, 4, fn [%{method: "eth_getBlockByHash"}], _options ->
-          {:error, :timeout}
-        end)
+        for _ <- 1..4 do
+          expect(EthereumJSONRPC.Mox, :json_rpc, fn [%{id: id, method: "eth_getBlockByNumber"}], _options ->
+            {:ok, [%{id: id, result: nil}]}
+          end)
+        end
 
-        expect_block_numbers(%{parent => 41})
+        expect_block_hash(41, "0x" <> Base.encode16(parent, case: :lower))
 
         capture_log(fn ->
           send(
             self(),
             {:blocks,
-             [parent]
+             [{parent, l2_timestamp(42)}]
+             |> singular_batches_channel()
+             |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {0, 2, 0}, json_rpc_named_arguments)}
+          )
+        end)
+
+        assert_received {:blocks, [%{l2_block_number: 42, frame_sequence_id: 7, l1_timestamp: @l1_timestamp} = block]}
+        assert map_size(block) == 3
+      end
+
+      # The parent of an invalid singular batch can be off the chain, as for a batch built on an unsafe chain that
+      # derivation replaced, even while an indexed block marked as consensus: the batch does not follow the safe block
+      # before its own
+      test "leaves out a singular batch whose parent is off the chain, and keeps the other batches", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        found = :crypto.strong_rand_bytes(32)
+        %{hash: orphan} = insert(:block, number: 49, consensus: true)
+        other = "0x" <> String.duplicate("11", 32)
+        expect_latest_l2_block(100)
+        expect_block_hashes(%{41 => "0x" <> Base.encode16(found, case: :lower), 49 => other})
+        expect_safe_block(60)
+        expect_block_hash(49, other)
+
+        log =
+          capture_log(fn ->
+            assert [42] ==
+                     [{found, l2_timestamp(42)}, {orphan.bytes, l2_timestamp(50)}]
+                     |> singular_batches_channel()
+                     |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {0, 2, 0}, json_rpc_named_arguments)
+                     |> Enum.map(& &1.l2_block_number)
+          end)
+
+        assert log =~ "50..50 does not follow the safe L2 block 49"
+      end
+
+      test "leaves out a singular batch whose timestamp no L2 block has", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        parent = :crypto.strong_rand_bytes(32)
+        expect_latest_l2_block(100)
+
+        log =
+          capture_log(fn ->
+            assert [] ==
+                     [{parent, l2_timestamp(42) + 1}]
+                     |> singular_batches_channel()
+                     |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {0, 2, 0}, json_rpc_named_arguments)
+          end)
+
+        assert log =~ Base.encode16(parent, case: :lower)
+      end
+
+      # No batch maps to the rollup genesis block or a block before it, which an L2 node need not have
+      test "leaves out a singular batch whose timestamp is that of the rollup genesis block or a block before it", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        at_genesis = :crypto.strong_rand_bytes(32)
+        before_genesis = :crypto.strong_rand_bytes(32)
+        expect_latest_l2_block(100)
+
+        log =
+          capture_log(fn ->
+            assert [] ==
+                     [{at_genesis, l2_timestamp(42)}, {before_genesis, l2_timestamp(41)}]
+                     |> singular_batches_channel()
+                     |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {42, 2, 0}, json_rpc_named_arguments)
+          end)
+
+        assert log =~ Base.encode16(at_genesis, case: :lower)
+        assert log =~ Base.encode16(before_genesis, case: :lower)
+      end
+
+      # A parent hash shorter than 32 bytes would match the block before by its beginning
+      test "leaves out a singular batch whose parent hash does not have 32 bytes", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        expect_latest_l2_block(100)
+
+        capture_log(fn ->
+          assert [] ==
+                   [{<<>>, l2_timestamp(42)}, {<<1::160>>, l2_timestamp(43)}, {<<1::264>>, l2_timestamp(44)}]
+                   |> singular_batches_channel()
+                   |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {0, 2, 0}, json_rpc_named_arguments)
+        end)
+      end
+
+      # A request that fails alone tells nothing of the block before a singular batch either
+      test "waits for an L2 node that does not answer the check of a singular batch", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        parent = :crypto.strong_rand_bytes(32)
+        expect_latest_l2_block(100)
+
+        expect(EthereumJSONRPC.Mox, :json_rpc, 2, fn [%{method: "eth_getBlockByNumber"}], _options ->
+          {:error, :timeout}
+        end)
+
+        expect(EthereumJSONRPC.Mox, :json_rpc, 2, fn [%{id: id, method: "eth_getBlockByNumber"}], _options ->
+          {:ok, [%{id: id, error: %{code: -32_005, message: "limit exceeded"}}]}
+        end)
+
+        expect_block_hash(41, "0x" <> Base.encode16(parent, case: :lower))
+
+        capture_log(fn ->
+          send(
+            self(),
+            {:blocks,
+             [{parent, l2_timestamp(42)}]
              |> singular_batches_channel()
              |> TransactionBatch.parse_frame_sequence(7, @l1_timestamp, {0, 2, 0}, json_rpc_named_arguments)}
           )
@@ -595,31 +712,39 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
         assert_received {:blocks, [%{l2_block_number: 42}]}
       end
 
-      # The L2 node can still have the parent on an unsafe chain that derivation replaces
+      # The L2 node can still have the parent on an unsafe chain that derivation replaces, however long its checks last
       test "waits for the parent of a span batch that is not safe yet to match", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
         unsafe_parent = "0x" <> String.duplicate("22", 32)
-        expect_block_hash(36_438_663, unsafe_parent)
-        expect_safe_block(36_438_600)
-        expect_block_hash(36_438_663, unsafe_parent)
+
+        for _ <- 1..3 do
+          expect_block_hash(36_438_663, unsafe_parent)
+          expect_safe_block(36_438_600)
+          expect_block_hash(36_438_663, unsafe_parent)
+        end
+
         expect_block_hash(36_438_663, @sepolia_parent)
 
-        assert [36_438_664, 36_438_665, 36_438_666] == parse_sepolia_span(json_rpc_named_arguments)
+        capture_log(fn -> send(self(), {:blocks, parse_sepolia_span(json_rpc_named_arguments)}) end)
+
+        assert_received {:blocks, [36_438_664, 36_438_665, 36_438_666]}
       end
 
-      # The wait is bounded: a parent that never comes (an invalid batch, or a genesis setting mapping it beyond the L2
-      # head) does not keep the fetcher from its other work for good
-      test "leaves out a span batch whose parent stays unavailable", %{
+      # The block before a span batch is asked for by its number: an L2 node that does not return it lags behind, so the
+      # span batch waits for it beyond its checks
+      test "waits for the parent of a span batch for as long as the L2 node does not return it", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
-        expect(EthereumJSONRPC.Mox, :json_rpc, 3, fn [%{id: id, method: "eth_getBlockByNumber"}], _options ->
+        expect(EthereumJSONRPC.Mox, :json_rpc, 4, fn [%{id: id, method: "eth_getBlockByNumber"}], _options ->
           {:ok, [%{id: id, result: nil}]}
         end)
 
-        log = capture_log(fn -> assert [] == parse_sepolia_span(json_rpc_named_arguments) end)
+        expect_block_hash(36_438_663, @sepolia_parent)
 
-        assert log =~ "36438663"
+        capture_log(fn -> send(self(), {:blocks, parse_sepolia_span(json_rpc_named_arguments)}) end)
+
+        assert_received {:blocks, [36_438_664, 36_438_665, 36_438_666]}
       end
     end
 
@@ -631,31 +756,29 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
       |> Enum.map(& &1.l2_block_number)
     end
 
-    # The zlib-compressed channel of singular batches (version 0) after the given parents
-    defp singular_batches_channel(parent_hashes) do
-      parent_hashes
-      |> Enum.map_join(fn parent_hash ->
-        ExRLP.encode(<<0>> <> ExRLP.encode([parent_hash, <<1>>, <<0::256>>, <<2>>, []]))
+    # The zlib-compressed channel of singular batches (version 0) of the given `{parent hash, timestamp}` tuples
+    defp singular_batches_channel(batches) do
+      batches
+      |> Enum.map_join(fn {parent_hash, timestamp} ->
+        ExRLP.encode(<<0>> <> ExRLP.encode([parent_hash, <<1>>, <<0::256>>, :binary.encode_unsigned(timestamp), []]))
       end)
       |> :zlib.compress()
     end
 
-    # The blocks eth_getBlockByHash gives for the given parents (`nil` for a block the node does not return)
-    defp expect_block_numbers(numbers_by_hashes) do
-      expect(EthereumJSONRPC.Mox, :json_rpc, fn requests, _options ->
-        assert Enum.sort(Enum.map(requests, fn %{params: [hash, false]} -> hash.bytes end)) ==
-                 Enum.sort(Map.keys(numbers_by_hashes))
+    # The timestamp of the L2 block `number` of the chain of the singular batch tests, whose blocks are 2 seconds apart
+    defp l2_timestamp(number), do: 1_700_000_000 + 2 * number
 
+    # The latest L2 block, `number`, as eth_getBlockByNumber gives it for the `latest` tag
+    defp expect_latest_l2_block(number) do
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn [%{id: id, method: "eth_getBlockByNumber", params: ["latest", false]}],
+                                                _options ->
         {:ok,
-         Enum.map(requests, fn %{id: id, params: [hash, false]} ->
-           result =
-             case Map.fetch!(numbers_by_hashes, hash.bytes) do
-               nil -> nil
-               number -> %{"number" => number, "hash" => "0x" <> Base.encode16(hash.bytes, case: :lower)}
-             end
-
-           %{id: id, result: result}
-         end)}
+         [
+           %{
+             id: id,
+             result: %{full_block(number) | "timestamp" => EthereumJSONRPC.integer_to_quantity(l2_timestamp(number))}
+           }
+         ]}
       end)
     end
 
@@ -707,6 +830,21 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
         "transactionsRoot" => zero_hash,
         "uncles" => []
       }
+    end
+
+    # The hashes eth_getBlockByNumber gives for the L2 blocks of `hashes_by_numbers`, requested together
+    defp expect_block_hashes(hashes_by_numbers) do
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn requests, _options ->
+        assert Enum.sort(Map.keys(hashes_by_numbers)) ==
+                 Enum.sort(Enum.map(requests, fn %{params: [quantity, false]} -> quantity_to_integer(quantity) end))
+
+        {:ok,
+         Enum.map(requests, fn %{id: id, params: [quantity, false]} ->
+           number = quantity_to_integer(quantity)
+           hash = Map.fetch!(hashes_by_numbers, number)
+           %{id: id, result: %{"number" => EthereumJSONRPC.integer_to_quantity(number), "hash" => hash}}
+         end)}
+      end)
     end
 
     # The hash eth_getBlockByNumber gives for the L2 block `number`

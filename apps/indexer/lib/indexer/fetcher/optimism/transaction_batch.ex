@@ -29,10 +29,9 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   import Explorer.Helper, only: [hash_to_binary: 1, parse_integer: 1]
 
   alias Ecto.Multi
-  alias EthereumJSONRPC.Block.{ByHash, ByNumber}
+  alias EthereumJSONRPC.Block.ByNumber
   alias EthereumJSONRPC.{Blocks, Contract}
   alias Explorer.{Chain, Repo}
-  alias Explorer.Chain.{Block, Hash}
   alias Explorer.Chain.Events.Publisher
   alias Explorer.Chain.Optimism.{FrameSequence, FrameSequenceBlob}
   alias Explorer.Chain.Optimism.TransactionBatch, as: OptimismTransactionBatch
@@ -48,10 +47,12 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   @compressor_brotli 1
   # the max number of L2 blocks in one batch request checking span batches
   @l2_blocks_request_size 50
-  # how many times, and how many milliseconds apart, the parent of a batch is asked for while the L2 node answers
-  # without it (missing, or not safe yet for a span batch): up to 15 minutes
+  # how many milliseconds apart the block before a batch is asked for again while the L2 node does not give it (missing,
+  # or not safe yet), and after how many times the wait is reported as stalling the fetcher (15 minutes)
   @parent_check_attempts 180
   @parent_check_interval 5_000
+  # how many milliseconds apart, at least, a stalled wait for the L2 node is reported as an error
+  @stall_report_interval :timer.minutes(1)
   @counter_type "optimism_batches_fetcher_last_l1_block_hash"
   @empty_hash "0x0000000000000000000000000000000000000000000000000000000000000000"
 
@@ -463,53 +464,11 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     {:noreply, state}
   end
 
-  @doc false
-  # Returns a `hash -> number` map of the given L2 blocks, from the database or from the L2 node, without the blocks
-  # the node does not return, or `:unavailable` when the node does not answer.
-  def get_block_numbers_by_hashes([], _json_rpc_named_arguments_l2) do
-    %{}
-  end
-
-  def get_block_numbers_by_hashes(hashes, json_rpc_named_arguments_l2) do
-    query =
-      from(
-        b in Block,
-        select: {b.hash, b.number},
-        where: b.hash in ^hashes
-      )
-
-    number_by_hash =
-      query
-      |> Repo.all(timeout: :infinity)
-      |> Enum.reduce(%{}, fn {hash, number}, acc ->
-        Map.put(acc, hash.bytes, number)
-      end)
-
-    hashes
-    |> Enum.filter(fn hash -> is_nil(Map.get(number_by_hash, hash)) end)
-    |> Enum.with_index()
-    |> Enum.map(fn {hash, id} ->
-      {:ok, hash} = Hash.Full.cast(hash)
-      ByHash.request(%{hash: hash, id: id}, false)
-    end)
-    |> Enum.chunk_every(50)
-    |> Enum.reduce_while(number_by_hash, fn requests, acc ->
-      case json_rpc(requests, json_rpc_named_arguments_l2) do
-        {:ok, responses} ->
-          {:cont,
-           Enum.reduce(responses, acc, fn
-             %{result: %{"number" => number, "hash" => "0x" <> hash}}, acc ->
-               Map.put(acc, Base.decode16!(hash, case: :mixed), quantity_to_integer(number))
-
-             # a block the node does not return (yet)
-             _, acc ->
-               acc
-           end)}
-
-        {:error, _} ->
-          {:halt, :unavailable}
-      end
-    end)
+  # Whether the L2 node answered each request of a batch: a request can also fail alone (as with a rate limit, or a
+  # timeout behind a proxy) or get no response, which tells nothing of its block.
+  defp answered_each?(requests, responses) do
+    answered_ids = for %{id: id, result: _} <- responses, into: MapSet.new(), do: id
+    Enum.all?(requests, &MapSet.member?(answered_ids, &1.id))
   end
 
   defp get_block_hash_by_number(block_number, blocks_params) do
@@ -1718,7 +1677,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   # - `bytes`: The compressed channel data.
   # - `id`: The id of the frame sequence the channel forms.
   # - `l1_timestamp`: The timestamp of the L1 block of the channel's last frame.
-  # - `span_batch_params`: `{genesis_block_l2, block_duration, genesis_time_offset}`, to map span batches to L2 blocks.
+  # - `span_batch_params`: `{genesis_block_l2, block_duration, genesis_time_offset}`, to map batches to L2 blocks.
   # - `json_rpc_named_arguments_l2`: Configuration parameters for the JSON RPC connection to the L2 node.
   @spec parse_frame_sequence(
           binary(),
@@ -1777,28 +1736,24 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     if batches == :error do
       :error
     else
-      batches = Enum.reverse(batches)
+      {singular_batches, span_batches} = batches |> Enum.reverse() |> Enum.split_with(&Map.has_key?(&1, :parent_hash))
 
-      numbers_by_hashes =
-        batches
-        |> Enum.filter(&Map.has_key?(&1, :parent_hash))
-        |> Enum.map(& &1.parent_hash)
-        |> resolved_parent_numbers(json_rpc_named_arguments_l2)
+      spans =
+        span_batches ++ singular_batches_as_spans(singular_batches, span_batch_params, json_rpc_named_arguments_l2)
 
-      verified_spans =
-        batches
-        |> Enum.filter(&Map.has_key?(&1, :parent_check))
-        |> verified_spans(json_rpc_named_arguments_l2)
+      verified_spans = verified_spans(spans, json_rpc_named_arguments_l2)
 
-      Enum.flat_map(batches, &to_l2_blocks(&1, numbers_by_hashes, verified_spans))
+      Enum.flat_map(spans, &to_l2_blocks(&1, verified_spans))
     end
   end
 
+  # A singular batch names the hash of its parent block and its own timestamp
   defp handle_v0_batch(content, frame_sequence_id, l1_timestamp, batch_acc) do
     content_decoded = ExRLP.decode(content)
 
     batch = %{
       parent_hash: Enum.at(content_decoded, 0),
+      timestamp: content_decoded |> Enum.at(3) |> decode_unsigned(),
       frame_sequence_id: frame_sequence_id,
       l1_timestamp: l1_timestamp
     }
@@ -1806,9 +1761,12 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     [batch | batch_acc]
   end
 
+  defp decode_unsigned(bytes) when is_binary(bytes), do: :binary.decode_unsigned(bytes)
+  defp decode_unsigned(_), do: nil
+
   # A span batch counts its first block's timestamp from the rollup's genesis time (`genesis.l2_time` in the rollup
   # config), which can precede the timestamp of the genesis block by `genesis_time_offset` seconds. Its `parent_check`
-  # is the beginning of the hash of the block before its first block, checked in `to_l2_blocks/3`.
+  # is the beginning of the hash of the block before its first block, checked in `verified_spans/2`.
   defp handle_v1_batch(
          content,
          frame_sequence_id,
@@ -1856,31 +1814,8 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     end
   end
 
-  # The L2 blocks of a batch: the block after the parent of a singular batch, or the blocks of a verified span batch
-  # (see `verified_spans/2`).
-  defp to_l2_blocks(%{parent_hash: parent_hash} = batch, numbers_by_hashes, _verified_spans) do
-    case Map.get(numbers_by_hashes, parent_hash) do
-      nil ->
-        Logger.error(
-          "The singular batch after the L2 block 0x#{Base.encode16(parent_hash, case: :lower)} is not mapped, as the L2 node does not give that block. Unless the node lags behind, the batch is invalid. We ignore the batch."
-        )
-
-        []
-
-      number ->
-        [
-          batch
-          |> Map.put(:l2_block_number, number + 1)
-          |> Map.delete(:parent_hash)
-        ]
-    end
-  end
-
-  defp to_l2_blocks(
-         %{span_start: span_start, span_end: span_end, parent_check: parent_check} = batch,
-         _numbers_by_hashes,
-         verified_spans
-       ) do
+  # The L2 blocks of a verified span batch (see `verified_spans/2`)
+  defp to_l2_blocks(%{span_start: span_start, span_end: span_end, parent_check: parent_check} = batch, verified_spans) do
     if MapSet.member?(verified_spans, {span_start, parent_check}) do
       Enum.map(
         span_start..span_end,
@@ -1891,49 +1826,62 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     end
   end
 
-  # Returns a `hash -> number` map of the parents of singular batches. The L2 node can lag behind the batches, so a
-  # parent it does not return is asked for again, as the block before a span batch is (see `verified_spans/2`), and a
-  # singular batch whose parent does not come is left out (see `to_l2_blocks/3`).
-  defp resolved_parent_numbers([], _json_rpc_named_arguments_l2), do: %{}
+  # Singular batches as span batches of one block, checked by the number of their block (see `verified_spans/2`): a
+  # block by the parent hash can be off the chain, even an indexed block marked as consensus while the L2 node replaces
+  # it, as for a batch built on an unsafe chain that derivation replaced (op-node drops such a batch). An L2 block
+  # follows its parent by the block duration, so the number is counted back from the latest L2 block by the batch
+  # timestamp. A batch whose timestamp is not that of an L2 block after the rollup genesis is invalid.
+  defp singular_batches_as_spans([], _span_batch_params, _json_rpc_named_arguments_l2), do: []
 
-  defp resolved_parent_numbers(parent_hashes, json_rpc_named_arguments_l2) do
-    attempts = parent_check_setting(:attempts)
-    deadline = System.monotonic_time(:millisecond) + attempts * parent_check_setting(:interval)
+  defp singular_batches_as_spans(
+         batches,
+         {genesis_block_l2, block_duration, _genesis_time_offset},
+         json_rpc_named_arguments_l2
+       ) do
+    {latest_block_number, latest_timestamp} = latest_l2_block(json_rpc_named_arguments_l2)
 
-    resolve_parents(Enum.uniq(parent_hashes), json_rpc_named_arguments_l2, {attempts, deadline}, %{})
-  end
+    Enum.flat_map(batches, fn %{parent_hash: parent_hash, timestamp: timestamp} = batch ->
+      block_number =
+        if is_integer(timestamp) and rem(latest_timestamp - timestamp, block_duration) == 0,
+          do: latest_block_number - div(latest_timestamp - timestamp, block_duration)
 
-  defp resolve_parents(hashes, json_rpc_named_arguments_l2, {attempts_left, deadline}, resolved) do
-    case get_block_numbers_by_hashes(hashes, json_rpc_named_arguments_l2) do
-      :unavailable ->
-        new_deadline = wait_for_l2_node("the parents of singular batches", attempts_left)
-        resolve_parents(hashes, json_rpc_named_arguments_l2, {attempts_left, new_deadline}, resolved)
+      cond do
+        # a parent hash has 32 bytes: a shorter one would match the block before by its beginning
+        not is_binary(parent_hash) or byte_size(parent_hash) != 32 ->
+          Logger.error("The singular batch after the L2 block #{inspect(parent_hash)} is invalid. We ignore the batch.")
+          []
 
-      numbers_by_hashes ->
-        resolved = Map.merge(resolved, numbers_by_hashes)
-        pending = Enum.reject(hashes, &Map.has_key?(numbers_by_hashes, &1))
+        is_integer(block_number) and block_number > genesis_block_l2 ->
+          [
+            %{
+              span_start: block_number,
+              span_end: block_number,
+              parent_check: parent_hash,
+              frame_sequence_id: batch.frame_sequence_id,
+              l1_timestamp: batch.l1_timestamp
+            }
+          ]
 
-        if pending == [] or attempts_left <= 1 or System.monotonic_time(:millisecond) >= deadline do
-          resolved
-        else
-          Logger.warning(
-            "Waiting for the L2 node to give the parent(s) #{inspect(Enum.map(pending, &("0x" <> Base.encode16(&1, case: :lower))))} of singular batch(es)..."
+        true ->
+          Logger.error(
+            "The singular batch after the L2 block 0x#{Base.encode16(parent_hash, case: :lower)} has the timestamp #{inspect(timestamp)}, which no L2 block after the rollup genesis has. Unless INDEXER_OPTIMISM_L2_BATCH_GENESIS_BLOCK_NUMBER does not match the rollup config, the batch is invalid. We ignore the batch."
           )
 
-          :timer.sleep(parent_check_setting(:interval))
-          resolve_parents(pending, json_rpc_named_arguments_l2, {attempts_left - 1, deadline}, resolved)
-        end
-    end
+          []
+      end
+    end)
   end
 
-  # Waits for an L2 node that does not answer, as the other L2 requests do, without spending the checks of the
-  # parents, which are for a node that answers without them. Returns the deadline of the checks left, which starts
-  # again once the node answers.
-  defp wait_for_l2_node(subject, attempts_left) do
-    Logger.warning("The L2 node does not answer the requests for #{subject}. Retrying...")
-    interval = parent_check_setting(:interval)
-    :timer.sleep(interval)
-    System.monotonic_time(:millisecond) + attempts_left * interval
+  # The number and the timestamp of the latest L2 block, read together
+  defp latest_l2_block(json_rpc_named_arguments_l2) do
+    case EthereumJSONRPC.fetch_block_by_tag("latest", json_rpc_named_arguments_l2) do
+      {:ok, %Blocks{blocks_params: [%{number: number, timestamp: timestamp}]}} ->
+        {number, DateTime.to_unix(timestamp)}
+
+      error ->
+        Optimism.log_error_message_with_retry_sleep("Cannot fetch the latest L2 block. Error: #{inspect(error)}")
+        latest_l2_block(json_rpc_named_arguments_l2)
+    end
   end
 
   # Returns `{span_start, parent_check}` of the span batches whose `parent_check` matches the hash of the L2 block before
@@ -1941,58 +1889,73 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   #
   # A span batch that does not match a safe block was mapped to the wrong blocks, as the genesis settings do not
   # match the rollup config, or is invalid: it is left out. The L2 node can lag behind the batches, though, or still
-  # have the block before a span batch on an unsafe chain that derivation replaces, so a span batch whose block before
-  # is missing or not safe yet is checked again, `parent_check_interval` milliseconds apart, up to
-  # `parent_check_attempts` times and within that many intervals in all, before it is left out.
+  # have the block before a span batch on an unsafe chain that derivation replaces, so any other span batch is checked
+  # again, `parent_check_interval` milliseconds apart, until it matches or its block before is safe. The fetcher does
+  # not move on to the next L1 blocks meanwhile, as it would not check the span batch again: a wait of
+  # `parent_check_attempts` intervals or more is reported as a stall. After a wait, the span batches that matched are
+  # checked again as well, as the node can replace their blocks before meanwhile.
   defp verified_spans(spans, json_rpc_named_arguments_l2) do
     {before_first_block, spans} = Enum.split_with(spans, &(&1.span_start < 1))
     Enum.each(before_first_block, &log_span_left_out(&1, "starts before the first L2 block"))
 
-    attempts = parent_check_setting(:attempts)
-    deadline = System.monotonic_time(:millisecond) + attempts * parent_check_setting(:interval)
-
-    verify_spans(spans, json_rpc_named_arguments_l2, {attempts, deadline}, MapSet.new())
+    verify_spans(spans, json_rpc_named_arguments_l2, {System.monotonic_time(:millisecond), nil})
   end
 
-  defp verify_spans([], _json_rpc_named_arguments_l2, _limits, verified), do: verified
+  defp verify_spans([], _json_rpc_named_arguments_l2, _wait), do: MapSet.new()
 
-  defp verify_spans(spans, json_rpc_named_arguments_l2, {attempts_left, deadline}, verified) do
+  defp verify_spans(spans, json_rpc_named_arguments_l2, wait) do
     with %{} = hashes_by_numbers <-
            spans |> Enum.map(&(&1.span_start - 1)) |> get_block_hashes_by_numbers(json_rpc_named_arguments_l2),
          {matching, mismatching_safe, pending} <-
            classify_spans(spans, hashes_by_numbers, json_rpc_named_arguments_l2) do
       Enum.each(mismatching_safe, &log_span_left_out(&1, "does not follow the safe L2 block #{&1.span_start - 1}"))
 
-      verified = Enum.reduce(matching, verified, &MapSet.put(&2, {&1.span_start, &1.parent_check}))
-
-      cond do
-        pending == [] ->
-          verified
-
-        attempts_left <= 1 or System.monotonic_time(:millisecond) >= deadline ->
-          Enum.each(
-            pending,
-            &log_span_left_out(
-              &1,
-              "is not checked, as the L2 node does not give the safe L2 block #{&1.span_start - 1}"
-            )
+      if pending == [] do
+        MapSet.new(matching, &{&1.span_start, &1.parent_check})
+      else
+        wait =
+          wait_for_l2_node(
+            "Waiting for the L2 node to give the safe L2 block(s) #{inspect(Enum.map(pending, &(&1.span_start - 1)))}, which the batch(es) after them must follow...",
+            wait
           )
 
-          verified
-
-        true ->
-          Logger.warning(
-            "Waiting for the L2 node to give the safe L2 block(s) #{inspect(Enum.map(pending, &(&1.span_start - 1)))}, which the span batch(es) after them must follow..."
-          )
-
-          :timer.sleep(parent_check_setting(:interval))
-          verify_spans(pending, json_rpc_named_arguments_l2, {attempts_left - 1, deadline}, verified)
+        verify_spans(matching ++ pending, json_rpc_named_arguments_l2, wait)
       end
     else
       :unavailable ->
-        new_deadline = wait_for_l2_node("the blocks before span batches", attempts_left)
-        verify_spans(spans, json_rpc_named_arguments_l2, {attempts_left, new_deadline}, verified)
+        wait =
+          wait_for_l2_node("The L2 node does not answer the requests for the blocks before batches. Retrying...", wait)
+
+        verify_spans(spans, json_rpc_named_arguments_l2, wait)
     end
+  end
+
+  # Logs a wait for the L2 node and sleeps for an interval: as a warning until the wait has stalled the fetcher for
+  # `parent_check_attempts` intervals, and then as an error, at most every `@stall_report_interval` milliseconds.
+  # Returns the wait: when it started, and when it was last reported as an error.
+  defp wait_for_l2_node(message, {waiting_since, reported_at}) do
+    interval = parent_check_setting(:interval)
+    now = System.monotonic_time(:millisecond)
+
+    reported_at =
+      cond do
+        now - waiting_since < parent_check_setting(:attempts) * interval ->
+          Logger.warning(message)
+          reported_at
+
+        is_nil(reported_at) or now - reported_at >= @stall_report_interval ->
+          Logger.error(
+            "#{message} The fetcher has waited for #{div(now - waiting_since, 1000)} seconds, importing no batches meanwhile. Unless the L2 node lags behind, check INDEXER_OPTIMISM_L2_BATCH_GENESIS_BLOCK_NUMBER and INDEXER_OPTIMISM_L2_BATCH_GENESIS_L2_TIME against the rollup config."
+          )
+
+          now
+
+        true ->
+          reported_at
+      end
+
+    :timer.sleep(interval)
+    {waiting_since, reported_at}
   end
 
   # Splits span batches into those matching their block before, those not matching it while it is safe, and the
@@ -2026,13 +1989,16 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     end
   end
 
+  # `parent_check` is the beginning of the hash of the block before the batch: 20 bytes of a span batch, all 32 of the
+  # parent of a singular batch
   defp parent_matches?(%{span_start: span_start, parent_check: parent_check}, hashes_by_numbers) do
-    match?(<<^parent_check::binary-size(20), _::binary>>, Map.get(hashes_by_numbers, span_start - 1))
+    size = byte_size(parent_check)
+    match?(<<^parent_check::binary-size(size), _::binary>>, Map.get(hashes_by_numbers, span_start - 1))
   end
 
   defp log_span_left_out(%{span_start: span_start, span_end: span_end}, reason) do
     Logger.error(
-      "The span batch mapped to L2 blocks #{span_start}..#{span_end} #{reason}. Check INDEXER_OPTIMISM_L2_BATCH_GENESIS_BLOCK_NUMBER and INDEXER_OPTIMISM_L2_BATCH_GENESIS_L2_TIME against the rollup config, unless the batch is invalid. We ignore the span batch."
+      "The batch mapped to L2 blocks #{span_start}..#{span_end} #{reason}. Check INDEXER_OPTIMISM_L2_BATCH_GENESIS_BLOCK_NUMBER and INDEXER_OPTIMISM_L2_BATCH_GENESIS_L2_TIME against the rollup config, unless the batch is invalid. We ignore the batch."
     )
   end
 
@@ -2043,7 +2009,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     do: Application.get_all_env(:indexer)[__MODULE__][:parent_check_interval] || @parent_check_interval
 
   # Returns a `number -> hash` map of the given L2 blocks that the L2 node returns (the indexed blocks can lag behind
-  # the batches, or still hold a block the node replaced), or `:unavailable` when the node does not answer.
+  # the batches, or still hold a block the node replaced), or `:unavailable` when the node does not answer a request.
   defp get_block_hashes_by_numbers(numbers, json_rpc_named_arguments_l2) do
     numbers
     |> Enum.uniq()
@@ -2057,7 +2023,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   end
 
   # Returns `{number, hash}` of each of the given L2 blocks that the node returns, or `:unavailable` when the node does
-  # not answer.
+  # not answer a request (see `answered_each?/2`).
   defp request_block_hashes(numbers, json_rpc_named_arguments_l2) do
     requests =
       numbers
@@ -2067,18 +2033,18 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     error_message = &"Cannot fetch L2 blocks #{inspect(numbers)}. Error: #{inspect(&1)}"
 
     # one attempt: `verified_spans/2` checks a span batch again in a while
-    case Helper.repeated_call(&json_rpc/2, [requests, json_rpc_named_arguments_l2], error_message, 1) do
-      {:ok, responses} ->
-        Enum.flat_map(responses, fn
-          %{result: %{"number" => number, "hash" => "0x" <> hash}} ->
-            [{quantity_to_integer(number), Base.decode16!(hash, case: :mixed)}]
+    with {:ok, responses} <-
+           Helper.repeated_call(&json_rpc/2, [requests, json_rpc_named_arguments_l2], error_message, 1),
+         true <- answered_each?(requests, responses) do
+      Enum.flat_map(responses, fn
+        %{result: %{"number" => number, "hash" => "0x" <> hash}} ->
+          [{quantity_to_integer(number), Base.decode16!(hash, case: :mixed)}]
 
-          _ ->
-            []
-        end)
-
-      {:error, _} ->
-        :unavailable
+        _ ->
+          []
+      end)
+    else
+      _ -> :unavailable
     end
   end
 
