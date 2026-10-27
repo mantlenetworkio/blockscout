@@ -14,6 +14,7 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
   import Explorer.Helper, only: [decode_data: 2]
 
   alias Explorer.{Chain, Repo}
+  alias Explorer.Chain.Cache.Counters.LastFetchedCounter
   alias Explorer.Chain.Events.Publisher
   alias Explorer.Chain.Optimism.{BridgeMessage, Deposit}
   alias Indexer.Fetcher.Optimism
@@ -25,10 +26,14 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
 
   @fetcher_name :optimism_deposits
   @address_prefix "0x000000000000000000000000"
-  # The fetcher's checkpoint: the hash of the last L1 block it handled. Deposits indexed before creation deposits and
-  # Mantle v0 events were derived the way op-node derives them are checkpointed under the previous name,
-  # `optimism_deposits_fetcher_last_l1_block_hash`, so the fetcher derives them again (see `get_last_l1_item/1`).
+  # The fetcher's checkpoint: the number and the hash of the last L1 block it handled, as one value (a counter holds a
+  # number: block number × 2^256 + hash), and the hash alone under the name the previous version reads and writes (see
+  # `check_checkpoint/1`). Deposits indexed before creation deposits and Mantle v0 events were derived the way op-node
+  # derives them are checkpointed under the previous name of the hash, `optimism_deposits_fetcher_last_l1_block_hash`,
+  # so the fetcher derives them again (see `get_last_l1_item/1`).
   @counter_type "optimism_deposits_fetcher_last_l1_block_hash_v2"
+  @counter_type_block "optimism_deposits_fetcher_last_l1_block_v2"
+  @hash_values Integer.pow(2, 256)
   @empty_hash "0x0000000000000000000000000000000000000000000000000000000000000000"
   # How many L1 blocks before a reported reorg the deposits are derived again: three epochs, which no reorg of
   # unfinalized blocks goes deeper than while the chain finalizes
@@ -60,7 +65,10 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
   def handle_continue(:ok, _state) do
     Logger.metadata(fetcher: @fetcher_name)
 
-    Optimism.init_continue(nil, __MODULE__)
+    case Optimism.init_continue(nil, __MODULE__) do
+      {:noreply, state} -> {:noreply, check_checkpoint(state)}
+      stop -> stop
+    end
   end
 
   @impl GenServer
@@ -194,60 +202,98 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
     Application.get_all_env(:indexer)[__MODULE__][:stall_retry_interval] || @stall_retry_interval
   end
 
-  # Handles the L1 reorg found meanwhile, if any, or else checkpoints the chunk. Returns the reduce action and the last
-  # block handled.
+  # Handles the L1 reorg found meanwhile, if any (see `rewind/3`), or else checkpoints the chunk. Returns the reduce
+  # action and the last block handled.
+  defp handle_reorg_or_checkpoint(
+         chunk_start,
+         chunk_end,
+         %{json_rpc_named_arguments: json_rpc_named_arguments} = state
+       ) do
+    reorg_block = RollupReorgMonitorQueue.pop(__MODULE__)
+
+    if !is_nil(reorg_block) && reorg_block > 0 do
+      {:halt, rewind(reorg_block, chunk_end, state)}
+    else
+      with true <- chunk_end >= chunk_start,
+           [%{"hash" => hash}] <-
+             Optimism.get_blocks_by_numbers([chunk_end], json_rpc_named_arguments, Helper.infinite_retries_number()) do
+        set_checkpoint(chunk_end, hash)
+      end
+
+      {:cont, chunk_end}
+    end
+  end
+
+  # Derives the deposits again after an L1 reorg at `reorg_block`: removes the rows from the first block to derive
+  # again and checkpoints the block before it, not after `last_handled_block`, together. Returns the checkpoint block.
   #
   # The reorg monitor reports the block whose hash changed, which can be above the first block the reorg replaced, and
   # its report can be handled after the replacing blocks are finalized. So the deposits are derived again from
   # `@reorg_depth` blocks before the reported block, or from the first block that is not finalized if that is earlier
   # (not before the start block). The checkpoint names the block before it, as the fetcher does not take up from its
   # last row on a restart (see `get_last_l1_item/1`).
-  defp handle_reorg_or_checkpoint(
-         chunk_start,
-         chunk_end,
+  defp rewind(
+         reorg_block,
+         last_handled_block,
          %{start_block_l1: start_block_l1, json_rpc_named_arguments: json_rpc_named_arguments}
        ) do
-    reorg_block = RollupReorgMonitorQueue.pop(__MODULE__)
+    earliest_reorg_block = reorg_block - @reorg_depth
 
-    if !is_nil(reorg_block) && reorg_block > 0 do
-      earliest_reorg_block = reorg_block - @reorg_depth
+    from_block =
+      earliest_reorg_block
+      |> min(first_unfinalized_block(earliest_reorg_block, json_rpc_named_arguments))
+      |> max(start_block_l1)
 
-      from_block =
-        earliest_reorg_block
-        |> min(first_unfinalized_block(earliest_reorg_block, json_rpc_named_arguments))
-        |> max(start_block_l1)
+    last_block = min(from_block - 1, last_handled_block)
+    {checkpoint_block, checkpoint_hash} = reorg_checkpoint(last_block, start_block_l1, json_rpc_named_arguments)
 
-      last_block = min(from_block - 1, chunk_end)
+    # together, so that no checkpoint stays after the rows it covers are removed
+    {:ok, deleted_count} =
+      Repo.transaction(fn ->
+        {deleted_count, _} = Repo.delete_all(from(d in Deposit, where: d.l1_block_number >= ^from_block))
+        set_checkpoint(checkpoint_block, checkpoint_hash)
+        deleted_count
+      end)
 
-      # No checkpoint before the start block, which `Optimism.init_continue/2` would refuse on a restart, nor one the
-      # L1 node does not resolve: without a checkpoint the fetcher takes up from the start block.
-      checkpoint_hash =
-        with true <- last_block >= start_block_l1,
-             [%{"hash" => hash}] <-
-               Optimism.get_blocks_by_numbers([last_block], json_rpc_named_arguments, Helper.infinite_retries_number()) do
-          hash
-        else
-          _ -> nil
-        end
+    log_deleted_rows_count(from_block, deleted_count)
 
-      # together, so that no checkpoint stays after the rows it covers are removed
-      {:ok, deleted_count} =
-        Repo.transaction(fn ->
-          {deleted_count, _} = Repo.delete_all(from(d in Deposit, where: d.l1_block_number >= ^from_block))
-          Optimism.set_last_block_hash(checkpoint_hash || @empty_hash, @counter_type)
-          deleted_count
-        end)
+    last_block
+  end
 
-      log_deleted_rows_count(from_block, deleted_count)
+  # The checkpoint of the last block kept by a reorg: none before the start block, which `Optimism.init_continue/2`
+  # would refuse on a restart (without a checkpoint the fetcher takes up from the start block)
+  defp reorg_checkpoint(last_block, start_block_l1, _json_rpc_named_arguments) when last_block < start_block_l1,
+    do: {0, @empty_hash}
 
-      {:halt, last_block}
-    else
-      if chunk_end >= chunk_start do
-        Optimism.set_last_block_hash_by_number(chunk_end, @counter_type, json_rpc_named_arguments)
-      end
+  defp reorg_checkpoint(last_block, _start_block_l1, json_rpc_named_arguments),
+    do: {last_block, block_hash_by_number(last_block, json_rpc_named_arguments)}
 
-      {:cont, chunk_end}
+  # The hash of the L1 block `block_number`, waiting for an L1 node that does not return the block (it lags behind): a
+  # checkpoint with no hash, or a stale one, could not be told from one a fetcher of the previous version writes (see
+  # `check_checkpoint/1`)
+  defp block_hash_by_number(block_number, json_rpc_named_arguments) do
+    case Optimism.get_block_by_number(block_number, json_rpc_named_arguments) do
+      {:ok, %{"hash" => hash}} ->
+        hash
+
+      {:ok, nil} ->
+        Optimism.log_error_message_with_retry_sleep("The L1 node does not return the block #{block_number}.")
+        block_hash_by_number(block_number, json_rpc_named_arguments)
     end
+  end
+
+  # Writes the checkpoint of `block_number`: the number and the hash of the block, and the hash alone under the
+  # previous name, together. The block number 0 stands for no checkpoint.
+  defp set_checkpoint(block_number, block_hash) do
+    {hash, ""} = block_hash |> String.trim_leading("0x") |> Integer.parse(16)
+
+    {:ok, _} =
+      Repo.transaction(fn ->
+        Optimism.set_last_block_hash(block_hash, @counter_type)
+
+        {:ok, _} =
+          LastFetchedCounter.upsert(%{counter_type: @counter_type_block, value: block_number * @hash_values + hash})
+      end)
   end
 
   defp log_deleted_rows_count(reorg_block, count) do
@@ -575,16 +621,17 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
     Determines the last L1 block the fetcher handled, for the `Indexer.Fetcher.Optimism` module to start fetching from
     the block after it.
 
-    The fetcher takes up after the block its checkpoint names. Without a checkpoint of its own (the deposits were
-    derived the way earlier versions of this fetcher derived them, or there are none yet), or with one the L1 node no
-    longer resolves, it derives every deposit again from the start block. It does not take up from its last row: while
-    a deployment rolls over, a fetcher of the previous version can import rows ahead of this one. The rows stay until
-    the chunk of their L1 block replaces them (see `remove_stale_deposits/3`), so the deposits stay visible meanwhile
-    and a rollback to an earlier version finds them all.
+    The fetcher takes up after the block its checkpoint names, once `check_checkpoint/1` finds it on the chain of the
+    L1 node. Without a checkpoint of its own (the deposits were derived the way earlier versions of this fetcher
+    derived them, or there are none yet), the fetcher derives every deposit again from the start block, as it does with
+    a checkpoint of an earlier version that has no block number and whose hash the L1 node does not find. It does not
+    take up from its last row: while a deployment rolls over, a fetcher of the previous version can import rows ahead
+    of this one. The rows stay until the chunk of their L1 block replaces them (see `remove_stale_deposits/3`), so the
+    deposits stay visible meanwhile and a rollback to an earlier version finds them all.
 
     ## Parameters
     - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection.
-                                  Used to get the checkpoint block by its hash from the RPC node.
+                                  Used to get the block of a checkpoint without a number by its hash from the RPC node.
 
     ## Returns
     - A tuple `{last_block_number, nil, nil}`, where `last_block_number` is the block the checkpoint names, or 0 to start
@@ -592,9 +639,77 @@ defmodule Indexer.Fetcher.Optimism.Deposit do
   """
   @spec get_last_l1_item(EthereumJSONRPC.json_rpc_named_arguments()) :: {non_neg_integer(), nil, nil}
   def get_last_l1_item(json_rpc_named_arguments) do
-    case Optimism.get_last_block_number_from_last_fetched_counter(json_rpc_named_arguments, @counter_type) do
-      nil -> {0, nil, nil}
-      last_block_number -> {last_block_number, nil, nil}
+    case read_checkpoint() do
+      {block_number, block_hash, block_hash} when block_number > 0 and block_hash != @empty_hash ->
+        {block_number, nil, nil}
+
+      {_block_number, _block_hash, hash} ->
+        {block_number_by_hash(hash, json_rpc_named_arguments) || 0, nil, nil}
+    end
+  end
+
+  @doc false
+  # Checks the checkpoint against the chain of the L1 node before the fetcher handles any chunk, and returns the state
+  # to take up with. An L1 node returns a block by its hash also when the block is off its chain, so the checkpoint is
+  # checked by its number. Its block can go off the chain in an L1 reorg while the fetcher is down, unseen by the reorg
+  # monitor: the deposits are then derived again from before it, as after a reorg reported at it (see `rewind/3`).
+  #
+  # A fetcher of the previous version writes only the hash, also when it rewinds after a reorg (to an earlier block,
+  # or to none, removing the rows after it), while a deployment rolls over or after a rollback. When the hash under the
+  # previous name is not the hash of the checkpoint, the fetcher takes up as the previous version does: after the block
+  # of that hash if it is on the chain, from before it if not, and from the start block if the node does not find it.
+  @spec check_checkpoint(map()) :: map()
+  def check_checkpoint(%{start_block_l1: start_block_l1, json_rpc_named_arguments: json_rpc_named_arguments} = state) do
+    {block_number, hash} =
+      case read_checkpoint() do
+        {block_number, block_hash, block_hash} when block_number > 0 and block_hash != @empty_hash ->
+          {block_number, block_hash}
+
+        {_block_number, _block_hash, hash} ->
+          {block_number_by_hash(hash, json_rpc_named_arguments), hash}
+      end
+
+    cond do
+      is_nil(block_number) ->
+        %{state | start_block: start_block_l1}
+
+      on_chain?(block_number, hash, json_rpc_named_arguments) ->
+        %{state | start_block: max(start_block_l1, block_number)}
+
+      true ->
+        Logger.warning(
+          "The checkpoint block #{block_number} (#{hash}) is not on the chain of the L1 node: the L1 chain was reorganized, or the node lags behind. Deriving the deposits again from before it..."
+        )
+
+        %{state | start_block: rewind(block_number, block_number, state) + 1}
+    end
+  end
+
+  # The checkpoint, read in one query: the number and the hash of its block, and the hash under the previous name.
+  # Without a checkpoint, the number is 0 and the hashes are the empty hash.
+  defp read_checkpoint do
+    values = Map.new(LastFetchedCounter.get_multiple([@counter_type_block, @counter_type]))
+    value = &Decimal.to_integer(Map.get(values, &1) || Decimal.new(0))
+    to_hash = &("0x" <> (&1 |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(64, "0")))
+    block = value.(@counter_type_block)
+
+    {div(block, @hash_values), to_hash.(rem(block, @hash_values)), to_hash.(value.(@counter_type))}
+  end
+
+  defp on_chain?(block_number, block_hash, json_rpc_named_arguments) do
+    case Optimism.get_block_by_number(block_number, json_rpc_named_arguments) do
+      {:ok, %{"hash" => hash}} -> String.downcase(hash) == block_hash
+      {:ok, nil} -> false
+    end
+  end
+
+  # The number of the block the L1 node returns by the hash, on its chain or not, or nil
+  defp block_number_by_hash(@empty_hash, _json_rpc_named_arguments), do: nil
+
+  defp block_number_by_hash(block_hash, json_rpc_named_arguments) do
+    case Optimism.get_block_by_hash(block_hash, json_rpc_named_arguments) do
+      {:ok, %{"number" => number}} -> quantity_to_integer(number)
+      {:ok, nil} -> nil
     end
   end
 

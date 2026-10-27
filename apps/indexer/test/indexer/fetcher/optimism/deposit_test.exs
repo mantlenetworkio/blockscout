@@ -9,6 +9,7 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
     import Explorer.OptimismBridgeFixtures
     import Mox
 
+    alias Explorer.Chain.Cache.Counters.LastFetchedCounter
     alias Explorer.Chain.Cache.LatestL1BlockNumber
     alias Explorer.Chain.Hash
     alias Explorer.Chain.Optimism.BridgeMessage
@@ -24,6 +25,7 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
 
     @portal "0xb3db4bd5bc225930ed674494f9a4f6a11b8efbc8"
     @counter_type "optimism_deposits_fetcher_last_l1_block_hash_v2"
+    @counter_type_block "optimism_deposits_fetcher_last_l1_block_v2"
 
     # opaqueData of the synthetic contract creations (see their tests)
     @mantle_v0_creation_data "0x0000000000000000000000000000000000000000000000000000000000000020000000000000000000000000000000000000000000000000000000000000006e000000000000000000000000000000000000000000000000000000000000123400000000000000000000000000000000000000000000000000000000000056780000000000000000000000000000000000000000000000000000000000009abc0000000000030d40016080604052000000000000000000000000000000000000"
@@ -219,19 +221,17 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
       } do
         index_creation_chunk(json_rpc_named_arguments)
 
-        # the checkpoint goes out in upper-case hex (`Optimism.get_last_block_hash/1`)
-        expect(EthereumJSONRPC.Mox, :json_rpc, fn %{method: "eth_getBlockByHash", params: [block_hash, false]},
-                                                  _options ->
-          assert String.downcase(block_hash) == hash(11_014_810)
-          {:ok, block_response(11_014_810)}
-        end)
-
         assert {11_014_810, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+
+        expect_checkpoint_lookup(11_014_810)
+        state = state(json_rpc_named_arguments, 11_014_810, 11_014_900)
+
+        assert state == Deposit.check_checkpoint(state)
         assert 1 == Repo.aggregate(DepositSchema, :count)
       end
     end
 
-    describe "get_last_l1_item/1" do
+    describe "get_last_l1_item/1 and check_checkpoint/1" do
       setup do
         LatestL1BlockNumber.set_block_number(300)
         on_exit(fn -> ConCache.delete(LatestL1BlockNumber.cache_name(), :block_number) end)
@@ -248,7 +248,102 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
         Optimism.set_last_block_hash(hash(150), "optimism_deposits_fetcher_last_l1_block_hash")
 
         assert {0, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+
+        state = state(json_rpc_named_arguments, 1, 299)
+
+        assert state == Deposit.check_checkpoint(state)
         assert [110, 150] == Repo.all(from(d in DepositSchema, select: d.l1_block_number, order_by: d.l1_block_number))
+      end
+
+      # An L1 reorg can replace the checkpoint block while the fetcher is down, unseen by the reorg monitor. The L1 node
+      # can still return the replaced block by its hash, so the checkpoint is checked by its block number, and the
+      # deposits are derived again from three epochs before it, as after a reorg reported at it, before the fetcher
+      # handles any chunk: the deposits of the replaced blocks go, and those the replacing blocks include come.
+      test "derives the deposits again from three epochs before a checkpoint block replaced while the fetcher was down",
+           %{json_rpc_named_arguments: json_rpc_named_arguments} do
+        %{l2_transaction_hash: kept} = insert(:op_deposit, l1_block_number: 250)
+        insert(:op_deposit, l1_block_number: 340)
+        put_checkpoint(350)
+
+        assert {350, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+
+        expect_checkpoint_lookup(350, hash(1_350))
+        expect_rewind_requests(370, %{253 => block_response(253)})
+
+        capture_log(fn ->
+          assert %{start_block: 254} = Deposit.check_checkpoint(state(json_rpc_named_arguments, 350, 399))
+        end)
+
+        assert [kept] == Repo.all(from(d in DepositSchema, select: d.l2_transaction_hash))
+        assert {253, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+      end
+
+      # A checkpoint of the previous version has the hash of its block only
+      test "takes up after a checkpoint of the previous version, which names its block by the hash", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        Optimism.set_last_block_hash(hash(350), @counter_type)
+        expect_block_by_hash(350)
+
+        assert {350, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+
+        expect_block_by_hash(350)
+        expect_checkpoint_lookup(350)
+        state = state(json_rpc_named_arguments, 350, 399)
+
+        assert state == Deposit.check_checkpoint(state)
+      end
+
+      # While a deployment rolls over, or after a rollback, a fetcher of the previous version writes only the hash of the
+      # checkpoint block, also when it rewinds after a reorg (here to block 853, removing the rows from block 854 on):
+      # the fetcher takes up after the block of that hash, even before the block of its own checkpoint
+      test "takes up after the block whose hash a fetcher of the previous version checkpointed last", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        put_checkpoint(1_000)
+        Optimism.set_last_block_hash(hash(853), @counter_type)
+
+        expect_block_by_hash(853)
+        expect_checkpoint_lookup(853)
+
+        assert %{start_block: 853} = Deposit.check_checkpoint(state(json_rpc_named_arguments, 1_000, 1_100))
+      end
+
+      # The previous version keeps no checkpoint when it rewinds to a block the L1 node does not return, and starts from
+      # the start block on a restart: so does this version, rather than take up after its own checkpoint, which the
+      # rewind removed the rows of
+      test "takes up from the start block after a fetcher of the previous version left no checkpoint", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        put_checkpoint(1_000)
+        Optimism.set_last_block_hash("0x" <> String.duplicate("0", 64), @counter_type)
+
+        assert {0, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+        assert %{start_block: 1} = Deposit.check_checkpoint(state(json_rpc_named_arguments, 1_000, 1_100))
+      end
+
+      test "takes up from the start block after a checkpoint of the previous version the L1 node does not find", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        put_checkpoint(1_000)
+        Optimism.set_last_block_hash(hash(853), @counter_type)
+        expect_block_by_hash(853, nil)
+
+        assert %{start_block: 1} = Deposit.check_checkpoint(state(json_rpc_named_arguments, 1_000, 1_100))
+      end
+
+      # The block of a checkpoint hash is looked up again when it is checked: the cursor comes from that lookup
+      test "takes up from the start block when the block of a checkpoint hash is gone when it is checked", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        Optimism.set_last_block_hash(hash(1_000), @counter_type)
+        expect_block_by_hash(1_000)
+
+        assert {1_000, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+
+        expect_block_by_hash(1_000, nil)
+
+        assert %{start_block: 1} = Deposit.check_checkpoint(state(json_rpc_named_arguments, 1_000, 1_100))
       end
 
       # The reorg monitor reports the block whose hash changed, which can be above the first block the reorg replaced,
@@ -276,9 +371,13 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
 
         # the previous version imports a deposit of a later block before the restart
         insert(:op_deposit, l1_block_number: 450)
-        expect_checkpoint_lookup(283)
 
         assert {283, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+
+        expect_checkpoint_lookup(283)
+        state = state(json_rpc_named_arguments, 283, 399)
+
+        assert state == Deposit.check_checkpoint(state)
       end
 
       # Finality can lag far behind, as on a testnet that does not finalize: the deposits are derived again from the
@@ -299,19 +398,38 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
         assert [kept] == Repo.all(from(d in DepositSchema, select: d.l2_transaction_hash))
       end
 
-      # The rows are removed with the checkpoint written, so a checkpoint the L1 node cannot resolve leaves no earlier
-      # checkpoint behind it: the fetcher takes up from the start block, not after the removed rows
-      test "takes up from the start block after an L1 reorg whose checkpoint block the L1 node does not return", %{
+      # The rows are removed with the checkpoint written, so a checkpoint block the L1 node does not return is kept
+      # without its hash: a restart derives the deposits again from before it, not from the start block
+      # The checkpoint block of a reorg is below the blocks just handled, so an L1 node that does not return it lags
+      # behind: the fetcher waits for it, as a checkpoint without a hash could not be told from one a fetcher of the
+      # previous version leaves
+      test "waits for the checkpoint block of an L1 reorg that the L1 node does not return yet", %{
         json_rpc_named_arguments: json_rpc_named_arguments
       } do
         insert(:op_deposit, l1_block_number: 290)
         Optimism.set_last_block_hash(hash(350), @counter_type)
         RollupReorgMonitorQueue.push(380, Deposit)
-        expect_reorg_requests(370, %{283 => nil})
+        expect(EthereumJSONRPC.Mox, :json_rpc, fn %{method: "eth_getLogs"}, _options -> {:ok, []} end)
+        expect_rewind_requests(370, %{283 => nil})
+        expect_checkpoint_lookup(283)
 
-        capture_log(fn -> Deposit.handle_info(:continue, state(json_rpc_named_arguments, 300, 399)) end)
+        capture_log(fn ->
+          assert {:noreply, %{start_block: 284}} =
+                   Deposit.handle_info(:continue, state(json_rpc_named_arguments, 300, 399))
+        end)
+
+        assert [] == Repo.all(DepositSchema)
+        assert {283, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+      end
+
+      # A checkpoint with a block number but no hash is no checkpoint of this version (it does not write one)
+      test "takes up from the start block after a checkpoint with a block number and no hash", %{
+        json_rpc_named_arguments: json_rpc_named_arguments
+      } do
+        LastFetchedCounter.upsert(%{counter_type: @counter_type_block, value: 1_000 * Integer.pow(2, 256)})
 
         assert {0, nil, nil} = Deposit.get_last_l1_item(json_rpc_named_arguments)
+        assert %{start_block: 1} = Deposit.check_checkpoint(state(json_rpc_named_arguments, 1_000, 1_100))
       end
 
       # A checkpoint before the start block would stop the fetcher on a restart (`Optimism.init_continue/2`), so after a
@@ -334,27 +452,62 @@ defmodule Indexer.Fetcher.Optimism.DepositTest do
       end
     end
 
-    # The requests of a chunk without deposits that handles an L1 reorg: the logs, the finalized block, and the block of
-    # each checkpoint in `checkpoint_blocks` (`nil` for a block the node does not return)
+    # The requests of a chunk without deposits that handles an L1 reorg: the logs, then those of the rewind (see
+    # `expect_rewind_requests/2`)
     defp expect_reorg_requests(finalized_block, checkpoint_blocks) do
-      expect(EthereumJSONRPC.Mox, :json_rpc, 2 + map_size(checkpoint_blocks), fn
-        %{method: "eth_getLogs"}, _options ->
-          {:ok, []}
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn %{method: "eth_getLogs"}, _options -> {:ok, []} end)
+      expect_rewind_requests(finalized_block, checkpoint_blocks)
+    end
 
-        [%{id: id, method: "eth_getBlockByNumber", params: ["finalized", false]}], _options ->
-          {:ok, [%{id: id, result: block_response(finalized_block)}]}
+    # The requests of a rewind after an L1 reorg: the finalized block, then the block of each checkpoint in
+    # `checkpoint_blocks` (`nil` for a block the node does not return)
+    defp expect_rewind_requests(finalized_block, checkpoint_blocks) do
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn [
+                                                  %{
+                                                    id: id,
+                                                    method: "eth_getBlockByNumber",
+                                                    params: ["finalized", false]
+                                                  }
+                                                ],
+                                                _options ->
+        {:ok, [%{id: id, result: block_response(finalized_block)}]}
+      end)
 
-        [%{id: id, method: "eth_getBlockByNumber", params: [quantity, false]}], _options ->
-          {:ok, [%{id: id, result: Map.fetch!(checkpoint_blocks, EthereumJSONRPC.quantity_to_integer(quantity))}]}
+      Enum.each(checkpoint_blocks, fn {number, block} ->
+        expect(EthereumJSONRPC.Mox, :json_rpc, fn %{method: "eth_getBlockByNumber", params: [quantity, false]},
+                                                  _options ->
+          assert EthereumJSONRPC.quantity_to_integer(quantity) == number
+          {:ok, block}
+        end)
       end)
     end
 
-    defp expect_checkpoint_lookup(number) do
+    # The block at the number of a checkpoint, as eth_getBlockByNumber gives it on a restart: with the hash `block_hash`,
+    # by default that of the checkpoint
+    defp expect_checkpoint_lookup(number, block_hash \\ nil) do
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn %{method: "eth_getBlockByNumber", params: [quantity, false]},
+                                                _options ->
+        assert EthereumJSONRPC.quantity_to_integer(quantity) == number
+        {:ok, %{block_response(number) | "hash" => block_hash || hash(number)}}
+      end)
+    end
+
+    # The block of the hash of a checkpoint, as eth_getBlockByHash gives it on a restart (`nil` for a hash the node does
+    # not find)
+    defp expect_block_by_hash(number, block \\ :found) do
       expect(EthereumJSONRPC.Mox, :json_rpc, fn %{method: "eth_getBlockByHash", params: [block_hash, false]},
                                                 _options ->
         assert String.downcase(block_hash) == hash(number)
-        {:ok, block_response(number)}
+        {:ok, if(block == :found, do: block_response(number))}
       end)
+    end
+
+    # The checkpoint of L1 block `number`, as the fetcher writes it: the number and the hash in one value, and the hash
+    # alone under the name of the previous version
+    defp put_checkpoint(number) do
+      Optimism.set_last_block_hash(hash(number), @counter_type)
+      {block_hash, ""} = number |> hash() |> String.trim_leading("0x") |> Integer.parse(16)
+      LastFetchedCounter.upsert(%{counter_type: @counter_type_block, value: number * Integer.pow(2, 256) + block_hash})
     end
 
     # Runs the fetcher over L1 blocks 11,014,800..11,014,810, where the Sepolia creation deposit sits.

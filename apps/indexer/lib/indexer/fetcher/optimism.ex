@@ -501,6 +501,27 @@ defmodule Indexer.Fetcher.Optimism do
   end
 
   @doc """
+    Fetches block data by its number using RPC request.
+
+    ## Parameters
+    - `number`: The block number.
+    - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection.
+
+    ## Returns
+    - `{:ok, block}` tuple in case of success, `{:ok, nil}` if the RPC node does not return the block.
+    - `{:error, message}` tuple in case of failure.
+  """
+  @spec get_block_by_number(non_neg_integer(), EthereumJSONRPC.json_rpc_named_arguments()) ::
+          {:ok, any()} | {:error, any()}
+  def get_block_by_number(number, json_rpc_named_arguments) do
+    req = ByNumber.request(%{id: 0, number: number}, false)
+
+    error_message = &"eth_getBlockByNumber failed. Error: #{inspect(&1)}"
+
+    Helper.repeated_call(&json_rpc/2, [req, json_rpc_named_arguments], error_message, Helper.infinite_retries_number())
+  end
+
+  @doc """
     Fetches blocks from RPC by their numbers.
 
     ## Parameters
