@@ -673,7 +673,7 @@ defmodule Indexer.Fetcher.Optimism do
   """
   @spec log_catchup_loop_finished(non_neg_integer(), non_neg_integer()) :: :ok
   def log_catchup_loop_finished(start_block_number, end_block_number) do
-    Logger.info("The fetcher catchup loop for the range #{inspect(start_block_number..end_block_number)} finished.")
+    Logger.info("The fetcher catchup loop for the range #{inspect(start_block_number..end_block_number//1)} finished.")
     Logger.info("Switching to realtime mode...")
   end
 

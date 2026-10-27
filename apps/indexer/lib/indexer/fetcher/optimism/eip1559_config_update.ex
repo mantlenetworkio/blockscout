@@ -42,6 +42,7 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
   alias Explorer.Chain.Events.Subscriber
   alias Explorer.Chain.Optimism.EIP1559ConfigUpdate
   alias Indexer.Fetcher.Optimism
+  alias Indexer.Fetcher.Optimism.TransactionBatch
   alias Indexer.Helper
 
   @fetcher_name :optimism_eip1559_config_updates
@@ -186,8 +187,10 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
           json_rpc_named_arguments: json_rpc_named_arguments
         } = state
       ) do
+    # no blocks when the range ends before it starts, as when the last handled block is above the latest one at the
+    # start: the realtime blocks come next
     {new_start_block_number, new_end_block_number, reorg_block_number} =
-      start_block_number..end_block_number
+      start_block_number..end_block_number//1
       |> Enum.chunk_every(chunk_size)
       |> Enum.reduce_while({nil, nil, nil}, fn block_numbers, _acc ->
         chunk_start = List.first(block_numbers)
@@ -305,6 +308,9 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
   # The last handled block hash is kept in the `last_fetched_counters` table to start from that after
   # instance restart.
   #
+  # The blocks are handled only once the RPC node returns all of them: the parameters a missing block sets would be
+  # recorded at a later block, or not at all, while the last handled block hash moves past it.
+  #
   # ## Parameters
   # - `block_numbers`: The list of block numbers for which we need to check and update config parameters.
   #                    Note that the size of this list cannot be larger than max batch request size on RPC node.
@@ -314,45 +320,37 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
   # - The number of inserted rows into the `op_eip1559_config_updates` database table.
   @spec handle_updates([non_neg_integer()], EthereumJSONRPC.json_rpc_named_arguments()) :: non_neg_integer()
   defp handle_updates(block_numbers, json_rpc_named_arguments) do
-    case fetch_blocks_by_numbers(block_numbers, json_rpc_named_arguments, false) do
-      {:ok, %Blocks{blocks_params: blocks_params}} ->
-        # we only keep block numbers for the existing blocks
-        block_numbers_existing = existing_block_numbers(block_numbers, blocks_params)
-        blocks_by_number = blocks_params_by_number(blocks_params)
+    with {:ok, %Blocks{blocks_params: blocks_params} = blocks} <-
+           fetch_blocks_by_numbers(block_numbers, json_rpc_named_arguments, false),
+         blocks_by_number = blocks_params_by_number(blocks_params),
+         # a request of the batch can fail or return no block alone, or get no response
+         {:missing_blocks, [], _} <-
+           {:missing_blocks, Enum.reject(block_numbers, &Map.has_key?(blocks_by_number, &1)), blocks} do
+      last_block_number = List.last(block_numbers)
 
-        last_block_number = List.last(block_numbers_existing)
-
-        Enum.reduce(block_numbers_existing, 0, fn block_number, acc ->
-          block = Map.get(blocks_by_number, block_number, %{extra_data: "0x"})
-
-          process_block_config(block, block_number, last_block_number, acc)
-        end)
-
-      {_, message_or_errors} ->
-        message =
-          case message_or_errors do
-            %Blocks{errors: errors} -> errors
-            msg -> msg
-          end
-
-        chunk_start = List.first(block_numbers)
-        chunk_end = List.last(block_numbers)
-
-        Optimism.log_error_message_with_retry_sleep(
-          "Cannot fetch blocks #{inspect(chunk_start..chunk_end)}. Error(s): #{inspect(message)}"
+      Enum.reduce(block_numbers, 0, fn block_number, acc ->
+        process_block_config(Map.fetch!(blocks_by_number, block_number), block_number, last_block_number, acc)
+      end)
+    else
+      {:missing_blocks, missing_block_numbers, %Blocks{errors: errors}} ->
+        retry_updates(
+          block_numbers,
+          json_rpc_named_arguments,
+          "Missing blocks #{inspect(missing_block_numbers)}. Error(s): #{inspect(errors)}"
         )
 
-        handle_updates(block_numbers, json_rpc_named_arguments)
+      {:error, reason} ->
+        retry_updates(block_numbers, json_rpc_named_arguments, "Error(s): #{inspect(reason)}")
     end
   end
 
-  defp existing_block_numbers(block_numbers, blocks_params) do
-    existing_numbers =
-      blocks_params
-      |> Enum.reject(&is_nil/1)
-      |> MapSet.new(& &1.number)
+  defp retry_updates(block_numbers, json_rpc_named_arguments, message) do
+    chunk_start = List.first(block_numbers)
+    chunk_end = List.last(block_numbers)
 
-    Enum.filter(block_numbers, &MapSet.member?(existing_numbers, &1))
+    Optimism.log_error_message_with_retry_sleep("Cannot fetch blocks #{inspect(chunk_start..chunk_end)}. #{message}")
+
+    handle_updates(block_numbers, json_rpc_named_arguments)
   end
 
   defp blocks_params_by_number(blocks_params) do
@@ -440,6 +438,11 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
   # The time need not be the timestamp of any block. The chain is searched over RPC rather than in the indexed blocks:
   # those can be far from the time, as a new database is indexed from the head of the chain down.
   #
+  # An L2 block follows its parent by the block duration, so the block is counted back from the latest one, and checked.
+  # The chain is searched only when the count misses it (the block duration setting does not space the blocks). Blocks
+  # before the rollup genesis, which an L2 node does not have to keep, are not read when
+  # INDEXER_OPTIMISM_L2_BATCH_GENESIS_BLOCK_NUMBER gives the genesis block: the activation block is at least that one.
+  #
   # ## Parameters
   # - `timestamp`: The activation time of the upgrade, which the latest block has reached.
   # - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection.
@@ -449,18 +452,41 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
   @spec block_number_by_timestamp(non_neg_integer(), EthereumJSONRPC.json_rpc_named_arguments()) :: non_neg_integer()
   defp block_number_by_timestamp(timestamp, json_rpc_named_arguments)
 
-  defp block_number_by_timestamp(0, _json_rpc_named_arguments), do: 0
+  # the upgrade is active from the rollup genesis
+  defp block_number_by_timestamp(0, _json_rpc_named_arguments), do: rollup_genesis_block_number()
 
   defp block_number_by_timestamp(timestamp, json_rpc_named_arguments) do
     {:ok, latest_block_number} =
       Helper.get_block_number_by_tag("latest", json_rpc_named_arguments, Helper.infinite_retries_number())
 
-    block_number = first_block_at_or_after(timestamp, 0, latest_block_number, json_rpc_named_arguments)
+    first_block_number = min(rollup_genesis_block_number(), latest_block_number)
+    block_duration = Application.get_all_env(:indexer)[Optimism][:block_duration]
+
+    block_number =
+      with true <- is_integer(block_duration) and block_duration > 0,
+           latest_timestamp = block_timestamp(latest_block_number, json_rpc_named_arguments),
+           counted_block_number =
+             max(latest_block_number - div(latest_timestamp - timestamp, block_duration), first_block_number),
+           true <-
+             first_block_at_or_after?(counted_block_number, first_block_number, timestamp, json_rpc_named_arguments) do
+        counted_block_number
+      else
+        _ -> first_block_at_or_after(timestamp, first_block_number, latest_block_number, json_rpc_named_arguments)
+      end
 
     Logger.info("The first block at or after the timestamp #{timestamp} is #{block_number}.")
 
     block_number
   end
+
+  # Whether `block_number` is the first block from `first_block_number` on whose timestamp is at or after `timestamp`
+  defp first_block_at_or_after?(block_number, first_block_number, timestamp, json_rpc_named_arguments) do
+    block_timestamp(block_number, json_rpc_named_arguments) >= timestamp and
+      (block_number == first_block_number or block_timestamp(block_number - 1, json_rpc_named_arguments) < timestamp)
+  end
+
+  # The rollup genesis block that INDEXER_OPTIMISM_L2_BATCH_GENESIS_BLOCK_NUMBER gives, or the first block
+  defp rollup_genesis_block_number, do: Application.get_all_env(:indexer)[TransactionBatch][:genesis_block_l2] || 0
 
   # Binary search for the first block of `low..high` whose timestamp is at or after `timestamp`. The timestamp of
   # block `high` is.
@@ -469,14 +495,22 @@ defmodule Indexer.Fetcher.Optimism.EIP1559ConfigUpdate do
   defp first_block_at_or_after(timestamp, low, high, json_rpc_named_arguments) do
     middle = div(low + high, 2)
 
-    {:ok, middle_timestamp} =
-      Helper.get_block_timestamp_by_number_or_tag(middle, json_rpc_named_arguments, Helper.infinite_retries_number())
-
-    if middle_timestamp >= timestamp do
+    if block_timestamp(middle, json_rpc_named_arguments) >= timestamp do
       first_block_at_or_after(timestamp, low, middle, json_rpc_named_arguments)
     else
       first_block_at_or_after(timestamp, middle + 1, high, json_rpc_named_arguments)
     end
+  end
+
+  defp block_timestamp(block_number, json_rpc_named_arguments) do
+    {:ok, timestamp} =
+      Helper.get_block_timestamp_by_number_or_tag(
+        block_number,
+        json_rpc_named_arguments,
+        Helper.infinite_retries_number()
+      )
+
+    timestamp
   end
 
   # Gets the last known L2 block number from the `op_eip1559_config_updates` database table.
