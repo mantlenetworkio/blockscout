@@ -30,8 +30,11 @@ defmodule Utils.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:bypass, "~> 2.1", only: :test},
       {:credo, "~> 1.5", only: [:test, :dev], runtime: false},
+      {:dns, "~> 2.4"},
       {:httpoison, "~> 2.0"},
+      {:inet_cidr, "~> 1.0"},
       {:mime, "~> 2.0"},
       {:tesla, "~> 1.17.0"}
     ]

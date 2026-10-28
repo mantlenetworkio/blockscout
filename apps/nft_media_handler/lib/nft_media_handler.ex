@@ -28,7 +28,8 @@ defmodule NFTMediaHandler do
   @spec prepare_and_upload_by_url(binary(), binary()) :: {:error, any()} | {list(), {binary(), binary()}}
   def prepare_and_upload_by_url(url, r2_folder) do
     with {prepared_url, headers} <- maybe_process_ipfs(url),
-         {:fetch, {:ok, media_type, body}} <- {:fetch, Fetcher.fetch_media(prepared_url, headers)},
+         {:fetch, {:ok, media_type, body}} <-
+           {:fetch, Fetcher.fetch_media(prepared_url, headers, prepared_url == url)},
          {:ok, result} <- prepare_and_upload_inner(media_type, body, url, r2_folder) do
       result
     else
@@ -158,6 +159,10 @@ defmodule NFTMediaHandler do
     end
   end
 
+  # Rewrites ipfs:// and ar:// URIs (and IPFS gateway paths) to their operator-configured gateway,
+  # and returns regular URLs unchanged. So an unchanged URL means the host still comes from on-chain
+  # metadata and must be validated against the SSRF blacklist, while a rewritten one points at a
+  # gateway the operator chose (possibly on a private address) and must not be.
   # credo:disable-for-next-line Credo.Check.Refactor.CyclomaticComplexity
   defp maybe_process_ipfs(uri) do
     case URI.parse(uri) do
