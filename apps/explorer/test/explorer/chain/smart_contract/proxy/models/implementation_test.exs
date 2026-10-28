@@ -49,6 +49,46 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation.Test do
                Implementation.get_implementation(smart_contract)
     end
 
+    test "get_implementation/2 re-probes a verified non-proxy within empty cache TTL for a verification request" do
+      initial_proxy_config = Application.get_env(:explorer, :proxy)
+      on_exit(fn -> Application.put_env(:explorer, :proxy, initial_proxy_config) end)
+
+      smart_contract = insert(:smart_contract)
+
+      proxy =
+        :explorer
+        |> Application.get_env(:proxy)
+        |> Keyword.replace(:fallback_cached_implementation_data_ttl, :timer.seconds(20))
+        |> Keyword.replace(:implementation_data_fetching_timeout, :timer.seconds(20))
+        |> Keyword.put(:empty_cached_implementation_data_ttl, :timer.hours(24))
+
+      Application.put_env(:explorer, :proxy, proxy)
+
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
+
+      assert %Implementation{address_hashes: [], names: [], proxy_type: nil} =
+               Implementation.get_implementation(smart_contract)
+
+      verify!(EthereumJSONRPC.Mox)
+
+      # `verifyproxycontract` accepts a request once the regular TTL expires, and its pending
+      # verification completes only through the callback of a fresh probe
+      Application.put_env(:explorer, :proxy, Keyword.replace(proxy, :fallback_cached_implementation_data_ttl, 0))
+
+      EthereumJSONRPC.Mox
+      |> TestHelper.mock_generic_proxy_requests()
+
+      test_pid = self()
+
+      Implementation.get_implementation(smart_contract,
+        uid: "verification-uid",
+        callback: fn result, uid -> send(test_pid, {:verification_result, result, uid}) end
+      )
+
+      assert_receive {:verification_result, _result, "verification-uid"}, :timer.seconds(5)
+    end
+
     test "get_implementation/1" do
       initial_proxy_config = Application.get_env(:explorer, :proxy)
       on_exit(fn -> Application.put_env(:explorer, :proxy, initial_proxy_config) end)

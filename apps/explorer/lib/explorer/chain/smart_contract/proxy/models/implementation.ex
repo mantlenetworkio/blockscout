@@ -170,7 +170,7 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
     implementation_updated_at = proxy_implementations && proxy_implementations.updated_at
 
     {updated_smart_contract, implementation_address_fetched?} =
-      if implementation_refetch_necessary?(proxy_implementations, smart_contract) do
+      if implementation_refetch_necessary?(proxy_implementations, smart_contract, options) do
         {smart_contract_with_bytecode_twin, implementation_address_fetched?} =
           SmartContract.address_hash_to_smart_contract_with_bytecode_twin(address_hash, options)
 
@@ -214,7 +214,8 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
          implementation_address_fetched?,
          refetch_necessity_checked?,
          proxy_implementations,
-         smart_contract
+         smart_contract,
+         options
        ) do
       get_implementation_address_hash_task =
         Task.async(fn ->
@@ -258,10 +259,11 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
          implementation_address_fetched?,
          refetch_necessity_checked?,
          proxy_implementations,
-         smart_contract
+         smart_contract,
+         options
        ) do
     (!implementation_address_fetched? || !refetch_necessity_checked?) &&
-      implementation_refetch_necessary?(proxy_implementations, smart_contract)
+      implementation_refetch_necessary?(proxy_implementations, smart_contract, options)
   end
 
   # Decides whether the cached implementations row needs to be refetched. Empty
@@ -269,12 +271,15 @@ defmodule Explorer.Chain.SmartContract.Proxy.Models.Implementation do
   # itself are kept for a much longer TTL than positive ones: a verified
   # non-proxy contract is unlikely to become a proxy, so re-probing all known
   # proxy patterns via JSON-RPC on every regular cache expiry is wasted work on
-  # the hot path of API requests.
-  @spec implementation_refetch_necessary?(__MODULE__.t() | nil, SmartContract.t() | nil) :: boolean()
-  defp implementation_refetch_necessary?(nil, _smart_contract), do: true
+  # the hot path of API requests. An explicit proxy verification request (`verifyproxycontract`, which
+  # passes a callback to report its result) keeps the regular TTL: its pending verification completes only
+  # through a fresh probe.
+  @spec implementation_refetch_necessary?(__MODULE__.t() | nil, SmartContract.t() | nil, Keyword.t()) :: boolean()
+  defp implementation_refetch_necessary?(nil, _smart_contract, _options), do: true
 
-  defp implementation_refetch_necessary?(%__MODULE__{} = proxy_implementations, smart_contract) do
-    if Enum.empty?(proxy_implementations.address_hashes) && verified_on_this_address?(smart_contract) do
+  defp implementation_refetch_necessary?(%__MODULE__{} = proxy_implementations, smart_contract, options) do
+    if Enum.empty?(proxy_implementations.address_hashes) && verified_on_this_address?(smart_contract) &&
+         !Keyword.has_key?(options, :callback) do
       ttl = Application.get_env(:explorer, :proxy)[:empty_cached_implementation_data_ttl] || get_fresh_time_distance()
 
       implementation_data_stale?(proxy_implementations.updated_at, ttl)
