@@ -62,8 +62,15 @@ defmodule Explorer.SmartContract.StylusVerifierInterface do
       {:error, error} ->
         Logger.error(fn ->
           [
+            "Error while sending request to verification microservice url: #{url} ",
+            inspect(error)
+          ]
+        end)
+
+        Logger.debug(fn ->
+          [
             "Error while sending request to verification microservice url: #{url}, body: #{inspect(body, limit: :infinity, printable_limit: :infinity)}: ",
-            inspect(error, limit: :infinity, printable_limit: :infinity)
+            inspect(error)
           ]
         end)
 
@@ -84,7 +91,7 @@ defmodule Explorer.SmartContract.StylusVerifierInterface do
         Logger.error(fn ->
           [
             "Error while sending request to verification microservice url: #{url}: ",
-            inspect(error, limit: :infinity, printable_limit: :infinity)
+            inspect(error)
           ]
         end)
 

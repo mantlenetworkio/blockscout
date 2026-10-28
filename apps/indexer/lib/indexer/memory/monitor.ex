@@ -110,9 +110,50 @@ defmodule Indexer.Memory.Monitor do
         _ -> Application.get_env(:indexer, :system_memory_percentage)
       end
 
-    case :memsup.get_system_memory_data()[:total_memory] do
+    case total_memory() do
       nil -> default_limit
       total_memory -> floor(total_memory * percentage / 100)
+    end
+  end
+
+  @cgroup_memory_limit_paths [
+    # cgroup v2
+    "/sys/fs/cgroup/memory.max",
+    # cgroup v1
+    "/sys/fs/cgroup/memory/memory.limit_in_bytes"
+  ]
+
+  # cgroup v1 reports "no limit" as a huge sentinel number (PAGE_COUNTER_MAX)
+  # rather than a keyword, so values above this threshold are treated as unset
+  @cgroup_no_limit_threshold 1 <<< 60
+
+  # When running in a container, the memory available to the pod is defined by
+  # its cgroup limit, while `:memsup` reports the host's total memory, so the
+  # cgroup limit takes precedence when it is present and set.
+  defp total_memory do
+    cgroup_memory_limit() || :memsup.get_system_memory_data()[:total_memory]
+  end
+
+  defp cgroup_memory_limit do
+    Enum.find_value(@cgroup_memory_limit_paths, &read_cgroup_memory_limit/1)
+  end
+
+  defp read_cgroup_memory_limit(path) do
+    case File.read(path) do
+      {:ok, content} -> parse_cgroup_memory_limit(content)
+      _ -> nil
+    end
+  end
+
+  @doc false
+  def parse_cgroup_memory_limit(content) do
+    with {limit, ""} <- Integer.parse(String.trim(content)),
+         true <- limit > 0 and limit < @cgroup_no_limit_threshold do
+      limit
+    else
+      # content is "max" (cgroup v2 for "no limit"), not a plain positive integer,
+      # or the limit is not set
+      _ -> nil
     end
   end
 
@@ -247,19 +288,33 @@ defmodule Indexer.Memory.Monitor do
     |> Enum.reject(&is_nil(Process.whereis(&1)))
     |> Enum.flat_map(fn supervisor ->
       supervisor
-      |> Supervisor.which_children()
+      |> safe_which_children()
       |> Enum.filter(fn {name, _, _, _} -> is_atom(name) and String.contains?(to_string(name), "OnDemand") end)
       |> Enum.flat_map(fn
-        {_, pid, :supervisor, _} ->
+        {_, pid, :supervisor, _} when is_pid(pid) ->
           pid
-          |> Supervisor.which_children()
+          |> safe_which_children()
           |> Enum.filter(&(elem(&1, 2) == :worker))
           |> Enum.map(&elem(&1, 1))
+          |> Enum.filter(&is_pid/1)
 
-        {_, pid, _, _} ->
+        {_, pid, _, _} when is_pid(pid) ->
           [pid]
+
+        # child is :undefined or :restarting (not currently running)
+        _ ->
+          []
       end)
     end)
+  end
+
+  # `Supervisor.which_children/1` performs a `GenServer.call`, which exits with
+  # `:noproc` if the supervisor terminates between the pid check and the call.
+  # Treat that expected race as an empty child list instead of crashing.
+  defp safe_which_children(supervisor) do
+    Supervisor.which_children(supervisor)
+  catch
+    :exit, _ -> []
   end
 
   defp name(pid) do

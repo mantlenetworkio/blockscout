@@ -9,7 +9,7 @@ defmodule Indexer.Fetcher.Beacon.Client do
   @request_error_msg "Error while sending request to beacon rpc"
 
   defp http_get_request(url) do
-    case HttpClient.get(url) do
+    case HttpClient.get(url, [], recv_timeout: 30_000) do
       {:ok, %{body: body, status_code: 200}} ->
         Jason.decode(body)
 
@@ -17,17 +17,13 @@ defmodule Indexer.Fetcher.Beacon.Client do
         {:error, body}
 
       {:error, error} ->
-        old_truncate = Application.get_env(:logger, :truncate)
-        Logger.configure(truncate: :infinity)
-
         Logger.error(fn ->
           [
             "Error while sending request to beacon rpc: #{url}: ",
-            inspect(error, limit: :infinity, printable_limit: :infinity)
+            inspect(error)
           ]
         end)
 
-        Logger.configure(truncate: old_truncate)
         {:error, @request_error_msg}
     end
   end
