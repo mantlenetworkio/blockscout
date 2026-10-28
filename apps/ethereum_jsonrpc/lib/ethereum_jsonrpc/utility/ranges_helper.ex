@@ -296,27 +296,6 @@ defmodule EthereumJSONRPC.Utility.RangesHelper do
     end
   end
 
-  @doc """
-  Defines a stream reducer that filters out data outside configured block ranges.
-  Applicable for fetchers' `init` function (for modules that implement `BufferedTask`).
-  """
-  @spec stream_reducer_by_block_ranges((any(), any() -> any())) :: (any(), any() -> any())
-  def stream_reducer_by_block_ranges(reducer) do
-    if block_ranges_present?() do
-      block_ranges = get_block_ranges()
-
-      fn data, acc ->
-        block_number = extract_block_number(data)
-
-        if number_in_ranges?(block_number, block_ranges),
-          do: reducer.(data, acc),
-          else: acc
-      end
-    else
-      reducer
-    end
-  end
-
   defp do_sanitize_ranges([]), do: []
 
   defp do_sanitize_ranges([_.._//step | _] = ranges) do
