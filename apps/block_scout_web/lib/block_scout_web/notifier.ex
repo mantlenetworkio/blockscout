@@ -43,8 +43,10 @@ defmodule BlockScoutWeb.Notifier do
     Address.CoinBalance,
     Address.Reputation,
     BlockNumberHelper,
+    DenormalizationHelper,
     InternalTransaction,
     Token,
+    Token.Instance,
     Transaction
   }
 
@@ -240,7 +242,25 @@ defmodule BlockScoutWeb.Notifier do
   def handle_event({:chain_event, :token_transfers, :realtime, all_token_transfers}) do
     all_token_transfers_full =
       all_token_transfers
-      |> Chain.select_repo(@api_true).preload(token: Reputation.reputation_association())
+      |> Repo.preload(
+        DenormalizationHelper.extend_transaction_preload([
+          [token: Reputation.reputation_association()],
+          :transaction,
+          from_address: [
+            :scam_badge,
+            :names,
+            :smart_contract,
+            proxy_implementations_association()
+          ],
+          to_address: [
+            :scam_badge,
+            :names,
+            :smart_contract,
+            proxy_implementations_association()
+          ]
+        ])
+      )
+      |> Instance.preload_nft(@api_true)
 
     transfers_by_token = Enum.group_by(all_token_transfers_full, fn tt -> to_string(tt.token_contract_address_hash) end)
 
