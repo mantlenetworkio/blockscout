@@ -349,6 +349,19 @@ defmodule Indexer.Fetcher.Optimism.Withdrawal do
     Enum.count(withdrawals)
   end
 
+  # A reversed range scans nothing. It occurs when the realtime fetcher has already imported a withdrawal above the end
+  # of the range being caught up, and L2 nodes reject it in eth_getLogs.
+  defp fill_block_range(
+         l2_block_start,
+         l2_block_end,
+         _message_passer,
+         _json_rpc_named_arguments,
+         _eth_get_logs_range_size,
+         _scan_db
+       )
+       when l2_block_start > l2_block_end,
+       do: 0
+
   defp fill_block_range(
          l2_block_start,
          l2_block_end,
