@@ -39,6 +39,12 @@ defmodule Explorer.Migrator.FillingMigration do
       timeout: 0        # Delay between batches in ms (default: 0)
     ```
 
+    ## Options
+    - `skip_meta_update?` (default `false`): do not checkpoint the state after each batch.
+    - `complete_on_green_install?` (default `true`): on a database without blocks (a fresh install), where the
+      indexer writes all data in its final form, mark the migration as completed right at start. A migration whose
+      work the indexer does not fully cover on a fresh install passes `false` and runs as usual.
+
     The migration process will:
     1. Start and check if already completed
     2. Execute pre-migration tasks via `before_start/0`
@@ -170,6 +176,7 @@ defmodule Explorer.Migrator.FillingMigration do
 
       import Ecto.Query
 
+      alias Explorer.Chain.Block
       alias Explorer.Migrator.HeavyDbIndexOperation.Helper, as: HeavyDbIndexOperationHelper
       alias Explorer.Migrator.MigrationStatus
       alias Explorer.Repo
@@ -194,7 +201,23 @@ defmodule Explorer.Migrator.FillingMigration do
 
       @impl true
       def init(_) do
-        {:ok, %{}, {:continue, :ok}}
+        unquote(
+          if Keyword.get(opts, :complete_on_green_install?, true) do
+            quote do
+              if Repo.exists?(Block) do
+                {:ok, %{}, {:continue, :ok}}
+              else
+                MigrationStatus.set_status(migration_name(), "completed")
+                update_cache()
+                :ignore
+              end
+            end
+          else
+            quote do
+              {:ok, %{}, {:continue, :ok}}
+            end
+          end
+        )
       end
 
       # Called once when the GenServer starts to initialize the migration process by checking its

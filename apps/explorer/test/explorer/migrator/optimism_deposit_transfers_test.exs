@@ -47,6 +47,8 @@ defmodule Explorer.Migrator.OptimismDepositTransfersTest do
       assert BackgroundMigrations.get_optimism_deposit_transfers_finished()
     end
 
+    # No block exists when the migration starts, as on a fresh install where L1 deposits are indexed before the
+    # first L2 block: an empty `blocks` table must not complete the migration with the deposit still undecoded
     test "a deposit whose L2 transaction is indexed while the migration waits is decoded" do
       put_migration_env(retries: 100)
       fixture = deposit(:eth)

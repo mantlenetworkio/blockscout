@@ -7,7 +7,10 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
   pipeline has imported the required blocks, transactions, and logs.
   """
 
-  use Explorer.Migrator.FillingMigration
+  # On a fresh install catchup imports blocks from the newest down, so a transfer can be imported before the older
+  # event that establishes its token's capability. The import leaves such a transfer unclassified, and only this
+  # backfill revisits it once the catchup coverage is complete.
+  use Explorer.Migrator.FillingMigration, complete_on_green_install?: false
 
   require Logger
 

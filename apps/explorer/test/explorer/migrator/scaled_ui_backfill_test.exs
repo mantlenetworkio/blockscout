@@ -396,6 +396,22 @@ defmodule Explorer.Migrator.ScaledUiBackfillTest do
              Repo.query!("SELECT convalidated FROM pg_constraint WHERE conname = 'ui_amount_status_known'").rows
   end
 
+  # On a fresh install catchup imports blocks from the newest down, so a transfer can be imported before the older
+  # event that establishes its token's capability, and only this backfill revisits it. A database without blocks must
+  # therefore not complete the migration at start: it waits for the catchup coverage as on any other database.
+  test "keeps waiting for catchup coverage on a database without blocks instead of completing at start" do
+    assert {:ok, pid} = ScaledUiBackfill.start_link([])
+    on_exit(fn -> if Process.alive?(pid), do: GenServer.stop(pid) end)
+
+    Process.sleep(500)
+
+    assert Process.alive?(pid)
+    assert MigrationStatus.get_status(ScaledUiBackfill.migration_name()) == "started"
+
+    assert [[false]] ==
+             Repo.query!("SELECT convalidated FROM pg_constraint WHERE conname = 'ui_amount_status_known'").rows
+  end
+
   test "fixes the target head in migration identifiers" do
     token = insert(:token)
     block = insert(:block, consensus: true)

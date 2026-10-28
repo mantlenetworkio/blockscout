@@ -10,7 +10,9 @@ defmodule Explorer.Migrator.OptimismDepositTransfers do
     `Explorer.Chain.Optimism.BridgeMessage.bridges/0` needs; without them it would decode nothing.
   """
 
-  use Explorer.Migrator.FillingMigration
+  # Deposits are indexed from L1 and can precede the first L2 block, so an empty `blocks` table does not mean that
+  # there is nothing to decode
+  use Explorer.Migrator.FillingMigration, complete_on_green_install?: false
 
   import Ecto.Query
 
