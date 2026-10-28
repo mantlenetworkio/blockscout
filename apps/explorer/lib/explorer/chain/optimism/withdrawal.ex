@@ -110,13 +110,14 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
             as: :l2_transaction,
             on: w.l2_transaction_hash == l2_transaction.hash,
             left_join: l2_block in Block,
-            on: w.l2_block_number == l2_block.number,
+            on: w.l2_block_number == l2_block.number and l2_block.consensus == true,
             left_join: we in WithdrawalEvent,
             on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized,
             left_join: log in Log,
             on:
-              log.transaction_hash == w.l2_transaction_hash and log.address_hash == ^message_passer and
-                log.first_topic == ^event_topic and log.second_topic == fragment("numeric_to_bytea32(?)", w.msg_nonce),
+              log.transaction_hash == w.l2_transaction_hash and log.block_hash == l2_block.hash and
+                log.address_hash == ^message_passer and log.first_topic == ^event_topic and
+                log.second_topic == fragment("numeric_to_bytea32(?)", w.msg_nonce),
             select: %{
               msg_nonce: w.msg_nonce,
               hash: w.hash,
@@ -284,8 +285,9 @@ defmodule Explorer.Chain.Optimism.Withdrawal do
         on: we.withdrawal_hash == w.hash and we.l1_event_type == :WithdrawalFinalized,
         left_join: log in Log,
         on:
-          log.transaction_hash == w.l2_transaction_hash and log.address_hash == ^message_passer and
-            log.first_topic == ^event_topic and log.second_topic == fragment("numeric_to_bytea32(msg_nonce)"),
+          log.transaction_hash == w.l2_transaction_hash and log.block_hash == l2_block.hash and
+            log.address_hash == ^message_passer and log.first_topic == ^event_topic and
+            log.second_topic == fragment("numeric_to_bytea32(msg_nonce)"),
         select: %{
           hash: w.hash,
           l2_block_number: w.l2_block_number,

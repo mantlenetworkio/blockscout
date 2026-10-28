@@ -5,6 +5,7 @@ defmodule Explorer.Chain.Optimism.WithdrawalTest do
     use Explorer.DataCase, async: false
 
     alias Explorer.Application.Constants
+    alias Explorer.Chain.{Block, Log}
     alias Explorer.Chain.Cache.BackgroundMigrations
     alias Explorer.Chain.Optimism.{OutputRoot, Withdrawal, WithdrawalEvent}
     alias Explorer.{PagingOptions, QueryPlanHelper, Repo}
@@ -80,6 +81,44 @@ defmodule Explorer.Chain.Optimism.WithdrawalTest do
 
         assert Withdrawal.list(address_hash: recipient) == []
         assert Withdrawal.count(address_hash: recipient) == 0
+      end
+    end
+
+    describe "after an L2 reorg" do
+      # Blockscout keeps the rows of a block that lost consensus, so the joins must read the consensus block only
+      defp copy_message_passed_log_into(withdrawal, block) do
+        log = Repo.get_by!(Log, transaction_hash: withdrawal.l2_transaction_hash)
+        Repo.insert!(%{log | block_hash: block.hash, block_number: block.number})
+      end
+
+      test "a forked block at the withdrawal's height does not duplicate it in the list" do
+        withdrawal = insert_op_withdrawal_with_message()
+        consensus_block = Repo.get_by!(Block, number: withdrawal.l2_block_number)
+        insert(:block, number: withdrawal.l2_block_number, consensus: false)
+
+        assert [item] = Withdrawal.list()
+        assert item.l2_timestamp == consensus_block.timestamp
+      end
+
+      test "the MessagePassed log left by a forked copy of the transaction does not duplicate the withdrawal" do
+        withdrawal = insert_op_withdrawal_with_message()
+        forked_block = insert(:block, number: withdrawal.l2_block_number - 1, consensus: false)
+        copy_message_passed_log_into(withdrawal, forked_block)
+
+        assert [item] = Withdrawal.list()
+        assert item.msg_nonce == withdrawal.msg_nonce
+        assert item.msg_log_data
+      end
+
+      test "the transaction page reports the withdrawal once despite the forked copy's log" do
+        withdrawal = insert_op_withdrawal_with_message()
+        forked_block = insert(:block, number: withdrawal.l2_block_number - 1, consensus: false)
+        copy_message_passed_log_into(withdrawal, forked_block)
+
+        assert [{_nonce, _status, %{msg_log_data: msg_log_data}}] =
+                 Withdrawal.transaction_statuses(withdrawal.l2_transaction_hash)
+
+        assert msg_log_data
       end
     end
 
