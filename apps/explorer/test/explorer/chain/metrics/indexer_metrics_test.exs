@@ -70,6 +70,71 @@ defmodule Explorer.Chain.Metrics.Queries.IndexerMetricsTest do
     end
   end
 
+  describe "blocks_realtime_indexing_delay_percentiles/0" do
+    test "measures the indexing delay of the consensus blocks of the last 5 minutes" do
+      now = DateTime.utc_now()
+
+      insert(:block,
+        consensus: true,
+        timestamp: DateTime.add(now, -60, :second),
+        inserted_at: DateTime.add(now, -58, :second)
+      )
+
+      # a non-consensus block and a block older than the window do not count
+      insert(:block,
+        consensus: false,
+        timestamp: DateTime.add(now, -60, :second),
+        inserted_at: DateTime.add(now, -30, :second)
+      )
+
+      insert(:block,
+        consensus: true,
+        timestamp: DateTime.add(now, -600, :second),
+        inserted_at: DateTime.add(now, -500, :second)
+      )
+
+      # the session's TimeZone must not move the window
+      for time_zone <- ["UTC", "Asia/Shanghai"] do
+        Repo.query!("SET LOCAL TIME ZONE '#{time_zone}'")
+        percentiles = IndexerMetrics.blocks_realtime_indexing_delay_percentiles()
+
+        assert percentiles["p50"] == 2_000_000_000
+        assert percentiles["p99"] == 2_000_000_000
+      end
+    end
+
+    test "reads the window of recent blocks through the timestamp index" do
+      # as on a live chain, nearly all blocks are older than the window
+      miner = insert(:address)
+      insert_list(1_000, :block, miner: miner, timestamp: DateTime.add(DateTime.utc_now(), -86_400, :second))
+      insert(:block, miner: miner)
+      Repo.query!("ANALYZE blocks")
+
+      test_pid = self()
+      handler_id = {__MODULE__, :blocks_delay_query}
+
+      :telemetry.attach(
+        handler_id,
+        [:explorer, :repo, :query],
+        fn _event, _measurements, %{query: query}, _config ->
+          if query =~ "delay_nanoseconds", do: send(test_pid, {:delay_query, query})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      IndexerMetrics.blocks_realtime_indexing_delay_percentiles()
+      assert_received {:delay_query, query}
+
+      # the test table is tiny, so the planner would scan it whatever the filter
+      Repo.query!("SET LOCAL enable_seqscan = off")
+      %{rows: rows} = Repo.query!("EXPLAIN " <> query)
+
+      assert Enum.any?(rows, fn [line] -> line =~ "blocks_timestamp_index" end)
+    end
+  end
+
   describe "missing_blocks_count/0" do
     test "counts only within configured ranges and latest tail" do
       previous_block_ranges = Application.get_env(:indexer, :block_ranges)

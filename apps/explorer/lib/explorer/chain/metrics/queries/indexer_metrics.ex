@@ -548,6 +548,9 @@ defmodule Explorer.Chain.Metrics.Queries.IndexerMetrics do
   # sobelow_skip ["SQL"]
   @spec blocks_realtime_indexing_delay_percentiles() :: map()
   def blocks_realtime_indexing_delay_percentiles do
+    # Both sides of the window filter are UTC timestamps without a time zone, so the filter uses the timestamp index
+    # and does not depend on the session's TimeZone. The percentiles sort the delays themselves; ordering the blocks
+    # by number would only tempt the planner into scanning every consensus block backwards.
     sql = """
     WITH stats AS (
         SELECT percentile_cont(
@@ -556,9 +559,8 @@ defmodule Explorer.Chain.Metrics.Queries.IndexerMetrics do
         FROM (
             SELECT (EXTRACT(EPOCH FROM inserted_at - timestamp) * 1e9)::bigint AS delay_nanoseconds
             FROM blocks
-            WHERE timestamp AT TIME ZONE 'UTC' >= NOW() AT TIME ZONE 'UTC' - INTERVAL '5 minutes'
+            WHERE timestamp >= (NOW() AT TIME ZONE 'UTC') - INTERVAL '5 minutes'
               AND consensus = true
-            ORDER BY number DESC
         ) s
     )
     SELECT t.percentile, t.delay_nanoseconds
