@@ -230,7 +230,9 @@ config :block_scout_web, BlockScoutWeb.API.V2, enabled: ConfigHelper.parse_bool_
 
 config :block_scout_web, BlockScoutWeb.API.RPC.AddressController,
   internal_transactions_pending_head_tolerance:
-    ConfigHelper.parse_integer_env_var("API_INTERNAL_TRANSACTIONS_PENDING_HEAD_TOLERANCE", 200, min: 0)
+    ConfigHelper.parse_integer_env_var("API_INTERNAL_TRANSACTIONS_PENDING_HEAD_TOLERANCE", 200, min: 0),
+  token_transfers_by_contract_default_page_size:
+    ConfigHelper.parse_integer_env_var("API_V1_TOKENTX_BY_CONTRACT_DEFAULT_PAGE_SIZE", 1000, min: 1)
 
 config :block_scout_web, BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation,
   service_url: ConfigHelper.parse_url_env_var("MICROSERVICE_TRANSACTION_INTERPRETATION_URL"),

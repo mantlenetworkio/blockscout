@@ -1584,7 +1584,7 @@ defmodule BlockScoutWeb.Etherscan do
         key: "offset",
         type: "integer",
         description:
-          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction."
+          "A nonnegative integer that represents the maximum number of records to return when paginating. 'page' must be provided in conjunction. Without it, a request by 'contractaddress' alone returns 1,000 records (configurable with API_V1_TOKENTX_BY_CONTRACT_DEFAULT_PAGE_SIZE), any other request up to 10,000."
       }
     ],
     responses: [

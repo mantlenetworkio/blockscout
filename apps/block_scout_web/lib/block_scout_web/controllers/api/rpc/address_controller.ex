@@ -311,6 +311,7 @@ defmodule BlockScoutWeb.API.RPC.AddressController do
          {:contract_address, {:ok, contract_address_hash}} <-
            {:contract_address, to_address_hash_optional(params["contractaddress"])},
          true <- !is_nil(address_hash) or !is_nil(contract_address_hash),
+         options = put_token_transfers_by_contract_page_size(options, transfers_type, address_hash),
          {:ok, token_transfers, max_block_number} <-
            list_token_transfers(transfers_type, address_hash, contract_address_hash, options) do
       render(conn, :tokentx, %{token_transfers: token_transfers, max_block_number: max_block_number})
@@ -331,6 +332,19 @@ defmodule BlockScoutWeb.API.RPC.AddressController do
         render(conn, :error, error: @results_window_too_large_message, data: nil)
     end
   end
+
+  # The ERC-20 transfers of a token alone (`contractaddress` without `address`) can number in the millions, and every
+  # returned transfer costs a random primary key lookup of its transaction, so the default 10,000-row page takes tens
+  # of seconds on a popular token. Without an explicit `offset` this variant returns a smaller page.
+  defp put_token_transfers_by_contract_page_size(options, :erc20, nil) do
+    Map.put_new(
+      options,
+      :page_size,
+      Application.get_env(:block_scout_web, __MODULE__)[:token_transfers_by_contract_default_page_size] || 1000
+    )
+  end
+
+  defp put_token_transfers_by_contract_page_size(options, _transfers_type, _address_hash), do: options
 
   @tokenbalance_required_params ~w(contractaddress address)
 

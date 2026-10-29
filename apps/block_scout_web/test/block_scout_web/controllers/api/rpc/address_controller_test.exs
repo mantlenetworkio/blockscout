@@ -3510,6 +3510,76 @@ defmodule BlockScoutWeb.API.RPC.AddressControllerTest do
       assert response["message"] == "OK"
       assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
     end
+
+    test "returns the configured default page of a token's transfers when only contractaddress is given", %{
+      conn: conn
+    } do
+      configuration = Application.get_env(:block_scout_web, AddressController)
+
+      Application.put_env(
+        :block_scout_web,
+        AddressController,
+        Keyword.put(configuration || [], :token_transfers_by_contract_default_page_size, 2)
+      )
+
+      on_exit(fn -> Application.put_env(:block_scout_web, AddressController, configuration) end)
+
+      address = insert(:address)
+      token = insert(:token)
+      nft = insert(:token, type: "ERC-721")
+
+      [_oldest, middle, newest] =
+        for _ <- 1..3 do
+          transaction = insert(:transaction) |> with_block()
+
+          insert(:token_transfer,
+            from_address: address,
+            token_contract_address: token.contract_address,
+            transaction: transaction,
+            block: transaction.block,
+            block_number: transaction.block_number
+          )
+
+          insert(:token_transfer,
+            from_address: address,
+            token_contract_address: nft.contract_address,
+            token_type: "ERC-721",
+            token_ids: [1],
+            transaction: transaction,
+            block: transaction.block,
+            block_number: transaction.block_number
+          )
+
+          transaction
+        end
+
+      tokentx = fn extra_params ->
+        conn
+        |> get("/api", Map.merge(%{"module" => "account", "action" => "tokentx"}, extra_params))
+        |> json_response(200)
+      end
+
+      contract_params = %{"contractaddress" => to_string(token.contract_address_hash)}
+
+      assert %{"status" => "1", "result" => results} = response = tokentx.(contract_params)
+      assert Enum.map(results, & &1["hash"]) == [to_string(newest.hash), to_string(middle.hash)]
+      assert :ok = ExJsonSchema.Validator.validate(tokentx_schema(), response)
+
+      # an explicit offset, an address filter and the other transfer types keep their usual page size
+      assert %{"result" => [_, _, _]} = tokentx.(Map.merge(contract_params, %{"page" => "1", "offset" => "3"}))
+
+      assert %{"result" => [_, _, _]} =
+               tokentx.(Map.put(contract_params, "address", to_string(address.hash)))
+
+      assert %{"result" => [_, _, _]} =
+               conn
+               |> get("/api", %{
+                 "module" => "account",
+                 "action" => "tokennfttx",
+                 "contractaddress" => to_string(nft.contract_address_hash)
+               })
+               |> json_response(200)
+    end
   end
 
   describe "tokennfttx" do
