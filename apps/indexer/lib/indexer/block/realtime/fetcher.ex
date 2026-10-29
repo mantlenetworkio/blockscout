@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Realtime.Fetcher do
   @moduledoc """
   Fetches and indexes block ranges from latest block forward using a WebSocket.
@@ -20,7 +21,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
       async_import_created_contract_codes: 2,
       async_import_filecoin_addresses_info: 2,
       async_import_internal_transactions: 2,
-      async_import_realtime_coin_balances: 2,
+      async_import_realtime_coin_balances: 1,
       async_import_replaced_transactions: 2,
       async_import_signed_authorizations_statuses: 2,
       async_import_token_balances: 2,
@@ -35,7 +36,6 @@ defmodule Indexer.Block.Realtime.Fetcher do
   alias EthereumJSONRPC.{Blocks, Subscription}
   alias Explorer.Chain
   alias Explorer.Chain.Cache.Counters.AverageBlockTime
-  alias Explorer.Chain.Events.Publisher
   alias Explorer.Utility.MissingBlockRange
   alias Indexer.{Block, Tracer}
   alias Indexer.Block.Realtime.TaskSupervisor
@@ -115,10 +115,6 @@ defmodule Indexer.Block.Realtime.Fetcher do
       )
       when is_binary(quantity) do
     number = quantity_to_integer(quantity)
-
-    if number > 0 do
-      Publisher.broadcast([{:last_block_number, number}], :realtime)
-    end
 
     if hash != Map.get(last_realtime_blocks, number) do
       Process.cancel_timer(timer)
@@ -300,7 +296,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
 
       async_import_remaining_block_data(
         imported,
-        Map.put(Map.take(options, @import_options), :block_rewards, %{errors: block_reward_errors})
+        %{block_rewards: %{errors: block_reward_errors}}
       )
 
       ContractCreatorOnDemand.async_update_cache_of_contract_creator_on_demand(imported)
@@ -423,7 +419,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
     case result do
       {:ok, %{inserted: inserted, errors: []}} ->
         log_import_timings(inserted, fetch_duration, time_before)
-        MissingBlockRange.clear_batch([block_number_to_fetch..block_number_to_fetch])
+        MissingBlockRange.clear_batch_if_indexed([block_number_to_fetch..block_number_to_fetch])
         Logger.debug("Fetched and imported.")
 
       {:ok, %{inserted: _, errors: [_ | _] = errors}} ->
@@ -524,11 +520,11 @@ defmodule Indexer.Block.Realtime.Fetcher do
 
   defp async_import_remaining_block_data(
          imported,
-         %{block_rewards: %{errors: block_reward_errors}} = options
+         %{block_rewards: %{errors: block_reward_errors}}
        ) do
     realtime? = true
 
-    async_import_realtime_coin_balances(imported, options)
+    async_import_realtime_coin_balances(imported)
     async_import_block_rewards(block_reward_errors, realtime?)
     async_import_created_contract_codes(imported, realtime?)
     async_import_internal_transactions(imported, realtime?)

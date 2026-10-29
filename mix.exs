@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScout.Mixfile do
   use Mix.Project
 
@@ -7,7 +8,7 @@ defmodule BlockScout.Mixfile do
     [
       # app: :block_scout,
       # aliases: aliases(config_env()),
-      version: "11.0.3",
+      version: "11.3.3",
       apps_path: "apps",
       deps: deps(),
       dialyzer: dialyzer(),
@@ -103,10 +104,11 @@ defmodule BlockScout.Mixfile do
   # and cannot be accessed from applications inside the apps folder
   defp deps do
     [
+      {:ex_abi, "~> 0.8.5"},
       {:prometheus_ex, "~> 5.1.0", override: true},
       {:absinthe_plug, git: "https://github.com/blockscout/absinthe_plug.git", tag: "1.5.8", override: true},
-      {:tesla, "~> 1.17.0"},
-      {:mint, "~> 1.7.1"},
+      {:tesla, "~> 1.21.0"},
+      {:mint, "~> 1.10.0"},
       # Documentation
       {:ex_doc, "~> 0.40.1", only: :dev, runtime: false},
       {:number, "~> 1.0.3"}

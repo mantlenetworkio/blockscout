@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Address.CoinBalance do
   @moduledoc """
   The `t:Explorer.Chain.Wei.t/0` `value` of `t:Explorer.Chain.Address.t/0` at the end of a `t:Explorer.Chain.Block.t/0`
@@ -6,7 +7,7 @@ defmodule Explorer.Chain.Address.CoinBalance do
 
   use Explorer.Schema
 
-  alias Explorer.{Chain, PagingOptions, Repo}
+  alias Explorer.{Chain, Helper, PagingOptions, Repo}
   alias Explorer.Chain.{Address, Block, Hash, InternalTransaction, Transaction, Wei}
   alias Explorer.Chain.Address.CoinBalance
 
@@ -128,10 +129,15 @@ defmodule Explorer.Chain.Address.CoinBalance do
         ) :: {:ok, accumulator}
         when accumulator: term()
   def stream_unfetched_balances(initial, reducer, limited? \\ false) when is_function(reducer, 2) do
+    # Balances at non-traceable block numbers are skipped by the catch-up fetcher
+    # (see `Indexer.Fetcher.CoinBalance.Helper.run/3`), so they must be excluded
+    # here as well. Otherwise they are never marked as fetched and, once their
+    # count reaches the init query limit, they shadow all fetchable balances.
     query =
       from(
         balance in CoinBalance,
         where: is_nil(balance.value_fetched_at),
+        where: ^Helper.traceable_block_numbers_dynamic(:block_number),
         select: %{address_hash: balance.address_hash, block_number: balance.block_number}
       )
 
@@ -387,15 +393,20 @@ defmodule Explorer.Chain.Address.CoinBalance do
   end
 
   defp fetch_coin_balance(address_hash, block_number) do
-    coin_balance_subquery =
+    latest_balances_query =
       from(
         cb in CoinBalance,
         where: cb.address_hash == ^address_hash,
         where: cb.block_number <= ^block_number,
+        order_by: [desc: :block_number],
+        limit: ^2
+      )
+
+    coin_balance_subquery =
+      from(
+        cb in subquery(latest_balances_query),
         inner_join: b in Block,
         on: cb.block_number == b.number,
-        limit: ^2,
-        order_by: [desc: :block_number],
         select_merge: %{block_timestamp: b.timestamp}
       )
 

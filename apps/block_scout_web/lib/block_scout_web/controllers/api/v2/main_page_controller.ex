@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.MainPageController do
   use BlockScoutWeb, :controller
 
@@ -13,10 +14,7 @@ defmodule BlockScoutWeb.API.V2.MainPageController do
 
   import BlockScoutWeb.Account.AuthController, only: [current_user: 1]
 
-  import Explorer.MicroserviceInterfaces.BENS,
-    only: [maybe_preload_ens_for_blocks: 1, maybe_preload_ens_for_transactions: 1]
-
-  import Explorer.MicroserviceInterfaces.Metadata, only: [maybe_preload_metadata: 1]
+  import Explorer.Chain.Address.MetadataPreloader, only: [maybe_preload_ens_and_metadata: 2]
   import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
 
   case @chain_identity do
@@ -29,19 +27,30 @@ defmodule BlockScoutWeb.API.V2.MainPageController do
       @chain_type_transaction_necessity_by_association %{}
   end
 
+  # Address-info preloads for the `from`/`to`/`created_contract` participants are
+  # intentionally absent: `preload_transaction_participants/1` loads them for the
+  # whole page in a single deduplicated pass.
   @transactions_options [
     necessity_by_association:
-      %{
-        :block => :required,
-        [created_contract_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] =>
-          :optional,
-        [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-        [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional
-      }
+      %{:block => :required}
       |> Map.merge(@chain_type_transaction_necessity_by_association),
     paging_options: %PagingOptions{page_size: 6},
     api?: true
   ]
+
+  @transaction_address_fields [
+    {:from_address_hash, :from_address},
+    {:to_address_hash, :to_address},
+    {:created_contract_address_hash, :created_contract_address}
+  ]
+
+  @transaction_participant_necessity_by_association %{
+    :scam_badge => :optional,
+    :names => :optional,
+    proxy_implementations_association() => :optional
+  }
+
+  @api_true [api?: true]
 
   action_fallback(BlockScoutWeb.API.V2.FallbackController)
 
@@ -58,7 +67,7 @@ defmodule BlockScoutWeb.API.V2.MainPageController do
         {"List of recent blocks on the home page.", "application/json",
          %Schema{
            type: :array,
-           items: Schemas.Block.Response,
+           items: Schemas.Block,
            nullable: false
          }}
     ]
@@ -80,7 +89,7 @@ defmodule BlockScoutWeb.API.V2.MainPageController do
     conn
     |> put_status(200)
     |> put_view(BlockView)
-    |> render(:blocks, %{blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata()})
+    |> render(:blocks, %{blocks: blocks |> maybe_preload_ens_and_metadata(:blocks)})
   end
 
   operation :transactions,
@@ -109,8 +118,22 @@ defmodule BlockScoutWeb.API.V2.MainPageController do
     |> put_status(200)
     |> put_view(TransactionView)
     |> render(:transactions, %{
-      transactions: recent_transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata()
+      transactions: recent_transactions |> preload_transaction_participants()
     })
+  end
+
+  # Loads the address info of every participant on the page in one pass,
+  # deduplicating addresses shared between items and between roles of the same
+  # item. Runs before `maybe_preload_ens_and_metadata/2`, which writes ENS and
+  # metadata into the very address structs assigned here.
+  defp preload_transaction_participants(transactions) do
+    transactions
+    |> Chain.preload_address_participants(
+      @transaction_address_fields,
+      @transaction_participant_necessity_by_association,
+      @api_true
+    )
+    |> maybe_preload_ens_and_metadata(:transactions)
   end
 
   operation :watchlist_transactions,
@@ -141,7 +164,7 @@ defmodule BlockScoutWeb.API.V2.MainPageController do
       |> put_status(200)
       |> put_view(TransactionView)
       |> render(:transactions_watchlist, %{
-        transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+        transactions: transactions |> preload_transaction_participants(),
         watchlist_names: watchlist_names
       })
     end

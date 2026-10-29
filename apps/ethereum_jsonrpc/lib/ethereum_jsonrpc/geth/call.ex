@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Geth.Call do
   @moduledoc """
   A single call returned from [debug_traceTransaction](https://github.com/ethereum/go-ethereum/wiki/Management-APIs#debug_tracetransaction)
@@ -322,6 +323,8 @@ defmodule EthereumJSONRPC.Geth.Call do
 
     entry
   end
+
+  defp entry_to_elixir({_, _}), do: {:ignore, :ignore}
 
   defp elixir_to_internal_transaction_params(
          %{

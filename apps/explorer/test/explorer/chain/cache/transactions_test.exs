@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.TransactionsTest do
   use Explorer.DataCase
 
@@ -81,6 +82,50 @@ defmodule Explorer.Chain.Cache.TransactionsTest do
       insert(:transaction) |> with_block(blocks[5]) |> Transactions.update()
 
       assert Transactions.size() == 3
+    end
+  end
+
+  describe "indexer mode" do
+    setup do
+      old_mode = Application.get_env(:explorer, :mode)
+      Application.put_env(:explorer, :mode, :indexer)
+
+      Supervisor.terminate_child(Explorer.Supervisor, Transactions.child_id())
+      Supervisor.restart_child(Explorer.Supervisor, Transactions.child_id())
+
+      on_exit(fn -> Application.put_env(:explorer, :mode, old_mode) end)
+
+      :ok
+    end
+
+    test "update/1 writes to local ConCache without connected API nodes" do
+      assert Explorer.mode() == :indexer
+      # Single-node test env: propagation multicasts to an empty list, so only the
+      # local-first write in do_raw_update/2 populates the cache.
+      assert Node.list() == []
+
+      transaction = insert(:transaction) |> preload_all()
+
+      Transactions.update(transaction)
+
+      assert Transactions.take(1) == [transaction]
+    end
+  end
+
+  describe "do_raw_update/2 with propagate: false" do
+    test "writes the received elements as is, without touching the database" do
+      Application.put_env(:explorer, :mode, :api)
+
+      block = insert(:block)
+      transaction = insert(:transaction) |> with_block(block) |> preload_all()
+      prepared = [{Transactions.element_to_id(transaction), transaction}]
+
+      # the rows are gone: the receiving node must not need them
+      Repo.delete!(transaction)
+
+      Transactions.do_raw_update(prepared, false)
+
+      assert Transactions.take(1) == [transaction]
     end
   end
 

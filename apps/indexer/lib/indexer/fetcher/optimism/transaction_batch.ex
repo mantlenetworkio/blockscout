@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   @moduledoc """
     Fills op_transaction_batches, op_frame_sequence, and op_frame_sequence_blobs DB tables.
@@ -101,7 +102,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
            {:genesis_block_l2_invalid, is_nil(env[:genesis_block_l2]) or env[:genesis_block_l2] < 0},
          _ <- RollupL1ReorgMonitor.wait_for_start(__MODULE__),
          {:rpc_l1_undefined, false} <- {:rpc_l1_undefined, is_nil(optimism_l1_rpc)},
-         json_rpc_named_arguments = Helper.json_rpc_named_arguments(optimism_l1_rpc),
+         json_rpc_named_arguments = Helper.l1_json_rpc_named_arguments(optimism_l1_rpc),
          {:system_config_read, {rollup_start_block_l1, batch_inbox}} <-
            {:system_config_read, read_system_config(system_config, json_rpc_named_arguments)},
          # the first L1 blocks of a rollup can carry batches in a format this module cannot read
@@ -2184,8 +2185,16 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   # Gets the number of a start block (from which this fetcher should start) and the inbox address.
   # The batcher (batch submitter) can change over time, so it is tracked by `BatcherTimeline`.
   #
-  # If SystemConfig has obsolete implementation, the values are fallen back from the corresponding
-  # env variables (INDEXER_OPTIMISM_L1_START_BLOCK, INDEXER_OPTIMISM_L1_BATCH_INBOX).
+  # Each getter is handled independently: if a getter is unavailable (the call reverts or the whole request fails),
+  # only that value is fallen back from the corresponding env variable (INDEXER_OPTIMISM_L1_START_BLOCK,
+  # INDEXER_OPTIMISM_L1_BATCH_INBOX) while the other is still taken from the contract. In particular, SystemConfig
+  # v4.0.0 (OP Stack Upgrade 20) removed the `batchInbox()` getter, and Mantle's SystemConfig v1.4.0 reverts on
+  # both `startBlock()` and `batchInbox()`.
+  #
+  # Moreover, if INDEXER_OPTIMISM_L1_BATCH_INBOX is explicitly set, it takes precedence over the inbox read from
+  # the SystemConfig contract. This is needed when the on-chain SystemConfig `batchInbox` diverges from the address
+  # the batcher actually uses, e.g. during an inbox migration where the SystemConfig value is updated ahead of the
+  # batcher.
   #
   # ## Parameters
   # - `contract_address`: An address of SystemConfig contract.
@@ -2197,11 +2206,14 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   @spec read_system_config(String.t(), EthereumJSONRPC.json_rpc_named_arguments()) ::
           {non_neg_integer(), String.t()} | nil
   defp read_system_config(contract_address, json_rpc_named_arguments) do
+    start_block_request_id = 0
+    batch_inbox_request_id = 1
+
     requests = [
       # startBlock() public getter
-      Contract.eth_call_request("0x48cd4cb1", contract_address, 0, nil, nil),
-      # batchInbox() public getter
-      Contract.eth_call_request("0xdac6e63a", contract_address, 1, nil, nil)
+      Contract.eth_call_request("0x48cd4cb1", contract_address, start_block_request_id, nil, nil),
+      # batchInbox() public getter (removed in SystemConfig v4.0.0, so the call can revert)
+      Contract.eth_call_request("0xdac6e63a", contract_address, batch_inbox_request_id, nil, nil)
     ]
 
     error_message = &"Cannot call public getters of SystemConfig. Error: #{inspect(&1)}"
@@ -2209,30 +2221,53 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     env = Application.get_all_env(:indexer)[__MODULE__]
     fallback_start_block = Application.get_all_env(:indexer)[Indexer.Fetcher.Optimism][:start_block_l1]
 
-    {start_block, batch_inbox} =
+    result_by_id =
       case Helper.repeated_call(
              &json_rpc/2,
              [requests, json_rpc_named_arguments],
              error_message,
              Helper.finite_retries_number()
            ) do
-        {:ok, responses} ->
-          results = Map.new(responses, &{&1.id, Map.get(&1, :result)})
-
-          batch_inbox =
-            case results[1] do
-              "0x000000000000000000000000" <> batch_inbox -> "0x" <> batch_inbox
-              _ -> env[:inbox]
-            end
-
-          {quantity_to_integer(results[0] || fallback_start_block), batch_inbox}
-
-        _ ->
-          {fallback_start_block, env[:inbox]}
+        {:ok, responses} -> Map.new(responses, &{&1.id, Map.get(&1, :result)})
+        _ -> %{}
       end
+
+    start_block =
+      result_by_id
+      |> Map.get(start_block_request_id)
+      |> Kernel.||(fallback_start_block)
+      |> quantity_to_integer()
+
+    # An explicitly configured inbox overrides the value read from the SystemConfig contract.
+    # Only kicks in when the env variable holds a correct address, so the on-chain value
+    # is still used by default.
+    batch_inbox = system_config_address(result_by_id[batch_inbox_request_id], env[:inbox])
+
+    if is_nil(batch_inbox) and Map.has_key?(result_by_id, start_block_request_id) do
+      Logger.error(
+        "The batchInbox() getter of SystemConfig is not available (it was removed in SystemConfig v4.0.0 by OP Stack Upgrade 20). Please, define the batch inbox address via INDEXER_OPTIMISM_L1_BATCH_INBOX env variable."
+      )
+    end
 
     if !is_nil(start_block) and Helper.address_correct?(batch_inbox) do
       {start_block, String.downcase(batch_inbox)}
+    end
+  end
+
+  # Returns an address read from a SystemConfig getter unless the corresponding env variable
+  # defines a correct address (which takes precedence). Returns `nil` if the getter result
+  # is absent (e.g. the call reverted) and the env variable is not defined.
+  @spec system_config_address(String.t() | nil, String.t() | nil) :: String.t() | nil
+  defp system_config_address(getter_result, env_address) do
+    cond do
+      Helper.address_correct?(env_address) ->
+        env_address
+
+      is_binary(getter_result) and String.starts_with?(getter_result, "0x000000000000000000000000") ->
+        "0x" <> String.slice(getter_result, 26..-1//1)
+
+      true ->
+        nil
     end
   end
 

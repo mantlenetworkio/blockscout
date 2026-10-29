@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.BlockView do
   use BlockScoutWeb, :view
 
@@ -37,9 +38,9 @@ defmodule BlockScoutWeb.API.V2.BlockView do
         estimated_time_in_sec: estimated_time_in_sec
       }) do
     %{
-      current_block_number: current_block,
-      countdown_block_number: countdown_block,
-      remaining_blocks_count: remaining_blocks,
+      current_block_number: to_string(current_block),
+      countdown_block_number: to_string(countdown_block),
+      remaining_blocks_count: to_string(remaining_blocks),
       estimated_time_in_seconds: to_string(estimated_time_in_sec)
     }
   end
@@ -50,6 +51,8 @@ defmodule BlockScoutWeb.API.V2.BlockView do
     %{
       "height" => block.number,
       "timestamp" => block.timestamp,
+      # Callers must preload :transactions; Block.aggregate_transactions/1 leaves
+      # transactions_count as nil when transactions is %NotLoaded{}.
       "transactions_count" => block.transactions_count,
       "internal_transactions_count" => count_internal_transactions(block),
       "miner" => Helper.address_with_info(nil, block.miner, block.miner_hash, false),

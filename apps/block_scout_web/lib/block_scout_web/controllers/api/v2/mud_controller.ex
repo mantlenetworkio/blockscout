@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.MudController do
   use BlockScoutWeb, :controller
   use OpenApiSpex.ControllerSpecs
@@ -11,8 +12,7 @@ defmodule BlockScoutWeb.API.V2.MudController do
   import BlockScoutWeb.PagingHelper, only: [mud_records_sorting: 1]
   import Explorer.PagingOptions, only: [default_paging_options: 0]
 
-  import Explorer.MicroserviceInterfaces.BENS, only: [maybe_preload_ens: 1]
-  import Explorer.MicroserviceInterfaces.Metadata, only: [maybe_preload_metadata: 1]
+  import Explorer.Chain.Address.MetadataPreloader, only: [maybe_preload_ens_and_metadata: 1]
 
   alias BlockScoutWeb.Schemas.Helper, as: SchemasHelper
   alias Explorer.Chain
@@ -82,8 +82,7 @@ defmodule BlockScoutWeb.API.V2.MudController do
       worlds:
         worlds
         |> Enum.map(fn world -> Map.get(world_addresses, world, %Address{hash: world}) end)
-        |> maybe_preload_ens()
-        |> maybe_preload_metadata(),
+        |> maybe_preload_ens_and_metadata(),
       next_page_params: next_page_params
     })
   end

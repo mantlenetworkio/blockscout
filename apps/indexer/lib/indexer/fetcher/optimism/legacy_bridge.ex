@@ -126,7 +126,7 @@ defmodule Indexer.Fetcher.Optimism.LegacyBridge do
       case env[:l2_rpc] do
         nil -> json_rpc_named_arguments
         "" -> json_rpc_named_arguments
-        url -> Helper.json_rpc_named_arguments(url)
+        url -> legacy_l2_json_rpc_named_arguments(url)
       end
 
     %{
@@ -152,9 +152,16 @@ defmodule Indexer.Fetcher.Optimism.LegacyBridge do
         end_block: env[:l1_end_block],
         range_size: optimism[:l1_eth_get_logs_range_size],
         progress_constant: @l1_block_constant,
-        json_rpc_named_arguments: Helper.json_rpc_named_arguments(Optimism.l1_rpc_url())
+        json_rpc_named_arguments: Helper.l1_json_rpc_named_arguments(Optimism.l1_rpc_url())
       }
     }
+  end
+
+  # The v1 era is read from an L2 node: its requests are not counted as requests to the parent chain
+  defp legacy_l2_json_rpc_named_arguments(url) do
+    url
+    |> Helper.l1_json_rpc_named_arguments()
+    |> update_in([:transport_options, :http_options], &Keyword.delete(&1, :layer))
   end
 
   # Writes the v1 messages and relays of one chain's range, chunk by chunk, after the last block already written

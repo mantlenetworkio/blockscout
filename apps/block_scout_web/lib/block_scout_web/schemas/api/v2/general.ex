@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.General do
   @moduledoc """
   This module defines the schema for general types used in the API.
@@ -23,6 +24,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   alias Explorer.Chain.InternalTransaction.CallType
   alias OpenApiSpex.{Parameter, Schema}
   @integer_pattern ~r"^-?([1-9][0-9]*|0)$"
+  @non_negative_integer_pattern ~r"^([1-9][0-9]*|0)$"
   @float_pattern ~r"^([1-9][0-9]*|0)(\.[0-9]+)?$"
   @address_hash_pattern ~r"^0x([A-Fa-f0-9]{40})$"
   @full_hash_pattern ~r"^0x([A-Fa-f0-9]{64})$"
@@ -285,7 +287,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
     %Parameter{
       name: :type,
       in: :query,
-      schema: %Schema{type: :string, enum: ["uncle", "reorg", "block"]},
+      schema: %Schema{type: :string, enum: ["uncle", "reorg", "block"], default: "block"},
       required: false,
       description: """
       Filter by block type:
@@ -1150,6 +1152,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
         next_page_params: %Schema{
           type: :object,
           nullable: true,
+          additionalProperties: true,
           example: next_page_params_example
         }
       },
@@ -1717,6 +1720,12 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
   """
   @spec integer_pattern() :: Regex.t()
   def integer_pattern, do: @integer_pattern
+
+  @doc """
+  Returns the non-negative integer pattern.
+  """
+  @spec non_negative_integer_pattern() :: Regex.t()
+  def non_negative_integer_pattern, do: @non_negative_integer_pattern
 
   @doc """
   Returns the float pattern.

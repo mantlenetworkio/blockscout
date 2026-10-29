@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain do
   @moduledoc """
   The chain context.
@@ -63,7 +64,6 @@ defmodule Explorer.Chain do
 
   alias Explorer.Chain.Cache.Counters.{
     AddressTabsElementsCount,
-    AddressTransactionsCount,
     BlocksCount,
     ContractsCount,
     NewContractsCount,
@@ -81,7 +81,7 @@ defmodule Explorer.Chain do
 
   alias Explorer.Market.MarketHistoryCache
   alias Explorer.MicroserviceInterfaces.MultichainSearch
-  alias Explorer.{PagingOptions, Repo}
+  alias Explorer.{PagingOptions, QueryHelper, Repo}
 
   alias Dataloader.Ecto, as: DataloaderEcto
 
@@ -888,7 +888,7 @@ defmodule Explorer.Chain do
     |> select_repo(options).one()
     |> then(fn address ->
       if Keyword.get(options, :preload_contract_creation_internal_transaction, false) do
-        Address.maybe_preload_contract_creation_internal_transaction(address, select_repo(options))
+        Address.maybe_preload_contract_creation_internal_transaction(address, options)
       else
         address
       end
@@ -1154,6 +1154,125 @@ defmodule Explorer.Chain do
   def get_token_transfers_per_transaction_preview_count, do: @token_transfers_per_transaction_preview
 
   @doc """
+  Loads address-info associations for every address participating in the
+  transaction — `from`/`to`/`created_contract` plus each preloaded token
+  transfer's `from`/`to` — in a single query pass, deduplicating addresses
+  shared between the transaction and its token transfers.
+
+  All participants share `address_necessity_by_association` (typically with the
+  ABI-less smart-contract preload, see
+  `Explorer.Chain.SmartContract.association_without_abi/0`). The `to_address`
+  additionally gets the full `:smart_contract` association when it is a
+  contract, since transaction input and revert-reason decoding need its `abi`.
+  """
+  @spec preload_transaction_participants(Transaction.t(), %{any() => :optional | :required}, [api?]) ::
+          Transaction.t()
+  def preload_transaction_participants(%Transaction{} = transaction, address_necessity_by_association, options) do
+    token_transfers = if is_list(transaction.token_transfers), do: transaction.token_transfers, else: []
+
+    participant_hashes =
+      [
+        transaction.from_address_hash,
+        transaction.to_address_hash,
+        transaction.created_contract_address_hash
+        | Enum.flat_map(token_transfers, &[&1.from_address_hash, &1.to_address_hash])
+      ]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+
+    addresses = addresses_by_hash(participant_hashes, address_necessity_by_association, options)
+
+    to_address =
+      addresses
+      |> Map.get(transaction.to_address_hash)
+      |> preload_full_smart_contract(options)
+
+    %Transaction{
+      transaction
+      | from_address: Map.get(addresses, transaction.from_address_hash),
+        to_address: to_address,
+        created_contract_address: Map.get(addresses, transaction.created_contract_address_hash),
+        token_transfers:
+          Enum.map(token_transfers, fn %TokenTransfer{} = token_transfer ->
+            %TokenTransfer{
+              token_transfer
+              | from_address: Map.get(addresses, token_transfer.from_address_hash),
+                to_address: Map.get(addresses, token_transfer.to_address_hash)
+            }
+          end)
+    }
+  end
+
+  @doc """
+    Loads address-info associations for every address referenced by a list of items in a single query pass.
+
+    Addresses shared between items, and between roles of the same item, are
+    deduplicated. Preloading the same associations per role instead — as
+    `necessity_by_association` does — repeats both the `addresses` query and
+    every nested association query once per role. This issues one `addresses`
+    query and one query per entry in `address_necessity_by_association`,
+    regardless of how many roles are populated.
+
+    Must run before `Explorer.Chain.Address.MetadataPreloader`, which writes ENS
+    and metadata into the very address structs assigned here.
+
+    ## Parameters
+    - `items`: The list of structs whose address associations are populated.
+    - `address_fields`: The `{hash_field, association_field}` pairs to populate, for
+      example `[{:from_address_hash, :from_address}, {:to_address_hash, :to_address}]`.
+    - `address_necessity_by_association`: A map of address associations to load,
+      shared by every role.
+    - `options`: An optional keyword list of options, such as selecting a specific repository.
+
+    ## Returns
+    - The list of items with every association named in `address_fields` set to the
+      matching `t:Explorer.Chain.Address.t/0`, or to `nil` when the hash field is
+      `nil` or no address row exists.
+  """
+  @spec preload_address_participants([struct()], [{atom(), atom()}], %{any() => :optional | :required}, [api?]) ::
+          [struct()]
+  def preload_address_participants(items, address_fields, address_necessity_by_association, options)
+
+  def preload_address_participants([], _address_fields, _address_necessity_by_association, _options), do: []
+
+  def preload_address_participants(items, address_fields, address_necessity_by_association, options) do
+    addresses =
+      items
+      |> Enum.flat_map(fn item ->
+        Enum.map(address_fields, fn {hash_field, _association_field} -> Map.fetch!(item, hash_field) end)
+      end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+      |> addresses_by_hash(address_necessity_by_association, options)
+
+    Enum.map(items, fn item ->
+      Enum.reduce(address_fields, item, fn {hash_field, association_field}, item_acc ->
+        Map.replace!(item_acc, association_field, Map.get(addresses, Map.fetch!(item_acc, hash_field)))
+      end)
+    end)
+  end
+
+  @spec addresses_by_hash([Hash.Address.t()], %{any() => :optional | :required}, [api?]) :: %{
+          Hash.Address.t() => Address.t()
+        }
+  defp addresses_by_hash([], _address_necessity_by_association, _options), do: %{}
+
+  defp addresses_by_hash(hashes, address_necessity_by_association, options) do
+    Address
+    |> where([address], address.hash in ^hashes)
+    |> join_associations(address_necessity_by_association)
+    |> select_repo(options).all()
+    |> Map.new(&{&1.hash, &1})
+  end
+
+  defp preload_full_smart_contract(%Address{contract_code: contract_code} = address, options)
+       when not is_nil(contract_code) do
+    select_repo(options).preload(address, :smart_contract, force: true)
+  end
+
+  defp preload_full_smart_contract(address, _options), do: address
+
+  @doc """
   Converts list of `t:Explorer.Chain.Transaction.t/0` `hashes` to the list of `t:Explorer.Chain.Transaction.t/0`s for
   those `hashes`.
 
@@ -1221,19 +1340,16 @@ defmodule Explorer.Chain do
         invalidate_address_counters(imported)
         invalidate_scaled_ui_reorg_counters(imported[:scaled_ui_reorg])
 
-        assets_to_import = %{
-          addresses: imported[:addresses] || [],
+        addresses_to_import =
+          MultichainSearch.filter_addresses_to_multichain_import(imported[:addresses] || [], options[:broadcast])
+
+        MultichainSearch.send_data_to_queue(%{
+          addresses: addresses_to_import,
           blocks: imported[:blocks] || [],
           transactions: imported[:transactions] || [],
-          address_current_token_balances: imported[:address_current_token_balances] || []
-        }
-
-        filtered_addresses_to_import =
-          MultichainSearch.filter_addresses_to_multichain_import(assets_to_import[:addresses], options[:broadcast])
-
-        assets_to_import = Map.put(assets_to_import, :addresses, filtered_addresses_to_import)
-
-        MultichainSearch.send_data_to_queue(assets_to_import)
+          address_current_token_balances: imported[:address_current_token_balances] || [],
+          address_coin_balances: coin_balances_to_export(addresses_to_import, options)
+        })
 
         result
 
@@ -1332,10 +1448,7 @@ defmodule Explorer.Chain do
     |> Enum.flat_map(&transaction_address_hashes/1)
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
-    |> Enum.each(fn address_hash ->
-      AddressTransactionsCount.invalidate(address_hash)
-      AddressTabsElementsCount.invalidate_transactions_counter(address_hash)
-    end)
+    |> Enum.each(&AddressTabsElementsCount.invalidate_transactions_counter/1)
   end
 
   defp invalidate_tab_counter(counter_type, records, address_hashes_fun) do
@@ -1383,6 +1496,44 @@ defmodule Explorer.Chain do
 
   defp celo_election_reward_address_hashes(%CeloElectionReward{} = election_reward) do
     [election_reward.account_address_hash]
+  end
+
+  # Selects the coin balances to hand to the Multichain balances export queue after an import.
+  #
+  # Without an explicit `:address_coin_balances` list, `MultichainSearch.send_data_to_queue/1`
+  # derives a "current balance" row from every imported address. Most imports only touch
+  # addresses without changing their balance (internal transactions, token transfers, logs,
+  # ...) and would re-enqueue hundreds of unchanged balances per batch, which floods the queue
+  # and serializes all importers on the same hot rows. So only the addresses whose
+  # `fetched_coin_balance` this import supplied (realtime block imports, coin balance fetchers,
+  # on-demand fetches) are exported, with the balance stored after the upsert.
+  @spec coin_balances_to_export([Address.t()], Import.all_options()) :: [
+          %{address_hash: Hash.Address.t(), value: Wei.t() | nil}
+        ]
+  defp coin_balances_to_export([], _options), do: []
+
+  defp coin_balances_to_export(imported_addresses, options) do
+    hashes_with_supplied_balance =
+      options
+      |> get_in([:addresses, :params])
+      |> List.wrap()
+      |> Enum.reduce(MapSet.new(), fn address_params, acc ->
+        with %{hash: hash, fetched_coin_balance: fetched_coin_balance} when not is_nil(fetched_coin_balance) <-
+               address_params,
+             {:ok, address_hash} <- Hash.Address.cast(hash) do
+          MapSet.put(acc, address_hash)
+        else
+          _ -> acc
+        end
+      end)
+
+    if MapSet.size(hashes_with_supplied_balance) == 0 do
+      []
+    else
+      imported_addresses
+      |> Enum.filter(&MapSet.member?(hashes_with_supplied_balance, &1.hash))
+      |> Enum.map(&%{address_hash: &1.hash, value: &1.fetched_coin_balance})
+    end
   end
 
   @doc """
@@ -1539,7 +1690,7 @@ defmodule Explorer.Chain do
         elements
 
       blocks ->
-        blocks
+        blocks |> select_repo(options).preload(Map.keys(necessity_by_association))
     end
   end
 
@@ -1923,83 +2074,6 @@ defmodule Explorer.Chain do
   end
 
   def default_page_size, do: @default_page_size
-
-  def fetch_recent_collated_transactions_for_rap(paging_options, necessity_by_association) do
-    Transaction.recent_collated_transactions(true,
-      paging_options: paging_options,
-      necessity_by_association: necessity_by_association
-    )
-  end
-
-  def transactions_available_count do
-    Transaction.transactions_available_count()
-  end
-
-  def fetch_recent_collated_transactions(
-        old_ui?,
-        paging_options,
-        necessity_by_association,
-        method_id_filter,
-        type_filter,
-        options
-      ) do
-    Transaction.recent_collated_transactions(
-      old_ui?,
-      options
-      |> Keyword.put(:paging_options, paging_options)
-      |> Keyword.put(:necessity_by_association, necessity_by_association)
-      |> Keyword.put(:method, method_id_filter)
-      |> Keyword.put(:type, type_filter)
-    )
-  end
-
-  @doc """
-  Return the list of pending transactions that occurred recently.
-
-      iex> 2 |> insert_list(:transaction)
-      iex> :transaction |> insert() |> with_block()
-      iex> 8 |> insert_list(:transaction)
-      iex> recent_pending_transactions = Explorer.Chain.recent_pending_transactions()
-      iex> length(recent_pending_transactions)
-      10
-      iex> Enum.all?(recent_pending_transactions, fn %Explorer.Chain.Transaction{block_hash: block_hash} ->
-      ...>   is_nil(block_hash)
-      ...> end)
-      true
-
-  ## Options
-
-    * `:necessity_by_association` - use to load `t:association/0` as `:required` or `:optional`.  If an association is
-      `:required`, and the `t:Explorer.Chain.Transaction.t/0` has no associated record for that association,
-      then the `t:Explorer.Chain.Transaction.t/0` will not be included in the list.
-    * `:paging_options` - a `t:Explorer.PagingOptions.t/0` used to specify the `:page_size` (defaults to
-      `#{@default_paging_options.page_size}`) and `:key` (a tuple of the lowest/oldest `{inserted_at, hash}`) and.
-      Results will be the transactions older than the `inserted_at` and `hash` that are passed.
-
-  """
-  @spec recent_pending_transactions([paging_options | necessity_by_association_option], true | false) :: [
-          Transaction.t()
-        ]
-  def recent_pending_transactions(options \\ [], old_ui? \\ true)
-      when is_list(options) do
-    Transaction.recent_pending_transactions(options, old_ui?)
-  end
-
-  @doc """
-  Query to return all pending transactions
-  """
-  @spec pending_transactions_query(Ecto.Queryable.t()) :: Ecto.Queryable.t()
-  def pending_transactions_query(query) do
-    Transaction.pending_transactions_query(query)
-  end
-
-  @doc """
-  Returns pending transactions list from the DB
-  """
-  @spec pending_transactions_list() :: Ecto.Schema.t() | term()
-  def pending_transactions_list do
-    Transaction.pending_transactions_list()
-  end
 
   @doc """
   The `string` must start with `0x`, then is converted to an integer and then to `t:Explorer.Chain.Hash.Address.t/0`.
@@ -2398,45 +2472,121 @@ defmodule Explorer.Chain do
   @doc """
     Dynamically joins and preloads associations in a query based on necessity.
 
-    This function adjusts the provided Ecto query to include joins for associations. It supports
-    both optional and required joins. Optional joins use the `preload` function to fetch associations
-    without enforcing their presence. Required joins ensure the association exists.
+    `:optional` returns the same rows as a plain preload; `:required` additionally
+    keeps only the entities that have the association.
+
+    A to-one association is fetched through a join — `LEFT` for `:optional`,
+    `INNER` for `:required` — and preloaded from it, saving a round trip. A
+    to-many association cannot be fetched that way: the join repeats the parent
+    row once per child, and while Ecto collapses the duplicates when assembling
+    structs, a `limit/2` applied elsewhere counts joined rows rather than
+    entities, so the page silently comes back short. Those keep the preload path,
+    with `:required` adding an `INNER JOIN` purely to filter, made row-preserving
+    by `distinct/2`.
+
+    The preload path is also taken whenever the join would be unsafe or
+    impossible: the source schema cannot be resolved, the association is a
+    `through` one or its related schema has no primary key (Ecto needs it to map
+    joined rows back onto parents), the query already binds the association, or
+    the spec is not a plain association name — `{name, query}` and `{name, fun}`
+    specs carry their own loading strategy that a join would drop.
+
+    None of that weakens `:required`: whenever the spec names an association at
+    all, the filtering `INNER JOIN` is applied on the preload path too, unaliased
+    so that it cannot collide with a binding the query already has.
 
     ## Parameters
     - `query`: The initial Ecto query.
-    - `associations`: A single association or a tuple with nested association preloads.
+    - `preload_spec`: An association name, or a preload spec naming one.
     - `necessity`: Specifies if the association is `:optional` or `:required`.
 
     ## Returns
     - The modified query with the specified associations joined according to the defined necessity.
   """
-  @spec join_association(atom() | Ecto.Query.t(), [{atom(), atom()}], :optional | :required) :: Ecto.Query.t()
-  def join_association(query, [{association, nested_preload}], necessity)
-      when is_atom(association) and is_atom(nested_preload) do
-    case necessity do
-      :optional ->
-        preload(query, [{^association, ^nested_preload}])
-
-      :required ->
-        from(q in query,
-          inner_join: a in assoc(q, ^association),
-          as: ^association,
-          left_join: b in assoc(a, ^nested_preload),
-          as: ^nested_preload,
-          preload: [{^association, {a, [{^nested_preload, b}]}}]
-        )
+  @spec join_association(atom() | Ecto.Query.t(), term(), :optional | :required) :: Ecto.Query.t()
+  def join_association(query, preload_spec, necessity) do
+    with {association, nested_preloads} <- join_target(preload_spec),
+         true <- joinable?(query, association) do
+      join_and_preload(query, association, nested_preloads, necessity)
+    else
+      _ -> preload_association(query, preload_spec, necessity)
     end
   end
 
-  @spec join_association(atom() | Ecto.Query.t(), atom(), :optional | :required) :: Ecto.Query.t()
-  def join_association(query, association, necessity) do
-    case necessity do
-      :optional ->
-        preload(query, ^association)
+  # `:required` keeps its filtering even when the spec itself cannot be joined.
+  # The `INNER JOIN` is what drops the entities that do not have the association,
+  # and the caller depends on that regardless of how the data ends up loaded, so
+  # it is applied off the association's name alone. The join is left unaliased,
+  # which is also what makes this path safe for an association the query already
+  # binds.
+  defp preload_association(query, preload_spec, :required) do
+    case spec_association(preload_spec) do
+      nil ->
+        preload(query, ^List.wrap(preload_spec))
 
-      :required ->
-        from(q in query, inner_join: a in assoc(q, ^association), as: ^association, preload: [{^association, a}])
+      association ->
+        query
+        |> filter_by_association(association)
+        |> preload(^List.wrap(preload_spec))
     end
+  end
+
+  defp preload_association(query, preload_spec, :optional), do: preload(query, ^List.wrap(preload_spec))
+
+  defp join_and_preload(query, association, nested_preloads, :optional) do
+    from(q in query,
+      left_join: a in assoc(q, ^association),
+      as: ^association,
+      preload: [{^association, {a, ^nested_preloads}}]
+    )
+  end
+
+  defp join_and_preload(query, association, nested_preloads, :required) do
+    from(q in query,
+      inner_join: a in assoc(q, ^association),
+      as: ^association,
+      preload: [{^association, {a, ^nested_preloads}}]
+    )
+  end
+
+  # An `INNER JOIN` is the only way to express "entities having this association"
+  # without knowing its keys, but on a to-many association it duplicates the
+  # parent row; `distinct/2` restores one row per entity so a `limit/2` applied
+  # elsewhere still counts entities.
+  defp filter_by_association(query, association) do
+    if QueryHelper.association_cardinality(query, association) == :one do
+      from(q in query, inner_join: assoc(q, ^association))
+    else
+      from(q in query, inner_join: assoc(q, ^association), distinct: true)
+    end
+  end
+
+  # The association and nested preloads a join could supply, or `nil` when the
+  # spec has to be loaded as written: `{name, query}` and `{name, fun}` carry
+  # their own loading strategy that a join would silently drop.
+  defp join_target(association) when is_atom(association) and not is_nil(association), do: {association, []}
+
+  defp join_target([{association, nested_preloads}])
+       when is_atom(association) and (is_atom(nested_preloads) or is_list(nested_preloads)),
+       do: {association, List.wrap(nested_preloads)}
+
+  defp join_target(_preload_spec), do: nil
+
+  # The association a spec names, whatever shape it takes — including the shapes
+  # `join_target/1` refuses, since `:required` still has to filter on them.
+  defp spec_association(association) when is_atom(association) and not is_nil(association), do: association
+  defp spec_association([{association, _nested_preloads}]) when is_atom(association), do: association
+  defp spec_association({association, _custom_preload}) when is_atom(association), do: association
+  defp spec_association(_preload_spec), do: nil
+
+  # Callers compose `join_associations/2` onto hand-written queries that may
+  # already bind or preload the very same association, and joining it again
+  # collides on the `as:` alias. Such associations fall back to the preload path,
+  # where `:required` still gets its filtering from an unaliased join.
+  defp joinable?(query, association) do
+    QueryHelper.join_preloadable?(query, association) and
+      QueryHelper.association_cardinality(query, association) == :one and
+      not QueryHelper.association_bound?(query, association)
   end
 
   @doc """
@@ -2465,12 +2615,9 @@ defmodule Explorer.Chain do
         join_association(acc_query, association, :required)
       end)
 
-    optional_preloads = Enum.map(optional_associations, fn {association, _join} -> association end)
-
-    case optional_preloads do
-      [] -> query_with_required_joins
-      _ -> preload(query_with_required_joins, ^optional_preloads)
-    end
+    Enum.reduce(optional_associations, query_with_required_joins, fn {association, _join}, acc_query ->
+      join_association(acc_query, association, :optional)
+    end)
   end
 
   def page_blocks(query, %PagingOptions{key: nil}), do: query
@@ -2672,7 +2819,6 @@ defmodule Explorer.Chain do
 
     query
     |> join_associations(necessity_by_association)
-    |> preload(:contract_address)
     |> select_repo(options).one()
     |> case do
       nil ->
@@ -2710,13 +2856,14 @@ defmodule Explorer.Chain do
     Repo.exists?(query)
   end
 
-  @spec fetch_last_token_balances_include_unfetched([Hash.Address.t()], [api?]) :: []
-  def fetch_last_token_balances_include_unfetched(address_hashes, options \\ []) when is_list(address_hashes) do
+  @spec fetch_last_token_balances_include_unfetched([Hash.Address.t()], Block.block_number(), [api?]) :: []
+  def fetch_last_token_balances_include_unfetched(address_hashes, stale_balance_window, options \\ [])
+      when is_list(address_hashes) do
     repo = select_repo(options)
     head_timestamp = ScaledUiReader.canonical_head_timestamp(repo)
 
     address_hashes
-    |> CurrentTokenBalance.last_token_balances_include_unfetched(head_timestamp)
+    |> CurrentTokenBalance.last_token_balances_include_unfetched(stale_balance_window, head_timestamp)
     |> repo.all()
   end
 

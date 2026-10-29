@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Source.Mobula do
   @moduledoc """
   Adapter for fetching exchange rates from https://mobula.io
@@ -40,7 +41,9 @@ defmodule Explorer.Market.Source.Mobula do
              |> URI.append_query("limit=#{batch_size}")
              |> URI.append_query("offset=#{offset}")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :market_query
            ) do
       {tokens_to_import, initial_tokens_len} =
         Enum.reduce(tokens, {[], 0}, &reduce_mobula_token/2)
@@ -75,6 +78,7 @@ defmodule Explorer.Market.Source.Mobula do
       fiat_value: Source.to_decimal(token["price"]),
       volume_24h: Source.to_decimal(token["off_chain_volume"]),
       circulating_market_cap: Source.to_decimal(token["market_cap"]),
+      circulating_supply: Source.to_decimal(token["circulating_supply"]),
       icon_url: Source.handle_image_url(token["logo"]),
       contract_address_hash: token_contract_address_hash,
       type: "ERC-20"
@@ -113,7 +117,9 @@ defmodule Explorer.Market.Source.Mobula do
              |> URI.append_path("/market/data")
              |> URI.append_query("asset=#{coin_id}")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :market_data
            ) do
       {:ok,
        %Token{
@@ -127,7 +133,8 @@ defmodule Explorer.Market.Source.Mobula do
          symbol: data["symbol"],
          fiat_value: Source.to_decimal(data["price"]),
          volume_24h: Source.to_decimal(data["off_chain_volume"]),
-         image_url: Source.handle_image_url(data["logo"])
+         image_url: Source.handle_image_url(data["logo"]),
+         circulating_supply: Source.to_decimal(data["circulating_supply"])
        }}
     else
       nil ->
@@ -152,7 +159,9 @@ defmodule Explorer.Market.Source.Mobula do
              |> URI.append_query("asset=#{coin_id}")
              |> URI.append_query("from=#{timestamp_ms}")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :market_history
            ) do
       result =
         for [date_ms, price] <- price_history do

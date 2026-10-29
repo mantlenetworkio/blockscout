@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Source.CoinGecko do
   @moduledoc """
   Adapter for fetching exchange rates from https://coingecko.com
@@ -52,7 +53,9 @@ defmodule Explorer.Market.Source.CoinGecko do
            |> URI.append_query("include_24hr_vol=true")
            |> URI.append_query("ids=#{joined_token_ids}")
            |> URI.to_string(),
-           headers()
+           headers(),
+           __MODULE__,
+           :simple_price
          ) do
       {:ok, data} ->
         to_import = put_market_data_to_tokens(to_fetch, data)
@@ -88,7 +91,9 @@ defmodule Explorer.Market.Source.CoinGecko do
              |> URI.append_query("vs_currency=#{config(:currency)}")
              |> URI.append_query("days=#{previous_days}")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :coins_market_chart_market_cap
            ) do
       market_caps =
         case market_caps_dates do
@@ -132,7 +137,9 @@ defmodule Explorer.Market.Source.CoinGecko do
              |> URI.append_query("developer_data=false")
              |> URI.append_query("sparkline=false")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :coins_details
            ) do
       {:ok,
        %Token{
@@ -147,7 +154,8 @@ defmodule Explorer.Market.Source.CoinGecko do
          symbol: String.upcase(data["symbol"]),
          fiat_value: Source.to_decimal(market_data["current_price"][config(:currency)]),
          volume_24h: Source.to_decimal(market_data["total_volume"][config(:currency)]),
-         image_url: Source.handle_image_url(data["image"]["small"] || data["image"]["thumb"])
+         image_url: Source.handle_image_url(data["image"]["small"] || data["image"]["thumb"]),
+         circulating_supply: Source.to_decimal(market_data["circulating_supply"])
        }}
     else
       nil -> {:error, coin_id_not_specified_error}
@@ -164,7 +172,9 @@ defmodule Explorer.Market.Source.CoinGecko do
              |> URI.append_path("/coins/list")
              |> URI.append_query("include_platform=true")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :coins_list
            ) do
       tokens
       |> Enum.reduce([], &reduce_coingecko_token(&1, &2, platform))
@@ -245,7 +255,9 @@ defmodule Explorer.Market.Source.CoinGecko do
              |> URI.append_query("vs_currency=#{config(:currency)}")
              |> URI.append_query("days=#{previous_days}")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :coins_market_chart_price
            ) do
       closings =
         case prices do

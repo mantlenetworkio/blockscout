@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Source.CoinMarketCap do
   @moduledoc """
   Adapter for fetching exchange rates from https://coinmarketcap.com/api/
@@ -56,7 +57,9 @@ defmodule Explorer.Market.Source.CoinMarketCap do
              |> URI.append_query("convert_id=#{currency_id}")
              |> URI.append_query("aux=market_cap")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :cryptocurrency_quotes_historical_market_cap
            ) do
       quotes = market_data["quotes"]
 
@@ -100,7 +103,9 @@ defmodule Explorer.Market.Source.CoinMarketCap do
              |> URI.append_query("convert_id=#{convert_id}")
              |> URI.append_query("aux=circulating_supply,total_supply")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :cryptocurrency_quotes_latest
            ) do
       token_properties = market_data |> Map.values() |> List.first() || %{}
       currency_id = token_properties["quote"][config(:currency_id)]
@@ -119,7 +124,8 @@ defmodule Explorer.Market.Source.CoinMarketCap do
          symbol: String.upcase(token_properties["symbol"]),
          fiat_value: Source.to_decimal(currency_id["price"]),
          volume_24h: Source.to_decimal(currency_id["volume_24h"]),
-         image_url: nil
+         image_url: nil,
+         circulating_supply: Source.to_decimal(token_properties["circulating_supply"])
        }}
     else
       nil ->
@@ -148,7 +154,9 @@ defmodule Explorer.Market.Source.CoinMarketCap do
              |> URI.append_query("convert_id=#{currency_id}")
              |> URI.append_query("aux=price")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :cryptocurrency_quotes_historical_price
            ) do
       closing_quotes =
         case quotes do

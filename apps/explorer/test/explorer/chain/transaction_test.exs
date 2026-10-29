@@ -1,10 +1,13 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.TransactionTest do
   use Explorer.DataCase
 
   import Mox
+  import Explorer.QuerySources, only: [with_query_sources: 1]
 
   alias Ecto.Changeset
-  alias Explorer.Chain.{Address, InternalTransaction, Transaction}
+  alias Explorer.Chain.{Address, InternalTransaction, SmartContract, Transaction}
+  alias Explorer.Chain.SmartContract.Proxy.Models.Implementation
   alias Explorer.{PagingOptions, TestHelper}
 
   doctest Transaction
@@ -42,6 +45,60 @@ defmodule Explorer.Chain.TransactionTest do
       changeset_params = Map.merge(params, %{to_address: to_address_params})
 
       assert %Changeset{valid?: true} = Transaction.changeset(%Transaction{}, changeset_params)
+    end
+
+    if Application.compile_env(:explorer, :chain_type) == :eden do
+      test "casts the Eden sponsored transaction params merged with the receipt params" do
+        transaction_params =
+          %{
+            "type" => "0x76",
+            "nonce" => "0x1",
+            "maxPriorityFeePerGas" => "0x0",
+            "maxFeePerGas" => "0x7",
+            "gasLimit" => "0xa410",
+            "calls" => [%{"to" => "0x11f60a633dd30a8d1a26dd6e20167a9293fb4647", "value" => "0x0", "input" => "0x"}],
+            "hash" => "0x2b6e28053be6423e05a957b954990cc35971b48eb20d280fea148357fb2d09c0",
+            "blockHash" => "0x33f9bbda3453e26c88733d33db3239bfd03e30b6d6ea338d10b39e246ad0c765",
+            "blockNumber" => "0xafcd9e4",
+            "transactionIndex" => "0x0",
+            "from" => "0x7d32cfa8ba0daa0d44cf3b0ac372205456fcd0d1",
+            "gasPrice" => "0x7",
+            "feePayer" => "0xcfc096e58b1f858e5a3ee88ecaeccb2b464625b5"
+          }
+          |> EthereumJSONRPC.Transaction.to_elixir()
+          |> EthereumJSONRPC.Transaction.elixir_to_params()
+
+        receipt_params =
+          %{
+            "status" => "0x1",
+            "cumulativeGasUsed" => "0x5208",
+            "gasUsed" => "0x5208",
+            "type" => "0x76",
+            "transactionHash" => "0x2b6e28053be6423e05a957b954990cc35971b48eb20d280fea148357fb2d09c0",
+            "transactionIndex" => "0x0",
+            "blockHash" => "0x33f9bbda3453e26c88733d33db3239bfd03e30b6d6ea338d10b39e246ad0c765",
+            "blockNumber" => "0xafcd9e4",
+            "contractAddress" => nil,
+            "effectiveGasPrice" => "0x7",
+            "feePayer" => "0xcfc096e58b1f858e5a3ee88ecaeccb2b464625b5"
+          }
+          |> EthereumJSONRPC.Receipt.to_elixir()
+          |> EthereumJSONRPC.Receipt.elixir_to_params()
+
+        params = Map.merge(transaction_params, receipt_params)
+
+        assert %Changeset{valid?: true, changes: changes} =
+                 Transaction.changeset(%Transaction{}, params)
+
+        assert changes.type == 118
+        assert changes.status == :ok
+        assert to_string(changes.gas) == "42000"
+        assert to_string(changes.gas_used) == "21000"
+        assert changes.calls == [%{"to" => "0x11f60a633dd30a8d1a26dd6e20167a9293fb4647", "value" => 0, "input" => "0x"}]
+        assert to_string(changes.fee_payer_address_hash) == "0xcfc096e58b1f858e5a3ee88ecaeccb2b464625b5"
+        assert to_string(changes.to_address_hash) == "0x11f60a633dd30a8d1a26dd6e20167a9293fb4647"
+        assert to_string(changes.hash) == "0x2b6e28053be6423e05a957b954990cc35971b48eb20d280fea148357fb2d09c0"
+      end
     end
   end
 
@@ -335,6 +392,80 @@ defmodule Explorer.Chain.TransactionTest do
       assert {:ok, "60fe47b1", "set(uint256 arg0)", [{"arg0", "uint256", 10}]} =
                Transaction.decoded_input_data(transaction, [])
     end
+  end
+
+  describe "decode_transactions/3" do
+    @decoded_set_10 {:ok, "60fe47b1", "set(uint256 x)", [{"x", "uint256", 10}]}
+    @abi_sources ["proxy_implementations", "smart_contracts", "addresses"]
+
+    test "decodes input with the implementation ABI of a proxy whose associations are not preloaded" do
+      transaction =
+        insert_transaction_to_verified_proxy()
+        |> Repo.preload(to_address: :smart_contract)
+
+      assert [@decoded_set_10] = Transaction.decode_transactions([transaction], true, api?: true)
+    end
+
+    test "reuses preloaded proxy implementations and ABIs without querying them again" do
+      transaction =
+        insert_transaction_to_verified_proxy()
+        |> Repo.preload(
+          to_address: [:smart_contract, Implementation.proxy_implementations_smart_contracts_association()]
+        )
+
+      {result, sources} =
+        with_query_sources(fn -> Transaction.decode_transactions([transaction], true, api?: true) end)
+
+      assert [@decoded_set_10] = result
+      assert Enum.filter(sources, &(&1 in @abi_sources)) == []
+    end
+
+    test "skips the proxy implementations query when the association is preloaded and empty" do
+      smart_contract = insert(:smart_contract) |> Repo.preload(:address)
+      input_data = "set(uint)" |> ABI.encode([10]) |> Base.encode16(case: :lower)
+
+      transaction =
+        :transaction
+        |> insert(to_address: smart_contract.address, input: "0x" <> input_data)
+        |> Repo.preload(to_address: [:smart_contract, :proxy_implementations])
+
+      {result, sources} =
+        with_query_sources(fn -> Transaction.decode_transactions([transaction], true, api?: true) end)
+
+      assert [@decoded_set_10] = result
+      assert Enum.filter(sources, &(&1 in @abi_sources)) == []
+    end
+
+    test "fetches the ABI when the smart contract was preloaded without it" do
+      transaction =
+        insert_transaction_to_verified_proxy()
+        |> Repo.preload(to_address: [SmartContract.association_without_abi(), :proxy_implementations])
+
+      {result, sources} =
+        with_query_sources(fn -> Transaction.decode_transactions([transaction], true, api?: true) end)
+
+      assert [@decoded_set_10] = result
+      assert "smart_contracts" in sources
+      refute "proxy_implementations" in sources
+    end
+  end
+
+  # a verified proxy whose own ABI lacks `set(uint256)`, delegating to a
+  # verified implementation whose ABI has it
+  defp insert_transaction_to_verified_proxy do
+    proxy_smart_contract = :smart_contract |> insert(abi: []) |> Repo.preload(:address)
+    implementation_smart_contract = insert(:smart_contract)
+
+    insert(:proxy_implementation,
+      proxy_address_hash: proxy_smart_contract.address_hash,
+      proxy_type: :eip1967,
+      address_hashes: [implementation_smart_contract.address_hash],
+      names: [implementation_smart_contract.name]
+    )
+
+    input_data = "set(uint)" |> ABI.encode([10]) |> Base.encode16(case: :lower)
+
+    insert(:transaction, to_address: proxy_smart_contract.address, input: "0x" <> input_data)
   end
 
   describe "Poison.encode!/1" do
@@ -865,6 +996,38 @@ defmodule Explorer.Chain.TransactionTest do
                  %Transaction{gas_price: %Explorer.Chain.Wei{value: 2}, gas_used: Decimal.new(3)},
                  :wei
                )
+    end
+  end
+
+  if Application.compile_env(:explorer, :chain_type) == :eden do
+    describe "calls_value_by_recipient/1" do
+      test "sums up the values of the batched calls per recipient" do
+        first_recipient = "0x11f60a633dd30a8d1a26dd6e20167a9293fb4647"
+        second_recipient = "0xcfc096e58b1f858e5a3ee88ecaeccb2b464625b5"
+
+        transaction = %Transaction{
+          calls: [
+            %{"to" => first_recipient, "value" => 1, "input" => "0x"},
+            %{"to" => second_recipient, "value" => 2, "input" => "0x"},
+            %{"to" => first_recipient, "value" => 3, "input" => "0x"}
+          ]
+        }
+
+        assert %{} = values = Transaction.calls_value_by_recipient(transaction)
+
+        assert Map.new(values, fn {address_hash, value} -> {to_string(address_hash), to_string(value.value)} end) ==
+                 %{first_recipient => "4", second_recipient => "2"}
+      end
+
+      test "skips the calls without a recipient" do
+        transaction = %Transaction{calls: [%{"to" => nil, "value" => 1, "input" => "0x"}]}
+
+        assert Transaction.calls_value_by_recipient(transaction) == %{}
+      end
+
+      test "returns an empty map for the transactions which are not sponsored ones" do
+        assert Transaction.calls_value_by_recipient(%Transaction{calls: nil}) == %{}
+      end
     end
   end
 

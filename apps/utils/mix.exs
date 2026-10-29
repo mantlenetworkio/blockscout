@@ -1,10 +1,11 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Utils.MixProject do
   use Mix.Project
 
   def project do
     [
       app: :utils,
-      version: "11.0.3",
+      version: "11.3.3",
       build_path: "../../_build",
       # config_path: "../../config/config.exs",
       deps_path: "../../deps",
@@ -36,7 +37,7 @@ defmodule Utils.MixProject do
       {:httpoison, "~> 2.0"},
       {:inet_cidr, "~> 1.0"},
       {:mime, "~> 2.0"},
-      {:tesla, "~> 1.17.0"}
+      {:tesla, "~> 1.21.0"}
     ]
   end
 

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.TransactionController do
   use BlockScoutWeb, :controller
 
@@ -31,16 +32,12 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       type_filter_options: 1
     ]
 
-  import Explorer.MicroserviceInterfaces.BENS,
+  import Explorer.Chain.Address.MetadataPreloader,
     only: [
-      maybe_preload_ens: 1,
-      maybe_preload_ens_for_token_transfers: 1,
-      maybe_preload_ens_for_transactions: 1,
-      maybe_preload_ens_to_transaction: 1
+      maybe_preload_ens_and_metadata: 1,
+      maybe_preload_ens_and_metadata: 2,
+      maybe_preload_selected_meta: 2
     ]
-
-  import Explorer.MicroserviceInterfaces.Metadata,
-    only: [maybe_preload_metadata: 1, maybe_preload_metadata_to_transaction: 1]
 
   import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
 
@@ -63,7 +60,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   alias Explorer.Chain.Beacon.Deposit, as: BeaconDeposit
   alias Explorer.Chain.Beacon.Reader, as: BeaconReader
   alias Explorer.Chain.Cache.Counters.{NewPendingTransactionsCount, Transactions24hCount}
-  alias Explorer.Chain.{FheOperation, Hash, Transaction}
+  alias Explorer.Chain.{FheOperation, Hash, SmartContract, Transaction}
   alias Explorer.Chain.Optimism.OutputRoot, as: OptimismOutputRoot
   alias Explorer.Chain.Optimism.TransactionBatch, as: OptimismTransactionBatch
   alias Explorer.Chain.Scroll.Reader, as: ScrollReader
@@ -94,45 +91,59 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   end
 
   # TODO might be redundant to preload blob fields in some of the endpoints
-  @transaction_necessity_by_association %{
-                                          :block => :optional,
-                                          [
-                                            created_contract_address: [
-                                              :scam_badge,
-                                              :names,
-                                              :token,
-                                              :smart_contract,
-                                              proxy_implementations_association()
-                                            ]
-                                          ] => :optional,
-                                          [
-                                            from_address: [
-                                              :scam_badge,
-                                              :names,
-                                              :smart_contract,
-                                              proxy_implementations_association()
-                                            ]
-                                          ] => :optional,
-                                          [
-                                            to_address: [
-                                              :scam_badge,
-                                              :names,
-                                              :smart_contract,
-                                              proxy_implementations_association()
-                                            ]
-                                          ] => :optional
-                                        }
+  # Address-info preloads for the transaction participants (from/to/created and
+  # token transfer addresses) are intentionally absent here: the `transaction`
+  # action loads them all in a single deduplicated pass via
+  # `Chain.preload_transaction_participants/3`, and the list actions via
+  # `Chain.preload_address_participants/4`.
+  @transaction_necessity_by_association %{:block => :optional}
                                         |> Map.merge(@chain_type_transaction_necessity_by_association)
 
+  @transaction_participants_necessity_by_association %{
+    :scam_badge => :optional,
+    :names => :optional,
+    :token => :optional,
+    SmartContract.association_without_abi() => :optional,
+    proxy_implementations_association() => :optional
+  }
+
+  # The same associations for an item of a transaction *list*, where nothing
+  # renders the contract source, so the smart contract itself is not loaded.
+  # `:token` stays: `TransactionView.transaction_types/3` reports
+  # `token_creation` off `created_contract_address.token`.
+  @transaction_list_participant_necessity_by_association %{
+    :scam_badge => :optional,
+    :names => :optional,
+    :token => :optional,
+    proxy_implementations_association() => :optional
+  }
+
+  @transaction_address_fields [
+    {:from_address_hash, :from_address},
+    {:to_address_hash, :to_address},
+    {:created_contract_address_hash, :created_contract_address}
+  ]
+
   @token_transfers_necessity_by_association %{
-    [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-    [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
     [token: reputation_association()] => :optional
   }
 
+  @token_transfer_participant_necessity_by_association %{
+    :scam_badge => :optional,
+    :names => :optional,
+    SmartContract.association_without_abi() => :optional,
+    proxy_implementations_association() => :optional
+  }
+
+  @token_transfer_address_fields [
+    {:from_address_hash, :from_address},
+    {:to_address_hash, :to_address}
+  ]
+
+  # Transfer from/to address preloads are handled by
+  # `Chain.preload_transaction_participants/3`, see
+  # `@transaction_participants_necessity_by_association`.
   @token_transfers_in_transaction_necessity_by_association %{
-    [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-    [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
     [token: reputation_association()] => :optional
   }
 
@@ -161,21 +172,20 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   """
   @spec transaction(Plug.Conn.t(), map()) :: Plug.Conn.t() | {atom(), any()}
   def transaction(conn, %{transaction_hash_param: transaction_hash_string} = params) do
-    necessity_by_association_with_actions =
-      @transaction_necessity_by_association
-      |> Map.put(:signed_authorizations, :optional)
-
+    # `signed_authorizations` are not part of the necessity map on purpose: only
+    # EIP-7702 (type 4) transactions have any, so they are preloaded below via
+    # `Transaction.preload_signed_authorizations/2` once the type is known.
     necessity_by_association =
       case Application.get_env(:explorer, :chain_type) do
         :zksync ->
-          necessity_by_association_with_actions
+          @transaction_necessity_by_association
           |> Map.put(:zksync_batch, :optional)
           |> Map.put(:zksync_commit_transaction, :optional)
           |> Map.put(:zksync_prove_transaction, :optional)
           |> Map.put(:zksync_execute_transaction, :optional)
 
         :arbitrum ->
-          necessity_by_association_with_actions
+          @transaction_necessity_by_association
           |> Map.put(:arbitrum_batch, :optional)
           |> Map.put(:arbitrum_commitment_transaction, :optional)
           |> Map.put(:arbitrum_confirmation_transaction, :optional)
@@ -183,13 +193,27 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
           |> Map.put(:arbitrum_message_from_l2, :optional)
 
         :suave ->
-          necessity_by_association_with_actions
+          @transaction_necessity_by_association
           |> Map.put(:logs, :optional)
           |> Map.put([execution_node: :names], :optional)
           |> Map.put([wrapped_to_address: :names], :optional)
 
+        :eden ->
+          Map.put(
+            @transaction_necessity_by_association,
+            [
+              fee_payer_address: [
+                :scam_badge,
+                :names,
+                :smart_contract,
+                proxy_implementations_association()
+              ]
+            ],
+            :optional
+          )
+
         _ ->
-          necessity_by_association_with_actions
+          @transaction_necessity_by_association
       end
 
     options =
@@ -197,11 +221,18 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       |> Keyword.merge(@api_true)
 
     with {:ok, transaction, _transaction_hash} <- validate_transaction(transaction_hash_string, params, options),
+         preloaded <- Transaction.preload_signed_authorizations(transaction, @api_true),
          preloaded <-
            Chain.preload_token_transfers(
-             transaction,
+             preloaded,
              @token_transfers_in_transaction_necessity_by_association,
              @api_true |> fetch_scam_token_toggle(conn)
+           ),
+         preloaded <-
+           Chain.preload_transaction_participants(
+             preloaded,
+             @transaction_participants_necessity_by_association,
+             @api_true
            ) do
       conn
       |> put_status(200)
@@ -209,8 +240,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
         transaction:
           preloaded
           |> Instance.preload_nft(@api_true)
-          |> maybe_preload_ens_to_transaction()
-          |> maybe_preload_metadata_to_transaction()
+          |> maybe_preload_ens_and_metadata()
       })
     end
   end
@@ -245,7 +275,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
 
     full_options =
       [
-        necessity_by_association: transactions_necessity_by_association()
+        necessity_by_association: @transaction_necessity_by_association
       ]
       |> Keyword.merge(paging_options(params, filter_options))
       |> Keyword.merge(method_filter_options(params))
@@ -261,38 +291,27 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     conn
     |> put_status(200)
     |> render(:transactions, %{
-      transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+      transactions: transactions |> preload_transaction_list_participants(),
       next_page_params: next_page_params
     })
   end
 
-  defp transactions_necessity_by_association do
-    %{
-      :block => :optional,
-      [
-        created_contract_address: [
-          :scam_badge,
-          :names,
-          :token,
-          proxy_implementations_association()
-        ]
-      ] => :optional,
-      [
-        from_address: [
-          :scam_badge,
-          :names,
-          proxy_implementations_association()
-        ]
-      ] => :optional,
-      [
-        to_address: [
-          :scam_badge,
-          :names,
-          proxy_implementations_association()
-        ]
-      ] => :optional
-    }
-    |> Map.merge(@chain_type_transaction_necessity_by_association)
+  # Loads the address info of every `from`/`to`/`created_contract` participant on
+  # the page in one pass, deduplicating addresses shared between items and
+  # between roles of the same item. Preloading it per role through
+  # `necessity_by_association` instead repeats the `address_names`, scam badge
+  # and proxy implementation queries once per role.
+  #
+  # Runs before `maybe_preload_ens_and_metadata/2`, which writes ENS and metadata
+  # into the very address structs assigned here.
+  defp preload_transaction_list_participants(transactions) do
+    transactions
+    |> Chain.preload_address_participants(
+      @transaction_address_fields,
+      @transaction_list_participant_necessity_by_association,
+      @api_true
+    )
+    |> maybe_preload_ens_and_metadata(:transactions)
   end
 
   operation :zksync_batch,
@@ -533,7 +552,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
           end
 
         query
-        |> Chain.join_associations(transactions_necessity_by_association())
+        |> Chain.join_associations(@transaction_necessity_by_association)
         |> preload([{:token_transfers, [:token, :from_address, :to_address]}])
         |> Repo.replica().all()
       end
@@ -544,7 +563,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     conn
     |> put_status(200)
     |> render(:transactions, %{
-      transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+      transactions: transactions |> preload_transaction_list_participants(),
       next_page_params: next_page_params
     })
   end
@@ -567,7 +586,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   defp handle_batch_transactions(conn, %{batch_number_param: batch_number} = params, batch_transactions_fun) do
     full_options =
       [
-        necessity_by_association: transactions_necessity_by_association()
+        necessity_by_association: @transaction_necessity_by_association
       ]
       |> Keyword.merge(paging_options(params))
       |> Keyword.merge(@api_true)
@@ -588,7 +607,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     conn
     |> put_status(200)
     |> render(:transactions, %{
-      transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+      transactions: transactions |> preload_transaction_list_participants(),
       next_page_params: next_page_params
     })
   end
@@ -620,7 +639,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
   def execution_node(conn, %{execution_node_hash_param: execution_node_hash_string} = params) do
     with {:format, {:ok, execution_node_hash}} <- {:format, Chain.string_to_address_hash(execution_node_hash_string)} do
       full_options =
-        [necessity_by_association: transactions_necessity_by_association()]
+        [necessity_by_association: @transaction_necessity_by_association]
         |> Keyword.merge(put_key_value_to_paging_options(paging_options(params), :is_index_in_asc_order, true))
         |> Keyword.merge(@api_true)
 
@@ -635,7 +654,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       conn
       |> put_status(200)
       |> render(:transactions, %{
-        transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+        transactions: transactions |> preload_transaction_list_participants(),
         next_page_params: next_page_params
       })
     end
@@ -745,9 +764,13 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       |> render(:token_transfers, %{
         token_transfers:
           token_transfers
+          |> Chain.preload_address_participants(
+            @token_transfer_address_fields,
+            @token_transfer_participant_necessity_by_association,
+            @api_true
+          )
           |> Instance.preload_nft(@api_true)
-          |> maybe_preload_ens_for_token_transfers()
-          |> maybe_preload_metadata(),
+          |> maybe_preload_ens_and_metadata(:token_transfers),
         next_page_params: next_page_params
       })
     end
@@ -798,7 +821,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       conn
       |> put_status(200)
       |> render(:internal_transactions, %{
-        internal_transactions: internal_transactions |> maybe_preload_ens() |> maybe_preload_metadata(),
+        internal_transactions: internal_transactions |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end
@@ -854,7 +877,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       |> put_status(200)
       |> render(:logs, %{
         transaction_hash: transaction_hash,
-        logs: logs |> maybe_preload_ens() |> maybe_preload_metadata(),
+        logs: logs |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end
@@ -981,7 +1004,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
     with {:auth, %{watchlist_id: watchlist_id}} <- {:auth, current_user(conn)} do
       full_options =
         [
-          necessity_by_association: transactions_necessity_by_association()
+          necessity_by_association: @transaction_necessity_by_association
         ]
         |> Keyword.merge(paging_options(params, [:validated]))
         |> Keyword.merge(@api_true)
@@ -996,7 +1019,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       conn
       |> put_status(200)
       |> render(:transactions_watchlist, %{
-        transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+        transactions: transactions |> preload_transaction_list_participants(),
         next_page_params: next_page_params,
         watchlist_names: watchlist_names
       })
@@ -1071,6 +1094,72 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       |> put_status(code)
       |> json(response)
     end
+  end
+
+  @preview_necessity_by_association %{
+    :block => :optional,
+    [from_address: [:names, :smart_contract]] => :optional,
+    [to_address: [:names, :smart_contract]] => :optional
+  }
+
+  operation :preview,
+    summary: "Get lightweight transaction preview for social media embeds",
+    description: "Returns minimal transaction data (status, timestamp, method, from/to) for rendering OG previews.",
+    parameters:
+      [transaction_hash_param() | base_params()] ++
+        [
+          %OpenApiSpex.Parameter{
+            name: :preload_ens,
+            in: :query,
+            schema: %Schema{type: :boolean},
+            required: false,
+            description: "Preload ENS domain names for addresses (default: false)"
+          },
+          %OpenApiSpex.Parameter{
+            name: :preload_metadata,
+            in: :query,
+            schema: %Schema{type: :boolean},
+            required: false,
+            description: "Preload address metadata/name tags (default: false)"
+          },
+          %OpenApiSpex.Parameter{
+            name: :decode_input,
+            in: :query,
+            schema: %Schema{type: :boolean},
+            required: false,
+            description: "Decode transaction input to resolve method name (default: false)"
+          }
+        ],
+    responses: [
+      ok: {"Lightweight transaction preview.", "application/json", Schemas.Transaction.Preview},
+      not_found: NotFoundResponse.response(),
+      unprocessable_entity: JsonErrorResponse.response()
+    ]
+
+  @doc """
+    Function to handle GET requests to `/api/v2/transactions/:transaction_hash_param/preview` endpoint.
+  """
+  @spec preview(Plug.Conn.t(), map()) :: Plug.Conn.t() | {atom(), any()}
+  def preview(conn, %{transaction_hash_param: transaction_hash_string} = params) do
+    options =
+      [necessity_by_association: @preview_necessity_by_association]
+      |> Keyword.merge(@api_true)
+
+    with {:ok, transaction, _transaction_hash} <- validate_transaction(transaction_hash_string, params, options) do
+      preloaded = maybe_preload_selected_meta(transaction, requested_preview_meta_fields(params))
+
+      conn
+      |> put_status(200)
+      |> render(:preview, %{transaction: preloaded, decode_input: params[:decode_input] == true})
+    end
+  end
+
+  # Both preloads are opt-in per request, so only what the caller asked for is
+  # fetched. When both are requested they are fetched concurrently.
+  defp requested_preview_meta_fields(params) do
+    for {param, field} <- [preload_ens: :ens_domain_name, preload_metadata: :metadata],
+        params[param] == true,
+        do: field
   end
 
   operation :blobs,
@@ -1232,7 +1321,7 @@ defmodule BlockScoutWeb.API.V2.TransactionController do
       |> put_status(200)
       |> put_view(DepositView)
       |> render(:deposits, %{
-        deposits: deposits |> maybe_preload_ens() |> maybe_preload_metadata(),
+        deposits: deposits |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end

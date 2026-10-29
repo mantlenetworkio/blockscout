@@ -53,7 +53,7 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
       BlobRetryQueue.clear()
       drain_reorg_queue()
 
-      %{rpc: Indexer.Helper.json_rpc_named_arguments(@l1_url), chain: chain}
+      %{rpc: Indexer.Helper.l1_json_rpc_named_arguments(@l1_url), chain: chain}
     end
 
     describe "handle_info(:continue, state)" do

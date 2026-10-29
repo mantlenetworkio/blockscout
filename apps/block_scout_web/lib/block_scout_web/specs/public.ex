@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Specs.Public do
   @moduledoc """
   This module defines the public API specification for the BlockScoutWeb application.
@@ -30,7 +31,8 @@ defmodule BlockScoutWeb.Specs.Public do
     "stats",
     "csv-export",
     "account-abstraction",
-    "withdrawals"
+    "withdrawals",
+    "advanced-filters"
   ]
 
   # todo: if new chain type is covered with OpenAPI specs
@@ -52,7 +54,7 @@ defmodule BlockScoutWeb.Specs.Public do
         end
       end
 
-    {chain_type, nil} when chain_type in [:scroll, :zilliqa] ->
+    {chain_type, nil} when chain_type in [:arbitrum, :scroll, :zilliqa] ->
       @chain_type_category_tags [%Tag{name: to_string(chain_type)}]
       defp chain_type_category_tags, do: @chain_type_category_tags
 

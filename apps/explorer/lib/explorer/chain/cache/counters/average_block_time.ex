@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.Counters.AverageBlockTime do
   @moduledoc """
   Caches the average block time in milliseconds.
@@ -8,6 +9,7 @@ defmodule Explorer.Chain.Cache.Counters.AverageBlockTime do
 
   alias EthereumJSONRPC.Utility.RangesHelper
   alias Explorer.Chain.Block
+  alias Explorer.Prometheus.Instrumenter
   alias Explorer.Repo
   alias Timex.Duration
 
@@ -110,7 +112,11 @@ defmodule Explorer.Chain.Cache.Counters.AverageBlockTime do
         {number, DateTime.to_unix(timestamp, :millisecond)}
       end)
 
-    %{timestamps: timestamps, average: average_distance(timestamps)}
+    average = average_distance(timestamps)
+
+    Instrumenter.average_block_time(Duration.to_milliseconds(average))
+
+    %{timestamps: timestamps, average: average}
   end
 
   defp average_distance([]), do: Duration.from_milliseconds(0)

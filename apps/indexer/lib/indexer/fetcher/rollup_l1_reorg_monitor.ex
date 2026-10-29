@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.RollupL1ReorgMonitor do
   @moduledoc """
   A module to monitor and catch L1 reorgs and make queue of the reorg blocks
@@ -110,7 +111,7 @@ defmodule Indexer.Fetcher.RollupL1ReorgMonitor do
     else
       l1_rpc = Enum.at(modules_using_reorg_monitor, 0).l1_rpc_url()
 
-      json_rpc_named_arguments = Helper.json_rpc_named_arguments(l1_rpc)
+      json_rpc_named_arguments = Helper.l1_json_rpc_named_arguments(l1_rpc)
 
       {:ok, block_check_interval, _} = Helper.get_block_check_interval(json_rpc_named_arguments)
 

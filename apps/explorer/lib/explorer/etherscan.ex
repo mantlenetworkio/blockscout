@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Etherscan do
   @moduledoc """
   The etherscan context.
@@ -24,6 +25,8 @@ defmodule Explorer.Etherscan do
     start_timestamp: nil,
     end_timestamp: nil
   }
+
+  @api_true [api?: true]
 
   @doc """
   Returns the maximum allowed page size number.
@@ -203,7 +206,7 @@ defmodule Explorer.Etherscan do
     |> Enum.map(fn direction ->
       options
       |> consensus_internal_transactions_with_transactions_and_blocks_query()
-      |> InternalTransaction.where_address_fields_match(address_hash, direction)
+      |> InternalTransaction.where_address_fields_match(address_hash, direction, @api_true)
       |> InternalTransaction.where_is_different_from_parent_transaction()
       |> InternalTransaction.include_zero_value(options.include_zero_value)
       |> where_start_block_match_internal_transaction(options)

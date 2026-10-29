@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule RPCTranslatorForwarder do
   @moduledoc """
   Phoenix router limits forwarding,
@@ -190,6 +191,7 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
       get("/:transaction_hash_param/raw-trace", V2.TransactionController, :raw_trace)
       get("/:transaction_hash_param/state-changes", V2.TransactionController, :state_changes)
       get("/:transaction_hash_param/summary", V2.TransactionController, :summary)
+      get("/:transaction_hash_param/preview", V2.TransactionController, :preview)
 
       chain_scope :neon do
         get("/:transaction_hash_param/external-transactions", V2.TransactionController, :external_transactions)
@@ -471,13 +473,13 @@ defmodule BlockScoutWeb.Routers.ApiRouter do
         get("/batches", V2.ArbitrumController, :batches)
         get("/batches/count", V2.ArbitrumController, :batches_count)
         get("/batches/:batch_number", V2.ArbitrumController, :batch)
-        get("/batches/da/anytrust/:data_hash", V2.ArbitrumController, :batch_by_data_availability_info)
-        get("/batches/da/eigenda/:data_hash", V2.ArbitrumController, :batch_by_data_availability_info)
+        get("/batches/da/anytrust/:data_hash", V2.ArbitrumController, :batch_by_anytrust_da_info)
+        get("/batches/da/eigenda/:data_hash", V2.ArbitrumController, :batch_by_eigenda_da_info)
 
         get(
           "/batches/da/celestia/:height/:transaction_commitment",
           V2.ArbitrumController,
-          :batch_by_data_availability_info
+          :batch_by_celestia_da_info
         )
       end
     end

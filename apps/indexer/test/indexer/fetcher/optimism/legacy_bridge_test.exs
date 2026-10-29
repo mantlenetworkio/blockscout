@@ -27,6 +27,42 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
       %{json_rpc_named_arguments: Keyword.put(json_rpc_named_arguments, :transport, EthereumJSONRPC.Mox)}
     end
 
+    describe "handle_continue/2" do
+      test "reads the v1 L1 range through the L1 RPC and the v1 L2 range through the legacy L2 RPC" do
+        optimism = Application.get_env(:indexer, Indexer.Fetcher.Optimism)
+        legacy_bridge = Application.get_env(:indexer, LegacyBridge)
+
+        on_exit(fn ->
+          Application.put_env(:indexer, Indexer.Fetcher.Optimism, optimism)
+          Application.put_env(:indexer, LegacyBridge, legacy_bridge)
+        end)
+
+        Application.put_env(
+          :indexer,
+          Indexer.Fetcher.Optimism,
+          Keyword.put(optimism, :optimism_l1_rpc, "http://l1.example:8545")
+        )
+
+        Application.put_env(
+          :indexer,
+          LegacyBridge,
+          Keyword.put(legacy_bridge || [], :l2_rpc, "http://legacy-l2.example:8545")
+        )
+
+        assert {:noreply, state} = LegacyBridge.handle_continue([transport: EthereumJSONRPC.Mox], %{})
+
+        l1_transport_options = state.l1.json_rpc_named_arguments[:transport_options]
+        assert l1_transport_options[:urls] == ["http://l1.example:8545"]
+        # requests to the parent chain are counted by the L1 request metrics
+        assert l1_transport_options[:http_options][:layer] == :l1
+
+        l2_transport_options = state.l2.json_rpc_named_arguments[:transport_options]
+        assert l2_transport_options[:urls] == ["http://legacy-l2.example:8545"]
+        # the node of the v1 era is an L2 node, not the parent chain
+        refute Keyword.has_key?(l2_transport_options[:http_options], :layer)
+      end
+    end
+
     describe "a full run" do
       test "writes the v1 rows and relays, and validates them against the chain", %{
         json_rpc_named_arguments: json_rpc_named_arguments
