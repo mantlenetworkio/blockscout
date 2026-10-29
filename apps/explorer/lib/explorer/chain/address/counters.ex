@@ -5,7 +5,7 @@ defmodule Explorer.Chain.Address.Counters do
   use Utils.RuntimeEnvHelper,
     chain_identity: [:explorer, :chain_identity]
 
-  import Ecto.Query, only: [from: 2, limit: 2, select: 3, union_all: 2, where: 3]
+  import Ecto.Query, only: [from: 2, limit: 2, select: 3, union: 2, union_all: 2, where: 3]
 
   import Explorer.Chain,
     only: [select_repo: 1, wrapped_union_subquery: 1]
@@ -289,6 +289,32 @@ defmodule Explorer.Chain.Address.Counters do
     |> wrapped_union_subquery()
   end
 
+  # Token transfers sent or received by the address, at most `@counters_limit` of each direction. With a single
+  # `to_address_hash = X OR from_address_hash = X` filter and a LIMIT, the planner may choose a sequential scan of
+  # `token_transfers` whenever the statistics promise many transfers per address, and that scan then reads the
+  # whole table for an address with fewer transfers than the limit. One limited scan per direction always uses the
+  # address indexes. `union` (not `union_all`) counts a transfer from the address to itself once, as the OR does;
+  # the result caps at `@counters_limit` exactly like the OR, because a direction that is cut by its limit alone
+  # already yields `@counters_limit` distinct transfers.
+  defp address_hash_to_token_transfers_limited_count_query(address_hash) do
+    address_hash
+    |> token_transfer_keys_limited_query(:to_address_hash)
+    |> union(^token_transfer_keys_limited_query(address_hash, :from_address_hash))
+    |> wrapped_union_subquery()
+  end
+
+  defp token_transfer_keys_limited_query(address_hash, address_field) do
+    TokenTransfer.only_consensus_transfers_query()
+    |> where([token_transfer], field(token_transfer, ^address_field) == ^address_hash)
+    |> select([token_transfer], %{
+      transaction_hash: token_transfer.transaction_hash,
+      block_hash: token_transfer.block_hash,
+      log_index: token_transfer.log_index
+    })
+    |> limit(@counters_limit)
+    |> wrapped_union_subquery()
+  end
+
   defp address_hash_to_beacon_deposits_unordered_query(address_hash) do
     from(
       deposit in BeaconDeposit,
@@ -448,7 +474,7 @@ defmodule Explorer.Chain.Address.Counters do
       configure_task(
         :token_transfers,
         cached_counters,
-        address_to_token_transfer_count_query(address_hash),
+        address_hash_to_token_transfers_limited_count_query(address_hash),
         address_hash,
         options
       )

@@ -4459,6 +4459,45 @@ defmodule BlockScoutWeb.API.V2.AddressControllerTest do
       assert response["token_transfers_erc8056_count"] == 1
     end
 
+    test "counts a token transfer from the address to itself once", %{conn: conn} do
+      address = insert(:address)
+
+      for {from_address, to_address} <- [{address, address}, {address, insert(:address)}, {insert(:address), address}] do
+        transaction = insert(:transaction) |> with_block()
+
+        insert(:token_transfer,
+          from_address: from_address,
+          to_address: to_address,
+          transaction: transaction,
+          block: transaction.block,
+          block_number: transaction.block_number
+        )
+      end
+
+      response = conn |> get("/api/v2/addresses/#{address.hash}/tabs-counters") |> json_response(200)
+
+      assert response["token_transfers_count"] == 3
+    end
+
+    test "caps the token transfers counter at 51 when neither direction reaches it alone", %{conn: conn} do
+      address = insert(:address)
+
+      for direction <- [:from_address, :to_address], _ <- 1..30 do
+        transaction = insert(:transaction) |> with_block()
+
+        insert(:token_transfer, [
+          {direction, address},
+          transaction: transaction,
+          block: transaction.block,
+          block_number: transaction.block_number
+        ])
+      end
+
+      response = conn |> get("/api/v2/addresses/#{address.hash}/tabs-counters") |> json_response(200)
+
+      assert response["token_transfers_count"] == 51
+    end
+
     test "get 200 on non existing address", %{conn: conn} do
       address = build(:address)
 
