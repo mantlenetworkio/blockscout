@@ -2,6 +2,8 @@
 defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
   use Explorer.DataCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Explorer.Chain.Address
   alias Explorer.Chain.Cache.Counters.{AddressCounters, AddressCountersConsolidator, Consolidation}
   alias Explorer.Repo
@@ -249,6 +251,289 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
       AddressCountersConsolidator.consolidate()
 
       assert Repo.aggregate(CountersRefetchBlock, :count) == 1
+    end
+  end
+
+  describe "consolidation in block range steps" do
+    setup do
+      initial_env = Application.get_env(:explorer, AddressCountersConsolidator) || []
+      initial_consolidation_env = Application.get_env(:explorer, Consolidation) || []
+
+      # a step covers at most 2 rows of each row source, and a spent time budget leaves a chunk after one step
+      Application.put_env(
+        :explorer,
+        AddressCountersConsolidator,
+        Keyword.merge(initial_env, step_rows: 2, step_time_budget: 0)
+      )
+
+      Application.put_env(:explorer, Consolidation, Keyword.merge(initial_consolidation_env, safe_block_lag: 0))
+
+      on_exit(fn ->
+        Application.put_env(:explorer, AddressCountersConsolidator, initial_env)
+        Application.put_env(:explorer, Consolidation, initial_consolidation_env)
+      end)
+
+      start_supervised!(AddressCounters)
+
+      :ok
+    end
+
+    test "consolidates an address with more rows than a step covers over several cycles, storing every step" do
+      address = insert(:address, transactions_count: 1000, token_transfers_count: 1000, gas_used: 1000)
+
+      insert(:block, number: 0)
+
+      transactions =
+        for number <- [10, 20, 30, 40, 50] do
+          :transaction |> insert(from_address: address) |> with_block(insert(:block, number: number))
+        end
+
+      insert(:block, number: 100)
+
+      gas_of_first = fn count ->
+        transactions |> Enum.take(count) |> Enum.map(&Decimal.to_integer(&1.gas_used)) |> Enum.sum()
+      end
+
+      AddressCounters.mark_dirty([{address.hash.bytes, 100}])
+      :sys.get_state(AddressCounters)
+
+      AddressCountersConsolidator.consolidate()
+
+      # the first step ends at the block of the second row and replaces the stale values
+      reloaded = Repo.get(Address, address.hash)
+      assert %{transactions_count: 2, token_transfers_count: 0, counters_updated_at: 20} = reloaded
+      assert reloaded.gas_used == gas_of_first.(2)
+
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 4, counters_updated_at: 40} = Repo.get(Address, address.hash)
+
+      # fewer rows than a step covers are left, so the last step reaches the safe block
+      AddressCountersConsolidator.consolidate()
+
+      reloaded = Repo.get(Address, address.hash)
+      assert %{transactions_count: 5, counters_updated_at: 100} = reloaded
+      assert reloaded.gas_used == gas_of_first.(5)
+      assert AddressCounters.dirty_empty?()
+    end
+
+    test "ends a step at the token transfers of the address too" do
+      address = insert(:address)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30] do
+        block = insert(:block, number: number)
+        transaction = :transaction |> insert() |> with_block(block)
+
+        insert(:token_transfer,
+          to_address: address,
+          transaction: transaction,
+          block: block,
+          block_number: number
+        )
+      end
+
+      insert(:block, number: 100)
+
+      AddressCounters.mark_dirty([{address.hash.bytes, 100}])
+      :sys.get_state(AddressCounters)
+
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 0, token_transfers_count: 2, counters_updated_at: 20} =
+               Repo.get(Address, address.hash)
+    end
+
+    test "stores the steps of the backfill once, at the safe block, so that a failure leaves the address to its retries" do
+      address = insert(:address, transactions_count: 1000)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30, 40, 50] do
+        :transaction |> insert(from_address: address) |> with_block(insert(:block, number: number))
+      end
+
+      insert(:block, number: 100)
+
+      test_pid = self()
+      handler_id = {__MODULE__, :counters_writes}
+
+      :telemetry.attach(
+        handler_id,
+        [:explorer, :repo, :query],
+        fn _event, _measurements, %{query: query}, _config ->
+          if String.starts_with?(query, ~s(UPDATE "addresses")), do: send(test_pid, :counters_write)
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      AddressCountersConsolidator.consolidate_addresses([address.hash], 100)
+
+      assert %{transactions_count: 5, counters_updated_at: 100} = Repo.get(Address, address.hash)
+      assert_received :counters_write
+      refute_received :counters_write
+    end
+
+    test "keeps the dirty marker of a contract until its steps reach the safe block" do
+      contract = insert(:contract_address)
+
+      insert(:block, number: 0)
+
+      incoming =
+        for number <- [10, 20, 30] do
+          :transaction |> insert(to_address: contract) |> with_block(insert(:block, number: number))
+        end
+
+      insert(:block, number: 100)
+
+      AddressCounters.mark_dirty([{contract.hash.bytes, 100}])
+      :sys.get_state(AddressCounters)
+
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 2, counters_updated_at: 20} = Repo.get(Address, contract.hash)
+      refute AddressCounters.dirty_empty?()
+
+      AddressCountersConsolidator.consolidate()
+
+      reloaded = Repo.get(Address, contract.hash)
+      assert %{transactions_count: 3, counters_updated_at: 100} = reloaded
+      # incoming gas for contracts
+      assert reloaded.gas_used == incoming |> Enum.map(&Decimal.to_integer(&1.gas_used)) |> Enum.sum()
+      assert AddressCounters.dirty_empty?()
+    end
+
+    test "leaves the other stepped addresses of a chunk to the next cycle once the time budget is spent" do
+      addresses = insert_list(2, :address)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30] do
+        block = insert(:block, number: number)
+
+        Enum.each(addresses, fn address ->
+          :transaction |> insert(from_address: address) |> with_block(block)
+        end)
+      end
+
+      insert(:block, number: 100)
+
+      AddressCounters.mark_dirty(Enum.map(addresses, &{&1.hash.bytes, 100}))
+      :sys.get_state(AddressCounters)
+
+      watermarks = fn ->
+        addresses |> Enum.map(&Repo.get(Address, &1.hash).counters_updated_at) |> Enum.sort()
+      end
+
+      AddressCountersConsolidator.consolidate()
+
+      assert watermarks.() == [20, nil]
+
+      # the address with one row left finishes in one go, the other one takes its first step
+      AddressCountersConsolidator.consolidate()
+
+      assert watermarks.() == [20, 100]
+
+      AddressCountersConsolidator.consolidate()
+
+      assert watermarks.() == [100, 100]
+      assert Enum.all?(addresses, &(Repo.get(Address, &1.hash).transactions_count == 3))
+      assert AddressCounters.dirty_empty?()
+    end
+
+    test "takes an address too large for one step to the safe block when called by the backfill" do
+      # a full dirty markers table: nothing could be handed over to the cycles
+      initial_counters_env = Application.get_env(:explorer, AddressCounters) || []
+      Application.put_env(:explorer, AddressCounters, Keyword.merge(initial_counters_env, max_dirty_markers: 0))
+      on_exit(fn -> Application.put_env(:explorer, AddressCounters, initial_counters_env) end)
+
+      address = insert(:address, transactions_count: 1000)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30] do
+        :transaction |> insert(from_address: address) |> with_block(insert(:block, number: number))
+      end
+
+      insert(:block, number: 100)
+
+      # in steps, and without the time budget of the cycles
+      AddressCountersConsolidator.consolidate_addresses([address.hash], 100)
+
+      assert %{transactions_count: 3, counters_updated_at: 100} = Repo.get(Address, address.hash)
+    end
+
+    test "keeps the dirty marker of an address whose cycle crashes after a step" do
+      address = insert(:address)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30] do
+        :transaction |> insert(from_address: address) |> with_block(insert(:block, number: number))
+      end
+
+      insert(:block, number: 100)
+
+      AddressCounters.mark_dirty([{address.hash.bytes, 100}])
+      :sys.get_state(AddressCounters)
+
+      cycle = spawn(fn -> receive do: (:go -> AddressCountersConsolidator.consolidate()) end)
+      ref = Process.monitor(cycle)
+
+      handler_id = {__MODULE__, :crash_after_first_step}
+
+      # kills the task of the cycle right after its first counters write, which
+      # takes the linked cycle down with it
+      :telemetry.attach(
+        handler_id,
+        [:explorer, :repo, :query],
+        fn _event, _measurements, %{query: query}, cycle ->
+          if cycle in Process.get(:"$callers", []) and String.starts_with?(query, ~s(UPDATE "addresses")) do
+            Process.exit(self(), :kill)
+          end
+        end,
+        cycle
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      send(cycle, :go)
+
+      assert_receive {:DOWN, ^ref, :process, ^cycle, :killed}, 10_000
+      assert %{counters_updated_at: 20} = Repo.get(Address, address.hash)
+      refute AddressCounters.dirty_empty?()
+
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 3, counters_updated_at: 100} = Repo.get(Address, address.hash)
+    end
+
+    test "does not fall back to whole-history aggregates when the step of an address cannot be found" do
+      # a negative OFFSET makes every step probe fail
+      Application.put_env(
+        :explorer,
+        AddressCountersConsolidator,
+        Keyword.merge(Application.get_env(:explorer, AddressCountersConsolidator), step_rows: 0)
+      )
+
+      address = insert(:address)
+
+      for number <- [10, 20, 30] do
+        :transaction |> insert(from_address: address) |> with_block(insert(:block, number: number))
+      end
+
+      assert capture_log(fn -> AddressCountersConsolidator.consolidate_addresses([address.hash], 200) end) =~
+               "Failed to find the consolidation step of address"
+
+      assert is_nil(Repo.get(Address, address.hash).counters_updated_at)
+
+      # left to a later cycle
+      :sys.get_state(AddressCounters)
+      assert {[{marked_bytes, _block_number}], _continuation} = AddressCounters.select_dirty(10)
+      assert marked_bytes == address.hash.bytes
     end
   end
 
