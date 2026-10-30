@@ -454,7 +454,7 @@ config :explorer, Explorer.Chain.Cache.Counters.AddressCountersConsolidator,
   batch_size: ConfigHelper.parse_integer_env_var("CACHE_ADDRESS_COUNTERS_CONSOLIDATION_BATCH_SIZE", 100, min: 1),
   concurrency: ConfigHelper.parse_integer_env_var("CACHE_ADDRESS_COUNTERS_CONSOLIDATION_CONCURRENCY", 4, min: 1),
   query_timeout: ConfigHelper.parse_time_env_var("CACHE_ADDRESS_COUNTERS_CONSOLIDATION_QUERY_TIMEOUT", "5m"),
-  step_rows: ConfigHelper.parse_integer_env_var("CACHE_ADDRESS_COUNTERS_CONSOLIDATION_STEP_ROWS", 20_000, min: 1),
+  step_rows: ConfigHelper.parse_integer_env_var("CACHE_ADDRESS_COUNTERS_CONSOLIDATION_STEP_ROWS", 5_000, min: 1),
   catch_up_pause: ConfigHelper.parse_time_env_var("CACHE_ADDRESS_COUNTERS_CONSOLIDATION_CATCH_UP_PAUSE", "30s")
 
 config :explorer, Explorer.Chain.Cache.Counters.Consolidation,

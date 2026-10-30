@@ -456,21 +456,15 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
     direction_field = Counters.gas_usage_direction_field(address)
     snapshot = AddressCounters.snapshot(address.hash.bytes)
 
-    transactions_count =
-      address.hash
-      |> Counters.address_hash_to_transaction_count_query(from_block_number, safe_block)
-      |> Repo.aggregate(:count, :hash, timeout: query_timeout())
-
-    token_transfers_count =
-      address.hash
-      |> Counters.address_to_token_transfer_count_query(from_block_number, safe_block)
-      |> Repo.aggregate(:count, timeout: query_timeout())
-
-    gas_used =
-      address.hash
-      |> Counters.address_to_gas_usage_sum_query(direction_field, from_block_number, safe_block)
-      |> Repo.aggregate(:sum, :gas_used, timeout: query_timeout())
-      |> Helper.gas_to_integer()
+    # the database cancels the aggregates at the query timeout: a client that
+    # gives up does not stop a statement on the server
+    {transactions_count, token_transfers_count, gas_used} =
+      case Helper.with_statement_timeout(query_timeout(), fn ->
+             aggregate_counters(address, direction_field, from_block_number, safe_block)
+           end) do
+        {:ok, counters} -> counters
+        {:error, :timeout} -> raise "the aggregates ran past the query timeout of #{query_timeout()} ms"
+      end
 
     %{
       address: address,
@@ -490,6 +484,59 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
       end)
 
       nil
+  end
+
+  defp aggregate_counters(address, direction_field, from_block_number, safe_block) do
+    # the database cancels a statement at the query timeout, before the client
+    # would give up on it
+    timeout = query_timeout() + :timer.seconds(10)
+    range = {address.hash.bytes, from_block_number || -1, safe_block}
+
+    # the same sides as `Transaction.where_transactions_to_from/1`: incoming
+    # transactions for smart contracts, both sides otherwise
+    transaction_fields =
+      if direction_field == :to_address_hash, do: [:to_address_hash], else: [:from_address_hash, :to_address_hash]
+
+    # one pass over the transactions for both of their counters: the gas sum
+    # reads the rows from the table anyway
+    {transactions_count, gas_used} =
+      Transaction
+      |> where_in_range(transaction_fields, range)
+      |> select(
+        [transaction],
+        {count(transaction.hash),
+         filter(sum(transaction.gas_used), field(transaction, ^direction_field) == ^address.hash)}
+      )
+      |> Repo.one!(timeout: timeout)
+
+    token_transfers_count =
+      TokenTransfer
+      |> where_in_range([:to_address_hash, :from_address_hash], range)
+      |> Repo.aggregate(:count, timeout: timeout)
+
+    {transactions_count, token_transfers_count, Helper.gas_to_integer(gas_used)}
+  end
+
+  # Rows whose `fields` (one of them) hold the address, in the block range
+  # (from, to]: each side is read from its (address, block number) index, from
+  # the first to the last row of the range. The address reaches the planner as
+  # a subquery result. Given the value itself, the planner expects millions of
+  # rows in the range for an address with a large share of the table (a busy
+  # token contract) and reads the whole table, or the block number index,
+  # instead.
+  defp where_in_range(query, fields, {address_bytes, from_block_number, to_block_number}) do
+    condition =
+      fields
+      |> Enum.map(fn field ->
+        dynamic(
+          [row],
+          fragment("? = (SELECT ?::bytea)", field(row, ^field), ^address_bytes) and
+            row.block_number > ^from_block_number and row.block_number <= ^to_block_number
+        )
+      end)
+      |> Enum.reduce(&dynamic(^&2 or ^&1))
+
+    where(query, ^condition)
   end
 
   defp apply_increments([], _safe_block), do: []
@@ -838,7 +885,7 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
   end
 
   defp step_rows do
-    Application.get_env(:explorer, __MODULE__)[:step_rows] || 20_000
+    Application.get_env(:explorer, __MODULE__)[:step_rows] || 5_000
   end
 
   defp catch_up_pause do

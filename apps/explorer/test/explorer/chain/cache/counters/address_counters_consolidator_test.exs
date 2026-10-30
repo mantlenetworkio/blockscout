@@ -90,8 +90,10 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
 
       AddressCountersConsolidator.consolidate_addresses([contract.hash, eoa_with_code.hash], 200)
 
-      assert Repo.get(Address, contract.hash).gas_used == Decimal.to_integer(incoming_to_contract.gas_used)
-      assert Repo.get(Address, eoa_with_code.hash).gas_used == Decimal.to_integer(outgoing_from_eoa.gas_used)
+      assert %{transactions_count: 1} = reloaded_contract = Repo.get(Address, contract.hash)
+      assert reloaded_contract.gas_used == Decimal.to_integer(incoming_to_contract.gas_used)
+      assert %{transactions_count: 2} = reloaded_eoa = Repo.get(Address, eoa_with_code.hash)
+      assert reloaded_eoa.gas_used == Decimal.to_integer(outgoing_from_eoa.gas_used)
     end
   end
 
@@ -537,6 +539,70 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
       assert %{cycle_task: nil, last_cycle_finished_at: ^finished_at} = :sys.get_state(pid)
     end
 
+    test "hides the address of a step from the planner and bounds every side of it on both ends, cancelled by the database at the query timeout" do
+      address = insert(:address)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30] do
+        block = insert(:block, number: number)
+        :transaction |> insert(from_address: address) |> with_block(block)
+      end
+
+      insert(:block, number: 100)
+
+      test_pid = self()
+      handler_id = {__MODULE__, :aggregates}
+
+      # plans every counters aggregate right after it ran, in its transaction
+      :telemetry.attach(
+        handler_id,
+        [:explorer, :repo, :query],
+        fn _event, _measurements, %{query: query, params: params}, _config ->
+          if query =~ ~r/^SELECT (count|sum)\(/ and query =~ ~r/"(transactions|token_transfers)"/ do
+            plan = Repo.query!("EXPLAIN " <> query, params).rows |> Enum.map_join("\n", fn [line] -> line end)
+            %{rows: [[statement_timeout]]} = Repo.query!("SELECT current_setting('statement_timeout')")
+            send(test_pid, {:aggregate, {query, plan, statement_timeout}})
+          end
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      AddressCountersConsolidator.consolidate_addresses([address.hash], 100)
+
+      aggregates = collect_aggregates()
+
+      # one pass over the transactions and one over the token transfers, for
+      # each of the two steps
+      assert length(aggregates) == 4
+
+      address_literal = "\\x" <> Base.encode16(address.hash.bytes, case: :lower)
+
+      for {query, plan, statement_timeout} <- aggregates do
+        # the planner gets the address as a subquery result: given the value of
+        # an address with a large share of the table, it expects millions of
+        # rows in the step and reads the whole table instead
+        assert plan =~ "InitPlan", plan
+        refute plan =~ address_literal, plan
+
+        # every side bounds the block number on both ends next to the address,
+        # which its (address, block number) index starts and stops the scan at
+        # (the planner picks that index with the statistics of a real chain)
+        [_, condition] = String.split(query, " WHERE ", parts: 2)
+
+        for side <- String.split(condition, " OR ") do
+          assert side =~ ~r/_address_hash" = \(SELECT \$\d+::bytea\)/, query
+          assert side =~ ~r/"block_number" > \$\d+/, query
+          assert side =~ ~r/"block_number" <= \$\d+/, query
+        end
+
+        # the 5-minute default query timeout
+        assert statement_timeout == "5min"
+      end
+    end
+
     test "keeps the dirty marker of a contract until its steps reach the safe block" do
       contract = insert(:contract_address)
 
@@ -756,6 +822,14 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
 
       assert AddressCountersConsolidator.apply_covered_deltas(transactions, [], :positive) == []
       assert Repo.get(Address, address.hash).transactions_count == 5
+    end
+  end
+
+  defp collect_aggregates(aggregates \\ []) do
+    receive do
+      {:aggregate, aggregate} -> collect_aggregates([aggregate | aggregates])
+    after
+      0 -> Enum.reverse(aggregates)
     end
   end
 end
