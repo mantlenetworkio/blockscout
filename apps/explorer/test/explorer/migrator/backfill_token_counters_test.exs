@@ -111,4 +111,16 @@ defmodule Explorer.Migrator.BackfillTokenCountersTest do
 
     assert meta["max_processed_hash"] >= max_hash
   end
+
+  test "waits on a fresh database for the indexed chain instead of completing at once" do
+    # no blocks yet: the initial sync is still to come; supervised, so that
+    # the waiting migration is stopped with the test
+    assert {:ok, pid} = start_supervised(BackfillTokenCounters)
+    assert is_pid(pid)
+
+    # time enough to complete, had it not waited
+    Process.sleep(1_000)
+
+    refute MigrationStatus.get_status("backfill_token_counters") == "completed"
+  end
 end

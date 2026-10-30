@@ -14,9 +14,15 @@ defmodule Explorer.Migrator.BackfillAddressCounters do
   a restart. Addresses consolidated concurrently (via the dirty-marker path of
   `Explorer.Chain.Cache.Counters.AddressCountersConsolidator`) are skipped by
   the `counters_updated_at IS NULL` guard.
+
+  It does not complete at start on a fresh database, the default of filling
+  migrations: the addresses come from the initial sync, which no consolidation
+  covers (there is no safe block until the chain is indexed down to the first
+  block, and the dirty markers of the sync are capped and kept in memory), so
+  the migration waits for a safe block and then walks them.
   """
 
-  use Explorer.Migrator.FillingMigration
+  use Explorer.Migrator.FillingMigration, complete_on_green_install?: false
 
   import Ecto.Query
 
@@ -40,6 +46,10 @@ defmodule Explorer.Migrator.BackfillAddressCounters do
 
   @impl FillingMigration
   def last_unprocessed_identifiers(state) do
+    # on a fresh database the addresses come from the initial sync, which no
+    # consolidation covers before the chain is indexed down to the first block
+    await_safe_block()
+
     limit = batch_size() * concurrency()
 
     query =
