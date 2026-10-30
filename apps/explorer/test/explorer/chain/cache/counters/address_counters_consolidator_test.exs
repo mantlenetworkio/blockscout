@@ -377,6 +377,166 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
       refute_received :counters_write
     end
 
+    test "reports a cycle that leaves an address part-way" do
+      address = insert(:address)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30] do
+        :transaction |> insert(from_address: address) |> with_block(insert(:block, number: number))
+      end
+
+      insert(:block, number: 100)
+
+      AddressCounters.mark_dirty([{address.hash.bytes, 100}])
+      :sys.get_state(AddressCounters)
+
+      assert AddressCountersConsolidator.consolidate() == :catching_up
+      assert AddressCountersConsolidator.consolidate() == :ok
+      assert %{counters_updated_at: 100} = Repo.get(Address, address.hash)
+    end
+
+    test "keeps the regular interval after a failed step, even if the budget left another address part-way" do
+      addresses = insert_list(2, :address)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30] do
+        block = insert(:block, number: number)
+
+        Enum.each(addresses, fn address ->
+          :transaction |> insert(from_address: address) |> with_block(block)
+        end)
+      end
+
+      insert(:block, number: 100)
+
+      # no counters update is stored (rolled back with the test): the step
+      # taken fails as if its watermark had moved, the other address waits
+      Repo.query!("CREATE FUNCTION test_skip_update() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'")
+
+      Repo.query!(
+        "CREATE TRIGGER test_skip_address_updates BEFORE UPDATE ON addresses FOR EACH ROW EXECUTE FUNCTION test_skip_update()"
+      )
+
+      AddressCounters.mark_dirty(Enum.map(addresses, &{&1.hash.bytes, 100}))
+      :sys.get_state(AddressCounters)
+
+      assert AddressCountersConsolidator.consolidate() == :ok
+    end
+
+    test "keeps the regular interval after a rejected write of an address consolidated whole" do
+      light = insert(:address)
+      heavy = insert(:address)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30] do
+        :transaction |> insert(from_address: heavy) |> with_block(insert(:block, number: number))
+      end
+
+      :transaction |> insert(from_address: light) |> with_block(insert(:block, number: 40))
+      insert(:block, number: 100)
+
+      # the counters of the light address are not stored, as if a reorg had
+      # reset its watermark meanwhile (rolled back with the test)
+      Repo.query!("CREATE FUNCTION test_skip_update() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RETURN NULL; END'")
+
+      Repo.query!("""
+      CREATE TRIGGER test_skip_light_update BEFORE UPDATE ON addresses FOR EACH ROW
+      WHEN (OLD.hash = '\\x#{Base.encode16(light.hash.bytes, case: :lower)}'::bytea) EXECUTE FUNCTION test_skip_update()
+      """)
+
+      AddressCounters.mark_dirty([{light.hash.bytes, 100}, {heavy.hash.bytes, 100}])
+      :sys.get_state(AddressCounters)
+
+      assert AddressCountersConsolidator.consolidate() == :ok
+
+      # the heavy address still took its step
+      assert %{counters_updated_at: 20} = Repo.get(Address, heavy.hash)
+      assert is_nil(Repo.get(Address, light.hash).counters_updated_at)
+    end
+
+    test "keeps the regular interval after a failed settlement of re-fetched blocks" do
+      address = insert(:address)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30] do
+        :transaction |> insert(from_address: address) |> with_block(insert(:block, number: number))
+      end
+
+      insert(:block, number: 50, refetch_needed: false)
+      insert(:block, number: 100)
+      Repo.insert!(%CountersRefetchBlock{block_number: 50})
+
+      # the settlement cannot drop its queue row (rolled back with the test)
+      Repo.query!(
+        "CREATE FUNCTION test_fail() RETURNS trigger LANGUAGE plpgsql AS 'BEGIN RAISE EXCEPTION ''failed''; END'"
+      )
+
+      Repo.query!(
+        "CREATE TRIGGER test_fail_settlement BEFORE DELETE ON counters_refetch_blocks FOR EACH ROW EXECUTE FUNCTION test_fail()"
+      )
+
+      AddressCounters.mark_dirty([{address.hash.bytes, 100}])
+      :sys.get_state(AddressCounters)
+
+      assert capture_log(fn -> assert AddressCountersConsolidator.consolidate() == :ok end) =~
+               "Failed to settle re-fetched blocks counters"
+
+      # the address still took its step, below the pending re-fetch
+      assert %{counters_updated_at: 20} = Repo.get(Address, address.hash)
+    end
+
+    test "starts the next cycle after a short pause while an address catches up, after the interval otherwise" do
+      initial_env = Application.get_env(:explorer, AddressCountersConsolidator)
+
+      Application.put_env(
+        :explorer,
+        AddressCountersConsolidator,
+        Keyword.merge(initial_env, interval: :timer.hours(1), catch_up_pause: 10)
+      )
+
+      address = insert(:address)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30, 40, 50] do
+        :transaction |> insert(from_address: address) |> with_block(insert(:block, number: number))
+      end
+
+      insert(:block, number: 100)
+
+      AddressCounters.mark_dirty([{address.hash.bytes, 100}])
+      :sys.get_state(AddressCounters)
+
+      pid = start_supervised!(AddressCountersConsolidator)
+      send(pid, :consolidate)
+
+      # three cycles: 20, 40, then the safe block
+      wait_for_results(fn ->
+        case Repo.get(Address, address.hash) do
+          %{counters_updated_at: 100} -> :ok
+          _ -> raise Ecto.NoResultsError, queryable: "catch-up"
+        end
+      end)
+
+      wait_for_results(fn ->
+        case :sys.get_state(pid) do
+          %{cycle_task: nil, last_cycle_finished_at: %DateTime{}} = state -> state
+          _ -> raise Ecto.NoResultsError, queryable: "cycle completion"
+        end
+      end)
+
+      %{last_cycle_finished_at: finished_at} = :sys.get_state(pid)
+
+      # caught up: the next cycle waits for the regular interval
+      Process.sleep(200)
+
+      assert %{cycle_task: nil, last_cycle_finished_at: ^finished_at} = :sys.get_state(pid)
+    end
+
     test "keeps the dirty marker of a contract until its steps reach the safe block" do
       contract = insert(:contract_address)
 

@@ -72,9 +72,10 @@ defmodule Explorer.Chain.Cache.Counters.Consolidation do
   content back to the addresses and tokens whose watermarks already cover the
   block, then drops the queue rows. Blocks whose re-import is still in flight
   (the consensus block still requires a re-fetch, or the block is still
-  covered by a missing range) are left queued.
+  covered by a missing range) are left queued. Returns `:failed` when the
+  settlement failed (it is retried by a later cycle).
   """
-  @spec settle_pending_refetch_blocks() :: :ok
+  @spec settle_pending_refetch_blocks() :: :ok | :failed
   def settle_pending_refetch_blocks do
     case Repo.all(ready_to_settle_query(), timeout: query_timeout()) do
       [] ->
@@ -94,7 +95,7 @@ defmodule Explorer.Chain.Cache.Counters.Consolidation do
         ["Failed to settle re-fetched blocks counters: ", Exception.format(:error, error, __STACKTRACE__)]
       end)
 
-      :ok
+      :failed
   end
 
   # a block is ready to settle once its re-fetch completed: the consensus
