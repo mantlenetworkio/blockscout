@@ -603,6 +603,59 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
       end
     end
 
+    test "hides the address from the planner in the step probes, cancelled by the database at the query timeout" do
+      address = insert(:address)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30] do
+        block = insert(:block, number: number)
+        :transaction |> insert(from_address: address) |> with_block(block)
+      end
+
+      insert(:block, number: 100)
+
+      test_pid = self()
+      handler_id = {__MODULE__, :probes}
+
+      # plans every step probe right after it ran, in its transaction
+      :telemetry.attach(
+        handler_id,
+        [:explorer, :repo, :query],
+        fn _event, _measurements, %{query: query, params: params}, _config ->
+          if query =~ ~r/^SELECT .+ OFFSET /s and query =~ ~r/"(transactions|token_transfers)"/ do
+            plan = Repo.query!("EXPLAIN " <> query, params).rows |> Enum.map_join("\n", fn [line] -> line end)
+            %{rows: [[statement_timeout]]} = Repo.query!("SELECT current_setting('statement_timeout')")
+            send(test_pid, {:aggregate, {query, plan, statement_timeout}})
+          end
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      AddressCountersConsolidator.consolidate_addresses([address.hash], 100)
+
+      probes = collect_aggregates()
+
+      # the four row sources, before each of the two steps
+      assert length(probes) == 8
+
+      address_literal = "\\x" <> Base.encode16(address.hash.bytes, case: :lower)
+
+      for {query, plan, statement_timeout} <- probes do
+        # as for the aggregates: given the value of an address with a large
+        # share of the table, the planner may walk the block number index
+        # until it has seen the rows of the step among all others
+        assert plan =~ "InitPlan", plan
+        refute plan =~ address_literal, plan
+        assert query =~ ~r/_address_hash" = \(SELECT \$\d+::bytea\)/, query
+
+        # the 5-minute default query timeout
+        assert statement_timeout == "5min"
+      end
+    end
+
     test "keeps the dirty marker of a contract until its steps reach the safe block" do
       contract = insert(:contract_address)
 

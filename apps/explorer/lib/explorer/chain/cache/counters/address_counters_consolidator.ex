@@ -407,22 +407,7 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
     if safe_block - (from_block_number || -1) <= div(step_rows(), 20) do
       {:ok, safe_block}
     else
-      target =
-        [
-          {Transaction, :from_address_hash},
-          {Transaction, :to_address_hash},
-          {TokenTransfer, :from_address_hash},
-          {TokenTransfer, :to_address_hash}
-        ]
-        |> Enum.map(fn {schema, field} ->
-          schema
-          |> step_end_query(field, address.hash, from_block_number, safe_block)
-          |> Repo.one(timeout: query_timeout())
-        end)
-        |> Enum.reject(&is_nil/1)
-        |> Enum.min(fn -> safe_block end)
-
-      {:ok, target}
+      {:ok, step_end(address, from_block_number, safe_block)}
     end
   rescue
     error ->
@@ -436,12 +421,39 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
       :error
   end
 
+  # The earliest step end among the row sources of the address (`safe_block`
+  # when none holds more than `step_rows()` rows above the watermark). The
+  # database cancels the probes at the query timeout, as it does the
+  # aggregates.
+  defp step_end(address, from_block_number, safe_block) do
+    probe = fn {schema, field} ->
+      schema
+      |> step_end_query(field, address.hash, from_block_number, safe_block)
+      |> Repo.one(timeout: query_timeout() + :timer.seconds(10))
+    end
+
+    sources = [
+      {Transaction, :from_address_hash},
+      {Transaction, :to_address_hash},
+      {TokenTransfer, :from_address_hash},
+      {TokenTransfer, :to_address_hash}
+    ]
+
+    case Helper.with_statement_timeout(query_timeout(), fn -> Enum.map(sources, probe) end) do
+      {:ok, ends} -> ends |> Enum.reject(&is_nil/1) |> Enum.min(fn -> safe_block end)
+      {:error, :timeout} -> raise "the step probes ran past the query timeout of #{query_timeout()} ms"
+    end
+  end
+
   # the block of the `step_rows()`-th row of a row source above the
-  # watermark, read from the (address, block number) index of the source
+  # watermark, read from the (address, block number) index of the source,
+  # with the address as a subquery result (see `where_in_range/3`)
   defp step_end_query(schema, field, address_hash, from_block_number, safe_block) do
     query =
       from(row in schema,
-        where: field(row, ^field) == ^address_hash and row.block_number <= ^safe_block,
+        where:
+          fragment("? = (SELECT ?::bytea)", field(row, ^field), ^address_hash.bytes) and
+            row.block_number <= ^safe_block,
         order_by: [asc: row.block_number],
         offset: ^(step_rows() - 1),
         limit: 1,
