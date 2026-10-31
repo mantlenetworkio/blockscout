@@ -27,6 +27,27 @@ defmodule Explorer.Chain.Cache.Counters.AddressTabsElementsCountTest do
     end
   end
 
+  describe "get_task/2" do
+    test "ignores a task marker older than ttl, so a failed task does not block the counter" do
+      old_env = Application.get_env(:explorer, AddressTabsElementsCount)
+      Application.put_env(:explorer, AddressTabsElementsCount, Keyword.merge(old_env || [], ttl: 100))
+
+      on_exit(fn ->
+        Application.put_env(:explorer, AddressTabsElementsCount, old_env)
+      end)
+
+      address = build(:address)
+
+      AddressTabsElementsCount.set_task(:token_transfers, address.hash)
+
+      assert AddressTabsElementsCount.get_task(:token_transfers, address.hash)
+
+      :timer.sleep(120)
+
+      assert AddressTabsElementsCount.get_task(:token_transfers, address.hash) == nil
+    end
+  end
+
   describe "invalidate_transactions_counter/1" do
     test "drops transactions counter and in-flight task markers" do
       address = build(:address)

@@ -63,7 +63,7 @@ defmodule Explorer.Chain.Cache.Counters.AddressTabsElementsCount do
 
   @spec set_task(atom, String.t()) :: true
   def set_task(counter_type, address_hash) do
-    :ets.insert(@cache_name, {task_cache_key(address_hash, counter_type), true})
+    :ets.insert(@cache_name, {task_cache_key(address_hash, counter_type), DateTime.utc_now()})
   end
 
   @spec drop_task(atom, String.t()) :: true
@@ -71,9 +71,14 @@ defmodule Explorer.Chain.Cache.Counters.AddressTabsElementsCount do
     :ets.delete(@cache_name, task_cache_key(address_hash, counter_type))
   end
 
+  # Only a task that succeeds drops its marker, so a marker older than the counter ttl (far longer than the query
+  # timeout) is left by a failed task and must not block the counter until restart.
   @spec get_task(atom, String.t()) :: true | nil
   def get_task(counter_type, address_hash) do
-    @cache_name |> fetch_from_ets_cache(address_hash |> task_cache_key(counter_type), nil)
+    case fetch_from_ets_cache(@cache_name, task_cache_key(address_hash, counter_type), nil) do
+      %DateTime{} = started_at -> if up_to_date?(started_at, ttl()), do: true
+      nil -> nil
+    end
   end
 
   def save_transactions_counter_progress(address_hash, results) do
