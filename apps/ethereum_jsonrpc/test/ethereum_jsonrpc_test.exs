@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPCTest do
   use EthereumJSONRPC.Case, async: true
 
@@ -540,8 +541,8 @@ defmodule EthereumJSONRPCTest do
                     hash: "0x0",
                     logs_bloom: "0x",
                     miner_hash: "0x0",
-                    mix_hash: "0x0",
-                    nonce: 0,
+                    mix_hash: "0x0000000000000000000000000000000000000000000000000000000000000000",
+                    nonce: "0x0000000000000000",
                     number: 0,
                     parent_hash: "0x0",
                     receipts_root: "0x0",

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Source.CryptoRank do
   @moduledoc """
   Adapter for fetching market history from https://cryptorank.io/.
@@ -36,7 +37,9 @@ defmodule Explorer.Market.Source.CryptoRank do
              |> URI.append_query("limit=#{batch_size}")
              |> URI.append_query("skip=#{skip}")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :currencies_contracts
            ) do
       {tokens_to_import, initial_tokens_len} =
         tokens |> Enum.reduce({[], 0}, &reduce_token(platform_id, &1, &2))
@@ -66,6 +69,7 @@ defmodule Explorer.Market.Source.CryptoRank do
               fiat_value: fiat_value,
               volume_24h: Source.to_decimal(token["volume24hUSD"]),
               circulating_market_cap: circulating_supply && fiat_value && Decimal.mult(fiat_value, circulating_supply),
+              circulating_supply: circulating_supply,
               contract_address_hash: token_contract_address_hash,
               type: "ERC-20"
             }
@@ -112,7 +116,12 @@ defmodule Explorer.Market.Source.CryptoRank do
   defp do_fetch_coin(coin_id, coin_id_not_specified_error) do
     with coin_id when not is_nil(coin_id) <- coin_id,
          {:ok, %{"data" => coin}} <-
-           Source.http_request(base_url() |> URI.append_path("/currencies/#{coin_id}") |> URI.to_string(), headers()) do
+           Source.http_request(
+             base_url() |> URI.append_path("/currencies/#{coin_id}") |> URI.to_string(),
+             headers(),
+             __MODULE__,
+             :currencies_details
+           ) do
       coin_data = coin["values"][config(:currency)]
 
       {:ok,
@@ -127,7 +136,8 @@ defmodule Explorer.Market.Source.CryptoRank do
          symbol: String.upcase(coin["symbol"]),
          fiat_value: Source.to_decimal(coin_data["price"]),
          volume_24h: Source.to_decimal(coin_data["volume24h"]),
-         image_url: Source.handle_image_url(coin["images"]["60x60"] || coin["images"]["16x16"])
+         image_url: Source.handle_image_url(coin["images"]["60x60"] || coin["images"]["16x16"]),
+         circulating_supply: Source.to_decimal(coin["circulatingSupply"])
        }}
     else
       nil -> {:error, coin_id_not_specified_error}
@@ -149,7 +159,9 @@ defmodule Explorer.Market.Source.CryptoRank do
              |> URI.append_query("from=#{from}")
              |> URI.append_query("to=#{to}")
              |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :currencies_sparkline
            ) do
       closing_prices =
         case opening_prices do

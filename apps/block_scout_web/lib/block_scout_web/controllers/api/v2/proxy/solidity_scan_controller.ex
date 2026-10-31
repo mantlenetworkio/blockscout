@@ -1,5 +1,8 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.Proxy.SolidityScanController do
   use BlockScoutWeb, :controller
+
+  action_fallback(BlockScoutWeb.API.V2.FallbackController)
 
   alias BlockScoutWeb.AccessHelper
   alias Explorer.Chain

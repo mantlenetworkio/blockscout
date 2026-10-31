@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.TokenInstanceImporter do
   @moduledoc """
   Periodically updates token instances accumulated from block fetcher
@@ -8,6 +9,7 @@ defmodule Indexer.Fetcher.TokenInstanceImporter do
   require Logger
 
   alias Explorer.Chain
+  alias Indexer.Block.Fetcher
   alias Indexer.Transform.TokenInstances
 
   @default_update_interval :timer.minutes(1)
@@ -27,6 +29,7 @@ defmodule Indexer.Fetcher.TokenInstanceImporter do
   end
 
   def init(_) do
+    Process.flag(:trap_exit, true)
     schedule_next_update()
 
     {:ok, %{tokens_map: %{}, token_instances_map: %{}}}
@@ -71,6 +74,10 @@ defmodule Indexer.Fetcher.TokenInstanceImporter do
     {:noreply, state}
   end
 
+  def handle_info({:EXIT, _pid, :normal}, state) do
+    {:noreply, state}
+  end
+
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
     {:noreply, state}
   end
@@ -78,6 +85,9 @@ defmodule Indexer.Fetcher.TokenInstanceImporter do
   def terminate(_reason, state) do
     do_update(state)
   end
+
+  defp do_update(%{tokens_map: tokens_map, token_instances_map: token_instances_map} = state)
+       when tokens_map == %{} and token_instances_map == %{}, do: state
 
   defp do_update(%{tokens_map: tokens_map, token_instances_map: token_instances_map}) do
     token_instances_params = Map.values(token_instances_map)
@@ -88,7 +98,9 @@ defmodule Indexer.Fetcher.TokenInstanceImporter do
            token_instances: %{params: token_instances_params},
            timeout: :infinity
          }) do
-      {:ok, _imported} ->
+      {:ok, imported} ->
+        Fetcher.async_import_token_instances(imported)
+
         Logger.info(
           "TokenInstanceImporter imported #{Enum.count(tokens_params)} tokens and #{Enum.count(token_instances_params)} token instances"
         )
@@ -97,7 +109,7 @@ defmodule Indexer.Fetcher.TokenInstanceImporter do
 
       error ->
         log_error(inspect(error))
-        token_instances_map
+        %{tokens_map: tokens_map, token_instances_map: token_instances_map}
     end
   end
 

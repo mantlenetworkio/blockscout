@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Helper do
   @moduledoc """
   Auxiliary common functions.
@@ -7,8 +8,10 @@ defmodule Explorer.Helper do
   import Explorer.Chain.SmartContract, only: [burn_address_hash_string: 0]
 
   alias ABI.TypeDecoder
+  alias EthereumJSONRPC.Utility.RangesHelper
   alias Explorer.Chain
   alias Explorer.Chain.{Address.Reputation, Address.ScamBadgeToAddress, Data, Hash, Wei}
+  alias Redix.URI, as: RedixURI
 
   require Logger
 
@@ -804,4 +807,92 @@ defmodule Explorer.Helper do
   @spec maybe_timeout(timeout() | nil) :: keyword()
   def maybe_timeout(nil), do: []
   def maybe_timeout(timeout), do: [timeout: timeout]
+
+  @doc """
+  Builds Redix connection options for either direct Redis URL or Redis Sentinel configuration.
+
+  This function supports two connection modes:
+  - **Direct connection**: When `sentinel_urls` is `nil` or empty, parses the
+    provided Redis URL into Redix start options.
+  - **Sentinel connection**: When `sentinel_urls` is provided, configures Redix
+    to connect through Redis Sentinel for high availability. In this mode, the
+    `sentinel_master_name` is required.
+
+  ## Parameters
+  - `url`: Redis connection URL (e.g., `redis://host:port/db`). Used only in
+    direct connection mode.
+  - `use_ssl?`: When `true`, adds SSL options with certificate verification
+    disabled.
+  - `sentinel_urls`: Comma-separated list of Sentinel node URLs. When provided,
+    enables Sentinel connection mode.
+  - `sentinel_master_name`: The name of the master group monitored by Sentinel.
+    Required when `sentinel_urls` is provided.
+
+  ## Returns
+  - A keyword list of Redix connection options.
+
+  ## Raises
+  - `RuntimeError` if `sentinel_urls` is provided but `sentinel_master_name` is
+    `nil` or empty.
+  """
+  @spec redix_opts(String.t() | nil, boolean(), String.t() | nil, String.t() | nil) :: keyword()
+  def redix_opts(url, use_ssl?, sentinel_urls, sentinel_master_name) do
+    ssl_opts = if use_ssl?, do: [ssl: true, socket_opts: [verify: :verify_none]], else: []
+
+    case sentinel_urls do
+      sentinel_urls when sentinel_urls in [nil, ""] ->
+        url |> RedixURI.to_start_options() |> Keyword.merge(ssl_opts)
+
+      sentinel_urls_str ->
+        sentinel_urls = String.split(sentinel_urls_str, ",")
+
+        if sentinel_master_name in [nil, ""] do
+          raise "sentinel_master_name is required when sentinel_urls is set"
+        end
+
+        [sentinel: [sentinels: sentinel_urls, group: sentinel_master_name]] |> Keyword.merge(ssl_opts)
+    end
+  end
+
+  @doc """
+  Builds an `Ecto.Query.dynamic/2` expression restricting the first query
+  binding's `block_number_field` to the traceable block ranges configured via
+  `TRACE_BLOCK_RANGES` (or `TRACE_FIRST_BLOCK`/`TRACE_LAST_BLOCK`).
+
+  Rows outside the traceable ranges cannot be fetched by trace-dependent
+  fetchers (internal transactions, catch-up coin balances), so excluding them
+  on the SQL side prevents them from occupying the fetchers' limited init
+  queries forever.
+
+  When no trace ranges are configured, the returned expression is always true.
+
+  ## Parameters
+  - `block_number_field`: The name of the block number field on the first
+    binding of the query, e.g. `:number` or `:block_number`.
+
+  ## Returns
+  - An `Ecto.Query.dynamic/2` expression to be used in a `where` clause.
+  """
+  @spec traceable_block_numbers_dynamic(atom()) :: Ecto.Query.dynamic_expr()
+  def traceable_block_numbers_dynamic(block_number_field) when is_atom(block_number_field) do
+    if RangesHelper.trace_ranges_present?() do
+      RangesHelper.get_trace_block_ranges()
+      |> Enum.reduce(dynamic([_], false), fn
+        _from.._to//_ = range, acc ->
+          lower = min(range.first, range.last)
+          upper = max(range.first, range.last)
+
+          dynamic(
+            [row],
+            ^acc or
+              (field(row, ^block_number_field) >= ^lower and field(row, ^block_number_field) <= ^upper)
+          )
+
+        num_to_latest, acc ->
+          dynamic([row], ^acc or field(row, ^block_number_field) >= ^num_to_latest)
+      end)
+    else
+      dynamic([_], true)
+    end
+  end
 end

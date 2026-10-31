@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Proxy.AccountAbstraction.Status do
   @moduledoc """
   This module defines the schema for the Status struct.
@@ -7,6 +8,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Proxy.AccountAbstraction.Status do
   alias OpenApiSpex.Schema
 
   OpenApiSpex.schema(%{
+    title: "AccountAbstractionStatus",
     description: "Status struct.",
     type: :object,
     properties: %{

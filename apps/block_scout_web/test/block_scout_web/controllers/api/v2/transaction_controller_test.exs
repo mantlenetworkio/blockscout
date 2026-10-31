@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.TransactionControllerTest do
   use BlockScoutWeb.ConnCase
 
@@ -41,6 +42,23 @@ defmodule BlockScoutWeb.API.V2.TransactionControllerTest do
       assert response = json_response(request, 200)
       assert Enum.count(response["items"]) == 1
       assert response["next_page_params"] == nil
+    end
+
+    # `token_creation` is reported off `created_contract_address.token`, which is
+    # only there while the participant preload keeps loading `:token`.
+    test "reports token_creation for a transaction that created a token", %{conn: conn} do
+      contract_address = insert(:contract_address)
+      insert(:token, contract_address: contract_address)
+
+      :transaction
+      |> insert()
+      |> with_block()
+      |> with_contract_creation(contract_address)
+
+      request = get(conn, "/api/v2/transactions")
+
+      assert %{"items" => [item]} = json_response(request, 200)
+      assert "token_creation" in item["transaction_types"]
     end
 
     test "transactions with next_page_params", %{conn: conn} do
@@ -206,6 +224,37 @@ defmodule BlockScoutWeb.API.V2.TransactionControllerTest do
   end
 
   describe "/transactions/{transaction_hash}" do
+    test "returns authorization list for EIP-7702 (type 4) transaction", %{conn: conn} do
+      transaction =
+        :transaction
+        |> insert(type: 4)
+        |> with_block()
+
+      authorization = insert(:signed_authorization, transaction: transaction, index: 0)
+
+      request = get(conn, "/api/v2/transactions/#{transaction.hash}")
+      response = json_response(request, 200)
+
+      assert [%{"address_hash" => address_hash, "authority" => authority, "nonce" => "0"}] =
+               response["authorization_list"]
+
+      assert address_hash == Address.checksum(authorization.address)
+      assert authority == Address.checksum(authorization.authority)
+      assert "set_code_transaction" in response["transaction_types"]
+    end
+
+    test "returns empty authorization list for non-EIP-7702 transaction", %{conn: conn} do
+      transaction =
+        :transaction
+        |> insert(type: 2)
+        |> with_block()
+
+      request = get(conn, "/api/v2/transactions/#{transaction.hash}")
+      response = json_response(request, 200)
+
+      assert response["authorization_list"] == []
+    end
+
     test "get token-transfers with ok reputation", %{conn: conn} do
       init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
       Application.put_env(:block_scout_web, :hide_scam_addresses, true)
@@ -3585,6 +3634,394 @@ defmodule BlockScoutWeb.API.V2.TransactionControllerTest do
         request = get(conn, "/api/v2/transactions/optimism-output-root/999")
         assert json_response(request, 404)
       end
+    end
+  end
+
+  if @chain_type == :eden do
+    describe "eden sponsored transactions" do
+      @eden_calls [
+        %{"to" => "0x11f60a633dd30a8d1a26dd6e20167a9293fb4647", "value" => 1, "input" => "0xdeadbeef"},
+        %{"to" => nil, "value" => 2, "input" => "0xc0ffee"}
+      ]
+
+      test "returns fee payer, calls and the sponsored transaction tag", %{conn: conn} do
+        fee_payer = insert(:address)
+
+        transaction =
+          :transaction
+          |> insert(type: 118, fee_payer_address_hash: fee_payer.hash, calls: @eden_calls)
+          |> with_block()
+
+        request = get(conn, "/api/v2/transactions/#{transaction.hash}")
+
+        assert response = json_response(request, 200)
+
+        assert response["fee_payer"]["hash"] == Address.checksum(fee_payer.hash)
+
+        assert response["calls"] == [
+                 %{
+                   "to" => Address.checksum("0x11f60a633dd30a8d1a26dd6e20167a9293fb4647"),
+                   "value" => "1",
+                   "input" => "0xdeadbeef"
+                 },
+                 %{"to" => nil, "value" => "2", "input" => "0xc0ffee"}
+               ]
+
+        assert "sponsored_transaction" in response["transaction_types"]
+      end
+
+      test "returns nil eden fields and no tag for regular transactions", %{conn: conn} do
+        transaction = :transaction |> insert(type: 2) |> with_block()
+
+        request = get(conn, "/api/v2/transactions/#{transaction.hash}")
+
+        assert response = json_response(request, 200)
+
+        assert response["fee_payer"] == nil
+        assert response["calls"] == nil
+        refute "sponsored_transaction" in response["transaction_types"]
+      end
+
+      test "omits calls in the transactions list", %{conn: conn} do
+        fee_payer = insert(:address)
+
+        transaction =
+          :transaction
+          |> insert(type: 118, fee_payer_address_hash: fee_payer.hash, calls: @eden_calls)
+          |> with_block()
+
+        request = get(conn, "/api/v2/transactions")
+
+        assert %{"items" => [item]} = json_response(request, 200)
+
+        assert item["hash"] == to_string(transaction.hash)
+        assert item["fee_payer"]["hash"] == Address.checksum(fee_payer.hash)
+        assert item["calls"] == nil
+        assert "sponsored_transaction" in item["transaction_types"]
+      end
+
+      test "attributes the fee state change to the fee payer instead of the sender", %{conn: conn} do
+        block_before = insert(:block)
+        fee_payer = insert(:address)
+        recipient = insert(:address)
+
+        transaction =
+          :transaction
+          |> insert(
+            type: 118,
+            fee_payer_address_hash: fee_payer.hash,
+            calls: [%{"to" => to_string(recipient.hash), "value" => 0, "input" => "0xdeadbeef"}],
+            to_address: recipient,
+            gas_price: 1_000,
+            value: 0
+          )
+          |> with_block(status: :ok, gas_used: 147)
+
+        insert_coin_balances_before(transaction, [fee_payer, recipient], block_before)
+
+        request = get(conn, "/api/v2/transactions/#{transaction.hash}/state-changes")
+
+        assert response = json_response(request, 200)
+
+        changes =
+          Map.new(response["items"], fn item -> {item["address"]["hash"], item["change"]} end)
+
+        assert changes[Address.checksum(fee_payer.hash)] == "-147000"
+
+        refute Map.has_key?(changes, Address.checksum(transaction.from_address_hash))
+
+        assert changes[Address.checksum(transaction.block.miner_hash)] == "147000"
+      end
+
+      test "credits every recipient of the batched calls with its own value", %{conn: conn} do
+        block_before = insert(:block)
+        fee_payer = insert(:address)
+        recipient_a = insert(:address)
+        recipient_b = insert(:address)
+
+        transaction =
+          :transaction
+          |> insert(
+            type: 118,
+            fee_payer_address_hash: fee_payer.hash,
+            calls: [
+              %{"to" => to_string(recipient_a.hash), "value" => 1, "input" => "0x"},
+              %{"to" => to_string(recipient_b.hash), "value" => 2, "input" => "0x"}
+            ],
+            to_address: recipient_a,
+            value: 3,
+            gas_price: 1_000
+          )
+          |> with_block(status: :ok, gas_used: 147)
+
+        insert_coin_balances_before(transaction, [fee_payer, recipient_a, recipient_b], block_before)
+
+        request = get(conn, "/api/v2/transactions/#{transaction.hash}/state-changes")
+
+        assert response = json_response(request, 200)
+
+        changes =
+          Map.new(response["items"], fn item -> {item["address"]["hash"], item["change"]} end)
+
+        assert changes[Address.checksum(fee_payer.hash)] == "-147000"
+        assert changes[Address.checksum(transaction.from_address_hash)] == "-3"
+        assert changes[Address.checksum(recipient_a.hash)] == "1"
+        assert changes[Address.checksum(recipient_b.hash)] == "2"
+      end
+
+      test "sums up the batched calls sharing the same recipient", %{conn: conn} do
+        block_before = insert(:block)
+        fee_payer = insert(:address)
+        recipient = insert(:address)
+
+        transaction =
+          :transaction
+          |> insert(
+            type: 118,
+            fee_payer_address_hash: fee_payer.hash,
+            calls: [
+              %{"to" => to_string(recipient.hash), "value" => 1, "input" => "0x"},
+              %{"to" => to_string(recipient.hash), "value" => 2, "input" => "0x"}
+            ],
+            to_address: recipient,
+            value: 3,
+            gas_price: 1_000
+          )
+          |> with_block(status: :ok, gas_used: 147)
+
+        insert_coin_balances_before(transaction, [fee_payer, recipient], block_before)
+
+        request = get(conn, "/api/v2/transactions/#{transaction.hash}/state-changes")
+
+        assert response = json_response(request, 200)
+
+        changes =
+          Map.new(response["items"], fn item -> {item["address"]["hash"], item["change"]} end)
+
+        assert changes[Address.checksum(transaction.from_address_hash)] == "-3"
+        assert changes[Address.checksum(recipient.hash)] == "3"
+      end
+
+      test "credits the recipients of the calls which have no address indexed yet", %{conn: conn} do
+        block_before = insert(:block)
+        fee_payer = insert(:address)
+        recipient_hash = "0x11f60a633dd30a8d1a26dd6e20167a9293fb4647"
+
+        transaction =
+          :transaction
+          |> insert(
+            type: 118,
+            fee_payer_address_hash: fee_payer.hash,
+            calls: [%{"to" => recipient_hash, "value" => 3, "input" => "0x"}],
+            value: 3,
+            gas_price: 1_000
+          )
+          |> with_block(status: :ok, gas_used: 147)
+
+        insert_coin_balances_before(transaction, [fee_payer], block_before)
+
+        request = get(conn, "/api/v2/transactions/#{transaction.hash}/state-changes")
+
+        assert response = json_response(request, 200)
+
+        changes =
+          Map.new(response["items"], fn item -> {item["address"]["hash"], item["change"]} end)
+
+        assert changes[Address.checksum(recipient_hash)] == "3"
+      end
+
+      test "charges the sender for both the value and the fee for regular transactions", %{conn: conn} do
+        block_before = insert(:block)
+
+        transaction =
+          :transaction
+          |> insert(type: 2, gas_price: 1_000, value: 3)
+          |> with_block(status: :ok, gas_used: 147)
+
+        insert_coin_balances_before(transaction, [], block_before)
+
+        request = get(conn, "/api/v2/transactions/#{transaction.hash}/state-changes")
+
+        assert response = json_response(request, 200)
+
+        changes =
+          Map.new(response["items"], fn item -> {item["address"]["hash"], item["change"]} end)
+
+        assert changes[Address.checksum(transaction.from_address_hash)] == "-147003"
+        assert changes[Address.checksum(transaction.to_address_hash)] == "3"
+      end
+    end
+
+    defp insert_coin_balances_before(transaction, extra_addresses, block_before) do
+      [
+        {transaction.from_address, transaction.from_address_hash},
+        {transaction.to_address, transaction.to_address_hash},
+        {transaction.block.miner, transaction.block.miner_hash}
+      ]
+      |> Enum.concat(Enum.map(extra_addresses, &{&1, &1.hash}))
+      |> Enum.uniq_by(fn {_address, address_hash} -> address_hash end)
+      |> Enum.each(fn {address, address_hash} ->
+        insert(:address_coin_balance,
+          address: address,
+          address_hash: address_hash,
+          block_number: block_before.number
+        )
+      end)
+    end
+  end
+
+  if @chain_type == :arbitrum do
+    describe "/transactions/arbitrum-batch/:batch_number_param" do
+      test "returns empty list when batch has no transactions", %{conn: conn} do
+        batch = insert(:arbitrum_l1_batch)
+
+        request = get(conn, "/api/v2/transactions/arbitrum-batch/#{batch.number}")
+        assert response = json_response(request, 200)
+        assert response["items"] == []
+        assert response["next_page_params"] == nil
+      end
+
+      test "returns transactions in the batch", %{conn: conn} do
+        batch = insert(:arbitrum_l1_batch)
+        transaction = :transaction |> insert() |> with_block()
+
+        insert(:arbitrum_batch_transaction, batch_number: batch.number, transaction_hash: transaction.hash)
+
+        request = get(conn, "/api/v2/transactions/arbitrum-batch/#{batch.number}")
+        assert response = json_response(request, 200)
+        assert length(response["items"]) == 1
+        assert hd(response["items"])["hash"] == to_string(transaction.hash)
+      end
+
+      test "can paginate transactions in Arbitrum batch", %{conn: conn} do
+        batch = insert(:arbitrum_l1_batch)
+        transactions = 51 |> insert_list(:transaction) |> with_block()
+
+        Enum.each(transactions, fn tx ->
+          insert(:arbitrum_batch_transaction, batch_number: batch.number, transaction_hash: tx.hash)
+        end)
+
+        request = get(conn, "/api/v2/transactions/arbitrum-batch/#{batch.number}")
+        assert response = json_response(request, 200)
+
+        request_2nd_page =
+          get(conn, "/api/v2/transactions/arbitrum-batch/#{batch.number}", response["next_page_params"])
+
+        assert response_2nd_page = json_response(request_2nd_page, 200)
+
+        check_paginated_response(response, response_2nd_page, transactions)
+      end
+
+      test "returns 422 for non-integer batch_number_param", %{conn: conn} do
+        request = get(conn, "/api/v2/transactions/arbitrum-batch/invalid")
+        assert %{"errors" => [_]} = json_response(request, 422)
+      end
+    end
+  end
+
+  describe "/transactions/{transaction_hash}/preview" do
+    setup do
+      bypass = Bypass.open()
+      old_bens_env = Application.get_env(:explorer, Explorer.MicroserviceInterfaces.BENS, [])
+      old_metadata_env = Application.get_env(:explorer, Explorer.MicroserviceInterfaces.Metadata, [])
+      old_chain_id = Application.get_env(:block_scout_web, :chain_id)
+
+      Application.put_env(:block_scout_web, :chain_id, 1)
+
+      Application.put_env(
+        :explorer,
+        Explorer.MicroserviceInterfaces.BENS,
+        Keyword.merge(old_bens_env || [],
+          service_url: "http://localhost:#{bypass.port}",
+          enabled: true
+        )
+      )
+
+      Application.put_env(
+        :explorer,
+        Explorer.MicroserviceInterfaces.Metadata,
+        Keyword.merge(old_metadata_env || [],
+          service_url: "http://localhost:#{bypass.port}",
+          enabled: true
+        )
+      )
+
+      on_exit(fn ->
+        Bypass.down(bypass)
+        Application.put_env(:explorer, Explorer.MicroserviceInterfaces.BENS, old_bens_env)
+        Application.put_env(:explorer, Explorer.MicroserviceInterfaces.Metadata, old_metadata_env)
+        Application.put_env(:block_scout_web, :chain_id, old_chain_id)
+      end)
+
+      {:ok, bypass: bypass}
+    end
+
+    test "preloads ENS names when preload_ens is requested", %{conn: conn, bypass: bypass} do
+      transaction = :transaction |> insert() |> with_block(status: :ok)
+      from_hash = Address.checksum(transaction.from_address_hash)
+
+      Bypass.expect_once(bypass, "POST", "/api/v1/1/addresses:batch_resolve_names", fn conn ->
+        Plug.Conn.resp(conn, 200, Jason.encode!(%{"names" => %{from_hash => "preview.eth"}}))
+      end)
+
+      request =
+        get(conn, "/api/v2/transactions/#{to_string(transaction.hash)}/preview", %{"preload_ens" => "true"})
+
+      assert %{"from" => %{"ens_domain_name" => "preview.eth"}} = json_response(request, 200)
+    end
+
+    test "preloads metadata when preload_metadata is requested", %{conn: conn, bypass: bypass} do
+      transaction = :transaction |> insert() |> with_block(status: :ok)
+      from_hash = Address.checksum(transaction.from_address_hash)
+      to_hash = Address.checksum(transaction.to_address_hash)
+
+      metadata_tag = %{
+        "slug" => "test-1",
+        "name" => "Test 1",
+        "tagType" => "name",
+        "ordinal" => 0,
+        "meta" => Jason.encode!(%{})
+      }
+
+      Bypass.expect_once(bypass, "GET", "/api/v1/metadata", fn conn ->
+        Plug.Conn.resp(
+          conn,
+          200,
+          Jason.encode!(%{
+            "addresses" => %{
+              from_hash => %{"tags" => [metadata_tag]},
+              to_hash => %{"tags" => [metadata_tag]}
+            }
+          })
+        )
+      end)
+
+      request =
+        get(conn, "/api/v2/transactions/#{to_string(transaction.hash)}/preview", %{"preload_metadata" => "true"})
+
+      response = json_response(request, 200)
+
+      assert %{"from" => %{"metadata" => %{"tags" => [%{"name" => "Test 1"}]}}} = response
+      assert %{"to" => %{"metadata" => %{"tags" => [%{"name" => "Test 1"}]}}} = response
+    end
+
+    test "returns nil metadata when preload_metadata is not requested", %{conn: conn} do
+      transaction = :transaction |> insert() |> with_block(status: :ok)
+
+      request = get(conn, "/api/v2/transactions/#{to_string(transaction.hash)}/preview")
+
+      response = json_response(request, 200)
+      assert %{"from" => %{"metadata" => nil}} = response
+      assert %{"to" => %{"metadata" => nil}} = response
+    end
+
+    test "queries no microservice when neither preload is requested", %{conn: conn} do
+      transaction = :transaction |> insert() |> with_block(status: :ok)
+
+      # any request to the bypass would fail the test, since nothing is expected
+      request = get(conn, "/api/v2/transactions/#{to_string(transaction.hash)}/preview")
+
+      assert %{"from" => %{"ens_domain_name" => nil}} = json_response(request, 200)
     end
   end
 end

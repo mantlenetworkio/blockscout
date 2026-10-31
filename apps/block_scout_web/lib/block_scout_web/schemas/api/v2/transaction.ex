@@ -1,7 +1,9 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
   @moduledoc false
   alias BlockScoutWeb.API.V2.ZkSyncView
   alias BlockScoutWeb.Schemas.API.V2.{Address, General, Token}
+  alias BlockScoutWeb.Schemas.API.V2.Eden.Call, as: EdenCall
   alias BlockScoutWeb.Schemas.API.V2.Transaction.Fee
   alias BlockScoutWeb.Schemas.Helper
   alias OpenApiSpex.Schema
@@ -116,6 +118,14 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
     additionalProperties: false
   }
 
+  # OP Stack-specific transaction types appended to the `transaction_types` enum
+  # for both `optimism` and `optimism-celo` chain types (the latter resolves to
+  # the `:optimism` chain type with a `{:optimism, :celo}` chain identity).
+  @optimism_transaction_types [
+    "op_stack_l1_attributes_transaction",
+    "op_stack_post_exec_transaction"
+  ]
+
   @scroll_schema %Schema{
     type: :object,
     nullable: false,
@@ -203,9 +213,20 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
             operator_fee: General.IntegerString
           }
         )
+        |> extend_transaction_types_enum(@optimism_transaction_types)
 
       :scroll ->
         schema |> Helper.extend_schema(properties: %{scroll: @scroll_schema})
+
+      :eden ->
+        schema
+        |> Helper.extend_schema(
+          properties: %{
+            fee_payer: %Schema{allOf: [Address], nullable: true},
+            calls: %Schema{type: :array, items: EdenCall, nullable: true}
+          },
+          required: [:fee_payer, :calls]
+        )
 
       :suave ->
         schema
@@ -290,6 +311,16 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction.ChainTypeCustomizations do
         schema
     end
     |> chain_identity_fields()
+  end
+
+  # Appends chain-specific values to the `transaction_types` items enum of the given schema.
+  @spec extend_transaction_types_enum(map(), [String.t()]) :: map()
+  defp extend_transaction_types_enum(schema, extra_types) do
+    update_in(
+      schema,
+      [:properties, :transaction_types, Access.key(:items), Access.key(:enum)],
+      &(&1 ++ extra_types)
+    )
   end
 
   defp chain_identity_fields(schema) do
@@ -430,7 +461,8 @@ defmodule BlockScoutWeb.Schemas.API.V2.Transaction do
               "token_creation",
               "token_transfer",
               "blob_transaction",
-              "set_code_transaction"
+              "set_code_transaction",
+              "sponsored_transaction"
             ]
           }
         },

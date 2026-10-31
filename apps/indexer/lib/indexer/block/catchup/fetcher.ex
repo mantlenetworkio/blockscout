@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Catchup.Fetcher do
   @moduledoc """
   Fetches and indexes block ranges from the block before the latest block to genesis (0) that are missing.
@@ -13,7 +14,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
       async_import_block_rewards: 2,
       async_import_celo_epoch_block_operations: 2,
       async_import_celo_accounts: 2,
-      async_import_coin_balances: 2,
+      async_import_coin_balances: 1,
       async_import_created_contract_codes: 2,
       async_import_filecoin_addresses_info: 2,
       async_import_internal_transactions: 2,
@@ -134,12 +135,12 @@ defmodule Indexer.Block.Catchup.Fetcher do
 
   defp async_import_remaining_block_data(
          imported,
-         %{block_rewards: %{errors: block_reward_errors}} = options
+         %{block_rewards: %{errors: block_reward_errors}}
        ) do
     realtime? = false
 
     async_import_block_rewards(block_reward_errors, realtime?)
-    async_import_coin_balances(imported, options)
+    async_import_coin_balances(imported)
     async_import_created_contract_codes(imported, realtime?)
     async_import_internal_transactions(imported, realtime?)
     async_import_tokens(imported, realtime?)
@@ -187,6 +188,7 @@ defmodule Indexer.Block.Catchup.Fetcher do
     case result do
       {:ok, %{errors: errors}} ->
         valid_errors = handle_null_rounds(errors)
+        log_errors(valid_errors, range)
 
         {:ok, %{range: range, errors: valid_errors}}
 
@@ -241,13 +243,15 @@ defmodule Indexer.Block.Catchup.Fetcher do
         acc
     end)
     |> numbers_to_ranges()
-    |> MissingBlockRange.clear_batch()
+    |> MissingBlockRange.clear_batch_if_indexed()
   end
 
+  # Lotus reports a null round either with the bare message (older versions) or with
+  # the epoch appended, e.g. "requested epoch was a null round (6394248)" (newer versions).
   defp handle_null_rounds(errors) do
     {null_rounds, other_errors} =
       Enum.split_with(errors, fn
-        %{message: "requested epoch was a null round"} -> true
+        %{message: "requested epoch was a null round" <> _} -> true
         _ -> false
       end)
 
@@ -257,6 +261,11 @@ defmodule Indexer.Block.Catchup.Fetcher do
 
     other_errors
   end
+
+  defp log_errors([], _range), do: :ok
+
+  defp log_errors(errors, range),
+    do: Logger.error(fn -> "Failed to fetch block range #{inspect(range)}: #{inspect(errors)}" end)
 
   defp timeout_exception?(%{message: message}) when is_binary(message) do
     match_timeout_exception?(message)

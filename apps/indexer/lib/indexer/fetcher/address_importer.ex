@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.AddressImporter do
   @moduledoc """
   Periodically updates addresses accumulated from block fetcher
@@ -8,6 +9,7 @@ defmodule Indexer.Fetcher.AddressImporter do
   require Logger
 
   alias Explorer.Chain
+  alias Explorer.Chain.Cache.Accounts
   alias Indexer.Block.Fetcher
 
   @default_update_interval :timer.minutes(1)
@@ -27,6 +29,7 @@ defmodule Indexer.Fetcher.AddressImporter do
   end
 
   def init(_) do
+    Process.flag(:trap_exit, true)
     schedule_next_update()
 
     {:ok, %{}}
@@ -37,13 +40,13 @@ defmodule Indexer.Fetcher.AddressImporter do
   end
 
   def handle_cast({:add, addresses_params}, state) do
-    params_map = Map.new(addresses_params, fn address -> {address.hash, address} end)
-
     result_state =
-      Map.merge(state, params_map, fn _hash, old_address, new_address ->
-        old_address
-        |> process_contract_code(new_address)
-        |> process_nonce(new_address)
+      Enum.reduce(addresses_params, state, fn new_address, acc ->
+        Map.update(acc, new_address.hash, new_address, fn old_address ->
+          old_address
+          |> process_contract_code(new_address)
+          |> process_nonce(new_address)
+        end)
       end)
 
     {:noreply, result_state}
@@ -67,6 +70,10 @@ defmodule Indexer.Fetcher.AddressImporter do
     {:noreply, state}
   end
 
+  def handle_info({:EXIT, _pid, :normal}, state) do
+    {:noreply, state}
+  end
+
   def handle_info({:DOWN, _ref, :process, _pid, _reason}, state) do
     {:noreply, state}
   end
@@ -75,11 +82,14 @@ defmodule Indexer.Fetcher.AddressImporter do
     do_update(state)
   end
 
+  defp do_update(addresses_map) when addresses_map == %{}, do: addresses_map
+
   defp do_update(addresses_map) do
     addresses_params = Map.values(addresses_map)
 
     case Chain.import(%{addresses: %{params: addresses_params}, timeout: :infinity}) do
       {:ok, imported} ->
+        Accounts.drop(imported[:addresses])
         Fetcher.async_import_filecoin_addresses_info(imported, false)
         Logger.info("AddressImporter imported #{Enum.count(addresses_map)} addresses")
 

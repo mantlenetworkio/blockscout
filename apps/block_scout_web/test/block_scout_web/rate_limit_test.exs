@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.RateLimitTest do
   use BlockScoutWeb.ConnCase, async: false
   alias BlockScoutWeb.RateLimit
@@ -383,6 +384,9 @@ defmodule BlockScoutWeb.RateLimitTest do
       # Extract token from response
       [token] = Plug.Conn.get_resp_header(conn, "api-v2-temp-token")
       assert conn.resp_cookies["api_v2_temp_token"] == nil
+
+      ttl = div(Application.get_env(:block_scout_web, :api_rate_limit)[:api_v2_token_ttl], 1000)
+      assert Plug.Conn.get_resp_header(conn, "api-v2-temp-token-ttl") == [Integer.to_string(ttl)]
 
       # Now make request with the token
       conn =

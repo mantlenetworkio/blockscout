@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Log.Schema do
   @moduledoc false
   use Utils.CompileTimeEnvHelper,
@@ -310,7 +311,7 @@ defmodule Explorer.Chain.Log do
     end
   rescue
     e ->
-      Logger.warning(fn ->
+      Logger.debug(fn ->
         [
           "Could not decode input data for log from transaction hash: ",
           Hash.to_iodata(transaction_hash),

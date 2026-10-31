@@ -23,6 +23,9 @@ defmodule Explorer.ExternalConnection do
   @spec start(keyword()) :: pid()
   def start(extra \\ []) do
     {:ok, conn} = Postgrex.start_link(options(extra))
+    # Unlinked, so the test's own exit does not shut the pool down while the callback below stops it: the pool
+    # terminates its connections synchronously, and a stop that meets a pool already shutting down exits.
+    Process.unlink(conn)
     ExUnit.Callbacks.on_exit(fn -> if Process.alive?(conn), do: GenServer.stop(conn) end)
     conn
   end

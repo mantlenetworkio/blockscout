@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.FetcherTest do
   # `async: false` due to use of named GenServer
   use EthereumJSONRPC.Case, async: false
@@ -10,7 +11,7 @@ defmodule Indexer.Block.FetcherTest do
   import EthereumJSONRPC, only: [integer_to_quantity: 1]
 
   alias Explorer.Chain
-  alias Explorer.Chain.{Address, Hash, Log, Transaction, Wei}
+  alias Explorer.Chain.{Address, Log, Transaction, Wei}
   # alias Explorer.TestHelper
   alias Indexer.Block.Fetcher
   alias Indexer.BufferedTask
@@ -54,7 +55,7 @@ defmodule Indexer.Block.FetcherTest do
   setup :verify_on_exit!
 
   describe "import/2" do
-    test "keeps capability addresses in the synchronous import" do
+    setup do
       capability_address_hash = "0xe916f4d7a32054ea2fbcf06ba52a6b864776b4f4"
       unrelated_address_hash = "0x8f542fd88031dc30c2014213632e4f975f34dcd9"
 
@@ -71,18 +72,47 @@ defmodule Indexer.Block.FetcherTest do
         }
       }
 
-      assert {:ok, _} =
-               Fetcher.import(
-                 %Fetcher{
-                   callback_module: ImportRecorder,
-                   json_rpc_named_arguments: [],
-                   task_supervisor: nil
-                 },
-                 options
-               )
+      block_fetcher = %Fetcher{callback_module: ImportRecorder, json_rpc_named_arguments: [], task_supervisor: nil}
+
+      %{
+        block_fetcher: block_fetcher,
+        options: options,
+        capability_address_hash: capability_address_hash,
+        unrelated_address_hash: unrelated_address_hash
+      }
+    end
+
+    test "keeps capability addresses in the synchronous import when addresses are imported asynchronously", %{
+      block_fetcher: block_fetcher,
+      options: options,
+      capability_address_hash: capability_address_hash
+    } do
+      initial_value = Application.get_env(:indexer, :enable_partial_async_import?)
+      Application.put_env(:indexer, :enable_partial_async_import?, true)
+      on_exit(fn -> Application.put_env(:indexer, :enable_partial_async_import?, initial_value) end)
+
+      assert {:ok, _} = Fetcher.import(block_fetcher, options)
 
       assert_received {:block_fetcher_import_options, import_options}
       assert [%{hash: ^capability_address_hash}] = import_options.addresses.params
+    end
+
+    test "imports every address synchronously without the partial async import", %{
+      block_fetcher: block_fetcher,
+      options: options,
+      capability_address_hash: capability_address_hash,
+      unrelated_address_hash: unrelated_address_hash
+    } do
+      initial_value = Application.get_env(:indexer, :enable_partial_async_import?)
+      Application.put_env(:indexer, :enable_partial_async_import?, false)
+      on_exit(fn -> Application.put_env(:indexer, :enable_partial_async_import?, initial_value) end)
+
+      assert {:ok, _} = Fetcher.import(block_fetcher, options)
+
+      assert_received {:block_fetcher_import_options, import_options}
+
+      assert [%{hash: ^capability_address_hash}, %{hash: ^unrelated_address_hash}] =
+               import_options.addresses.params
     end
   end
 
@@ -831,12 +861,29 @@ defmodule Indexer.Block.FetcherTest do
           assert fifth_address.fetched_coin_balance_block_number == block_number
 
         EthereumJSONRPC.Nethermind ->
-          {:ok, first_address_hash} = Hash.Address.cast("0x8bf38d4764929064f2d4d3a56520a76ab3df415b")
-          {:ok, second_address_hash} = Hash.Address.cast("0xe8ddc5c7a2d2f0d7a9798459c0104fdf5e987aca")
-
           assert {:ok,
                   %{
                     inserted: %{
+                      addresses: [
+                        %Address{
+                          hash:
+                            %Explorer.Chain.Hash{
+                              byte_count: 20,
+                              bytes:
+                                <<139, 243, 141, 71, 100, 146, 144, 100, 242, 212, 211, 165, 101, 32, 167, 106, 179,
+                                  223, 65, 91>>
+                            } = first_address_hash
+                        },
+                        %Address{
+                          hash:
+                            %Explorer.Chain.Hash{
+                              byte_count: 20,
+                              bytes:
+                                <<232, 221, 197, 199, 162, 210, 240, 215, 169, 121, 132, 89, 192, 16, 79, 223, 94, 152,
+                                  122, 202>>
+                            } = second_address_hash
+                        }
+                      ],
                       blocks: [
                         %Chain.Block{
                           hash: %Explorer.Chain.Hash{

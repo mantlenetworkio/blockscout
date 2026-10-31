@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.StatsController do
   use BlockScoutWeb, :controller
   use OpenApiSpex.ControllerSpecs
@@ -23,11 +24,11 @@ defmodule BlockScoutWeb.API.V2.StatsController do
   alias BlockScoutWeb.API.V2.Helper
   alias BlockScoutWeb.Chain.MarketHistoryChartController
   alias Explorer.{Chain, Market}
-  alias Explorer.Chain.Cache.Counters.{AddressesCount, AverageBlockTime, BlocksCount, GasUsageSum, TransactionsCount}
+  alias Explorer.Chain.Cache.Counters.{AddressesCount, AverageBlockTime, BlocksCount, TransactionsCount}
   alias Explorer.Chain.Cache.GasPriceOracle
   alias Explorer.Chain.Supply.RSK
   alias Explorer.Chain.Transaction.History.TransactionStats
-  alias Explorer.Stats.HotSmartContracts
+  alias Explorer.Stats.{HotSmartContracts, HotSmartContractsCache}
   alias Plug.Conn
   alias Timex.Duration
 
@@ -104,7 +105,6 @@ defmodule BlockScoutWeb.API.V2.StatsController do
         "coin_price" => exchange_rate.fiat_value,
         "coin_price_change_percentage" => coin_price_change,
         "secondary_coin_price" => secondary_coin_exchange_rate.fiat_value,
-        "total_gas_used" => GasUsageSum.total() |> to_string(),
         "transactions_today" => Enum.at(transaction_stats, 0).number_of_transactions |> to_string(),
         "gas_used_today" => Enum.at(transaction_stats, 0).gas_used,
         "gas_prices" => gas_prices,
@@ -289,7 +289,7 @@ defmodule BlockScoutWeb.API.V2.StatsController do
 
     {hot_smart_contracts, next_page} =
       scale
-      |> HotSmartContracts.paginated(options)
+      |> HotSmartContractsCache.fetch(options, fn -> HotSmartContracts.paginated(scale, options) end)
       |> case do
         {:error, :not_found} -> []
         hot_smart_contracts -> hot_smart_contracts

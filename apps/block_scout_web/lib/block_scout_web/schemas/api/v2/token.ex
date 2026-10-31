@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Token.ChainTypeCustomizations do
   @moduledoc false
   require OpenApiSpex
@@ -15,6 +16,22 @@ defmodule BlockScoutWeb.Schemas.API.V2.Token.ChainTypeCustomizations do
         |> Helper.extend_schema(
           properties: %{filecoin_robust_address: filecoin_robust_address_schema()},
           required: [:filecoin_robust_address]
+        )
+
+      :zilliqa ->
+        # Added by `ZilliqaView.extend_token_json_response/2` for ZRC-2 tokens only,
+        # hence optional (not added to `required`).
+        schema
+        |> Helper.extend_schema(
+          properties: %{
+            zilliqa: %Schema{
+              type: :object,
+              nullable: false,
+              properties: %{zrc2_address_hash: General.AddressHashNullable},
+              required: [:zrc2_address_hash],
+              additionalProperties: false
+            }
+          }
         )
 
       _ ->
@@ -89,6 +106,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Token do
         total_supply: General.IntegerStringNullable,
         icon_url: General.URLNullable,
         circulating_market_cap: General.FloatStringNullable,
+        circulating_supply: General.FloatStringNullable,
         extensions: %Schema{type: :array, items: %Schema{type: :string}},
         scaled_ui: ScaledUi,
         reputation: %Schema{
@@ -118,6 +136,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Token do
         :total_supply,
         :icon_url,
         :circulating_market_cap,
+        :circulating_supply,
         :reputation
       ],
       additionalProperties: false
@@ -144,6 +163,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.Token.Type do
   end
 
   OpenApiSpex.schema(%{
+    title: "TokenType",
     type: :string,
     enum: @token_types ++ @chain_type_token_types
   })

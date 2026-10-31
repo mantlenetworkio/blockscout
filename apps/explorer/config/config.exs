@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 # This file is responsible for configuring your application
 # and its dependencies with the aid of the Config module.
 #
@@ -22,6 +23,12 @@ config :explorer, Explorer.ChainSpec.GenesisData, enabled: true
 
 config :explorer, Explorer.Chain.Cache.BlockNumber, enabled: true
 
+config :explorer, Explorer.Chain.Cache.ContractMethods, enabled: true
+
+config :explorer, Explorer.Chain.Cache.AddressTags, enabled: true
+
+config :explorer, Explorer.Chain.Cache.Accounts.Refresher, enabled: true
+
 config :explorer, Explorer.Chain.Cache.Counters.AddressesCoinBalanceSum,
   enabled: true,
   ttl_check_interval: :timer.seconds(1)
@@ -34,9 +41,11 @@ config :explorer, Explorer.Chain.Cache.Counters.AddressesCount,
   enabled: true,
   enable_consolidation: true
 
-config :explorer, Explorer.Chain.Cache.Counters.AddressTransactionsGasUsageSum,
-  enabled: true,
-  enable_consolidation: true
+config :explorer, Explorer.Chain.Cache.Counters.TransactionsCount, enable_consolidation: true
+
+config :explorer, Explorer.Chain.Cache.Counters.AddressCounters, enabled: true
+
+config :explorer, Explorer.Chain.Cache.Counters.AddressCountersConsolidator, enabled: true
 
 config :explorer, Explorer.Chain.Cache.Counters.AddressTokensUsdSum,
   enabled: true,
@@ -81,21 +90,9 @@ config :explorer, Explorer.Chain.Cache.Counters.Blackfort.ValidatorsCount,
 
 config :explorer, Explorer.Market.Fetcher.Token, enabled: true
 
-config :explorer, Explorer.Chain.Cache.Counters.TokenHoldersCount,
-  enabled: true,
-  enable_consolidation: true
+config :explorer, Explorer.Chain.Cache.Counters.TokenCounters, enabled: true
 
-config :explorer, Explorer.Chain.Cache.Counters.TokenTransfersCount,
-  enabled: true,
-  enable_consolidation: true
-
-config :explorer, Explorer.Chain.Cache.Counters.AddressTransactionsCount,
-  enabled: true,
-  enable_consolidation: true
-
-config :explorer, Explorer.Chain.Cache.Counters.AddressTokenTransfersCount,
-  enabled: true,
-  enable_consolidation: true
+config :explorer, Explorer.Chain.Cache.Counters.TokenCountersConsolidator, enabled: true
 
 config :explorer, Explorer.Chain.Cache.Counters.BlockBurntFeeCount,
   enabled: true,
@@ -112,6 +109,8 @@ config :explorer, Explorer.Migrator.DeleteZeroValueInternalTransactions, enabled
 config :explorer, Explorer.Chain.Mud, enabled: ConfigHelper.parse_bool_env_var("MUD_INDEXER_ENABLED")
 
 config :explorer, Explorer.Utility.VersionConstantsUpdater, enabled: true
+
+config :explorer, Explorer.Utility.VersionUpgrade, enabled: true
 
 for migrator <- [
       # Background migrations
@@ -140,8 +139,12 @@ for migrator <- [
       Explorer.Migrator.UnescapeQuotesInTokens,
       Explorer.Migrator.UnescapeAmpersandsInTokens,
       Explorer.Migrator.SanitizeDuplicateSmartContractAdditionalSources,
+      Explorer.Migrator.ReindexBlocksWithUncatalogedTokenTransfers,
+      Explorer.Migrator.ReindexBlocksWithStaleInternalTransactions,
       Explorer.Migrator.EmptyInternalTransactionsData,
-      Explorer.Migrator.FillInternalTransactionsAddressIds
+      Explorer.Migrator.FillInternalTransactionsAddressIds,
+      Explorer.Migrator.BackfillAddressCounters,
+      Explorer.Migrator.BackfillTokenCounters
     ] do
   config :explorer, migrator, enabled: true
 end
@@ -179,7 +182,6 @@ for index_operation <- [
       Explorer.Migrator.HeavyDbIndexOperation.ValidateInternalTransactionsBlockNumberTransactionIndexNotNull,
       Explorer.Migrator.HeavyDbIndexOperation.CreateSmartContractAdditionalSourcesUniqueIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropTokenInstancesTokenIdIndex,
-      Explorer.Migrator.HeavyDbIndexOperation.CreateAddressesHashContractCodeNotNullIndex,
       Explorer.Migrator.HeavyDbIndexOperation.CreateTokensNamePartialFtsIndex,
       Explorer.Migrator.HeavyDbIndexOperation.CreateTransactionsCreatedContractAddressHashWPendingIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropTransactionsCreatedContractAddressHashWithPendingIndexA,
@@ -195,7 +197,9 @@ for index_operation <- [
       Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsBlockNumberCreatedContractAddressHashIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsCreatedContractAddressHashIndex,
       Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsFromAddressHashPartialIndex,
-      Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsToAddressHashPartialIndex
+      Explorer.Migrator.HeavyDbIndexOperation.DropInternalTransactionsToAddressHashPartialIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateLogsAddressHashFirstTopicSecondTopicBlockNumberIndex,
+      Explorer.Migrator.HeavyDbIndexOperation.CreateAddressCurrentTokenBalancesAddressHashBlockNumberIndex
     ] do
   config :explorer, index_operation, enabled: true
 end
@@ -214,6 +218,8 @@ config :explorer, Explorer.Utility.RateLimiter, enabled: true
 
 config :explorer, Explorer.Utility.Hammer.Redis, enabled: true
 config :explorer, Explorer.Utility.Hammer.ETS, enabled: true
+
+config :explorer, Explorer.Chain.Health.Monitor, enabled: true
 
 config :explorer, Explorer.Repo,
   migration_timestamps: [type: :utc_datetime_usec],

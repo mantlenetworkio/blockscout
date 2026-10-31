@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
   use BlockScoutWeb.ConnCase
 
@@ -232,7 +233,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
         |> get("/api/v2/advanced-filters", %{"token_extension" => "ERC-9999"})
         |> json_response(422)
 
-      assert response == %{"message" => "Invalid parameter(s)"}
+      assert %{"errors" => [%{"source" => %{"pointer" => "/token_extension"}}]} = response
     end
 
     test "combines transaction type and extension filters with intersection semantics", %{conn: conn} do
@@ -290,7 +291,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
         |> get("/api/v2/advanced-filters", %{"transaction_types" => "ERC-8056"})
         |> json_response(422)
 
-      assert response == %{"message" => "Invalid parameter(s)"}
+      assert %{"errors" => [%{"source" => %{"pointer" => "/transaction_types"}}]} = response
     end
 
     test "rejects ERC-8056 as a transaction type for CSV exports", %{conn: conn} do
@@ -299,7 +300,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
         |> get("/api/v2/advanced-filters/csv", %{"transaction_types" => "ERC-8056"})
         |> json_response(422)
 
-      assert response == %{"message" => "Invalid parameter(s)"}
+      assert %{"errors" => [%{"source" => %{"pointer" => "/transaction_types"}}]} = response
     end
 
     test "rejects malformed and unsupported transaction types before filtering", %{conn: conn} do
@@ -316,7 +317,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
           |> get(path, %{"transaction_types" => transaction_types})
           |> json_response(422)
 
-        assert response == %{"message" => "Invalid parameter(s)"}
+        assert %{"errors" => [%{"source" => %{"pointer" => "/transaction_types"}}]} = response
       end
     end
 
@@ -337,6 +338,42 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
 
       assert [%{"hash" => transaction_hash}] = response["items"]
       assert transaction_hash == to_string(transaction.hash)
+    end
+
+    test "accepts the Unicode whitespace the parser trims around allowed transaction types", %{conn: conn} do
+      token = insert(:token, type: "ERC-20")
+      transaction = insert(:transaction) |> with_block()
+
+      insert(:token_transfer,
+        transaction: transaction,
+        token_contract_address: token.contract_address,
+        token_type: "ERC-20"
+      )
+
+      no_break_space = "\u00A0"
+
+      for path <- ["/api/v2/advanced-filters", "/api/v2/advanced-filters/csv"] do
+        conn
+        |> get(path, %{"transaction_types" => "#{no_break_space}ERC-20#{no_break_space}"})
+        |> response(200)
+      end
+    end
+
+    # Regression: keyset cursor params accept the literal string "null" in addition
+    # to an empty string, signalling that the previous-page item was not of the
+    # corresponding kind (internal transaction / token transfer / batch item).
+    # Locks in the second branch of `General.IntegerStringOrEmptyOrNullLiteral`.
+    test "accepts the literal \"null\" in keyset cursor params", %{conn: conn} do
+      cursor_params = %{
+        "block_number" => "0",
+        "transaction_index" => "0",
+        "internal_transaction_index" => "null",
+        "token_transfer_index" => "null",
+        "token_transfer_batch_index" => "null"
+      }
+
+      request = get(conn, "/api/v2/advanced-filters", cursor_params)
+      assert json_response(request, 200)
     end
 
     test "get and paginate advanced filter (transactions split between pages)", %{conn: conn} do
@@ -780,6 +817,79 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
              end)
 
       assert Enum.count(response["items"]) == 21
+    end
+
+    test "filter by methods_names alone", %{conn: conn} do
+      contract_address = insert(:contract_address)
+      transfer_selector = "0xa9059cbb"
+      mint_selector = "0xa0712d68"
+      {:ok, transfer_input} = Data.cast(transfer_selector <> "ab0ba0")
+      {:ok, mint_input} = Data.cast(mint_selector <> "ab0ba0")
+
+      3
+      |> insert_list(:transaction,
+        to_address: contract_address,
+        to_address_hash: contract_address.hash,
+        input: transfer_input
+      )
+      |> with_block()
+
+      5
+      |> insert_list(:transaction,
+        to_address: contract_address,
+        to_address_hash: contract_address.hash,
+        input: mint_input
+      )
+      |> with_block()
+
+      request = get(conn, "/api/v2/advanced-filters", %{"methods_names" => "transfer"})
+      assert response = json_response(request, 200)
+
+      assert Enum.count(response["items"]) == 3
+
+      assert Enum.all?(response["items"], fn item ->
+               String.slice(item["method"], 0..9) == transfer_selector
+             end)
+    end
+
+    test "filter by methods_names merges with methods param", %{conn: conn} do
+      contract_address = insert(:contract_address)
+      transfer_selector = "0xa9059cbb"
+      mint_selector = "0xa0712d68"
+      {:ok, transfer_input} = Data.cast(transfer_selector <> "ab0ba0")
+      {:ok, mint_input} = Data.cast(mint_selector <> "ab0ba0")
+
+      3
+      |> insert_list(:transaction,
+        to_address: contract_address,
+        to_address_hash: contract_address.hash,
+        input: transfer_input
+      )
+      |> with_block()
+
+      5
+      |> insert_list(:transaction,
+        to_address: contract_address,
+        to_address_hash: contract_address.hash,
+        input: mint_input
+      )
+      |> with_block()
+
+      2 |> insert_list(:transaction) |> with_block()
+
+      request =
+        get(conn, "/api/v2/advanced-filters", %{
+          "methods_names" => "transfer",
+          "methods" => mint_selector
+        })
+
+      assert response = json_response(request, 200)
+
+      assert Enum.count(response["items"]) == 8
+
+      assert Enum.all?(response["items"], fn item ->
+               String.slice(item["method"], 0..9) in [transfer_selector, mint_selector]
+             end)
     end
 
     test "filter by age", %{conn: conn} do
@@ -1579,7 +1689,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
         to_timestamp = List.last(transactions).block.timestamp
 
         params = %{
-          "tx_types" => "coin_transfer,ERC-20",
+          "transaction_types" => "COIN_TRANSFER,ERC-20",
           "methods" => method_id_string,
           "age_from" => from_timestamp |> DateTime.to_iso8601(),
           "age_to" => to_timestamp |> DateTime.to_iso8601(),
@@ -1601,7 +1711,7 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
 
         check_paginated_response(
           AdvancedFilter.list(
-            tx_types: ["COIN_TRANSFER", "ERC-20"],
+            transaction_types: ["COIN_TRANSFER", "ERC-20"],
             methods: ["0xa9059cbb"],
             age: [from: from_timestamp, to: to_timestamp],
             from_address_hashes: [
@@ -1630,9 +1740,30 @@ defmodule BlockScoutWeb.API.V2.AdvancedFilterControllerTest do
     end
   end
 
+  describe "/advanced_filters/methods" do
+    test "returns default list of methods", %{conn: conn} do
+      request = get(conn, "/api/v2/advanced-filters/methods")
+      assert response = json_response(request, 200)
+      assert is_list(response)
+      assert length(response) > 0
+
+      Enum.each(response, fn method ->
+        assert %{"method_id" => method_id, "name" => name} = method
+        assert method_id =~ ~r/^0x[0-9a-f]{8}$/
+        assert is_binary(name) and name != ""
+      end)
+    end
+  end
+
   describe "/advanced_filters/methods?q=" do
     test "returns empty list if method does not exist", %{conn: conn} do
       request = get(conn, "/api/v2/advanced-filters/methods", %{"q" => "foo"})
+      assert response = json_response(request, 200)
+      assert response == []
+    end
+
+    test "returns empty list for empty q", %{conn: conn} do
+      request = get(conn, "/api/v2/advanced-filters/methods", %{"q" => ""})
       assert response = json_response(request, 200)
       assert response == []
     end

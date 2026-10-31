@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.AddressController do
   use BlockScoutWeb, :controller
   use Utils.CompileTimeEnvHelper, chain_identity: [:explorer, :chain_identity], chain_type: [:explorer, :chain_type]
@@ -29,15 +30,11 @@ defmodule BlockScoutWeb.API.V2.AddressController do
 
   import Explorer.Helper, only: [safe_parse_non_negative_integer: 1]
 
-  import Explorer.MicroserviceInterfaces.BENS,
-    only: [
-      maybe_preload_ens: 1,
-      maybe_preload_ens_for_token_transfers: 1,
-      maybe_preload_ens_for_transactions: 1,
-      maybe_preload_ens_to_address: 1
-    ]
+  import Explorer.MicroserviceInterfaces.BENS, only: [maybe_preload_ens_to_address: 1]
 
-  import Explorer.MicroserviceInterfaces.Metadata, only: [maybe_preload_metadata: 1]
+  import Explorer.Chain.Address.MetadataPreloader,
+    only: [maybe_preload_ens_and_metadata: 1, maybe_preload_ens_and_metadata: 2]
+
   import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
 
   alias BlockScoutWeb.AccessHelper
@@ -54,6 +51,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
   alias Explorer.{Chain, Market, PagingOptions}
   alias Explorer.Chain.{Address, Beacon.Deposit, Block, Hash, Token, Transaction}
   alias Explorer.Chain.Address.{CoinBalance, Counters}
+  alias Explorer.Chain.Cache.Counters.AddressCounters
 
   alias Explorer.Chain.Token.FiatValue
   alias Explorer.Chain.Token.Instance
@@ -80,13 +78,51 @@ defmodule BlockScoutWeb.API.V2.AddressController do
 
   @token_transfer_necessity_by_association [
     necessity_by_association: %{
-      [to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
-      [from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]] => :optional,
       :block => :optional,
       :transaction => :optional,
       [token: reputation_association()] => :optional
     },
     api?: true
+  ]
+
+  # Address-info associations shared by every participant role of a list item.
+  # Loaded once for the whole page by `Chain.preload_address_participants/4`
+  # rather than per role through `necessity_by_association`.
+  @transaction_participant_necessity_by_association %{
+    :scam_badge => :optional,
+    :names => :optional,
+    proxy_implementations_association() => :optional
+  }
+
+  @token_transfer_participant_necessity_by_association %{
+    :scam_badge => :optional,
+    :names => :optional,
+    :smart_contract => :optional,
+    proxy_implementations_association() => :optional
+  }
+
+  @transaction_address_fields [
+    {:from_address_hash, :from_address},
+    {:to_address_hash, :to_address},
+    {:created_contract_address_hash, :created_contract_address}
+  ]
+
+  @token_transfer_address_fields [
+    {:from_address_hash, :from_address},
+    {:to_address_hash, :to_address}
+  ]
+
+  @internal_transaction_participant_necessity_by_association %{
+    :scam_badge => :optional,
+    :names => :optional,
+    :smart_contract => :optional,
+    proxy_implementations_association() => :optional
+  }
+
+  @internal_transaction_address_fields [
+    {:from_address_hash, :from_address},
+    {:to_address_hash, :to_address},
+    {:created_contract_address_hash, :created_contract_address}
   ]
 
   case @chain_identity do
@@ -294,16 +330,18 @@ defmodule BlockScoutWeb.API.V2.AddressController do
     with {:ok, address_hash} <- validate_address_hash(address_hash_string, params) do
       case Chain.hash_to_address(address_hash, Keyword.merge(@api_true, necessity_by_association: %{})) do
         {:ok, address} ->
-          {validation_count} = Counters.address_counters(address, @api_true)
+          validation_count = Counters.address_to_validation_count(address.hash, @api_true)
 
-          transactions_from_db = address.transactions_count || 0
-          token_transfers_from_db = address.token_transfers_count || 0
-          address_gas_usage_from_db = address.gas_used || 0
+          %{
+            transactions_count: transactions_count,
+            token_transfers_count: token_transfers_count,
+            gas_used: gas_used
+          } = AddressCounters.fetch(address)
 
           json(conn, %{
-            transactions_count: to_string(transactions_from_db),
-            token_transfers_count: to_string(token_transfers_from_db),
-            gas_usage_count: to_string(address_gas_usage_from_db),
+            transactions_count: to_string(transactions_count),
+            token_transfers_count: to_string(token_transfers_count),
+            gas_usage_count: to_string(gas_used),
             validations_count: to_string(validation_count)
           })
 
@@ -461,7 +499,14 @@ defmodule BlockScoutWeb.API.V2.AddressController do
           |> put_status(200)
           |> put_view(TransactionView)
           |> render(:transactions, %{
-            transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+            transactions:
+              transactions
+              |> Chain.preload_address_participants(
+                @transaction_address_fields,
+                @transaction_participant_necessity_by_association,
+                @api_true
+              )
+              |> maybe_preload_ens_and_metadata(:transactions),
             next_page_params: next_page_params
           })
 
@@ -477,31 +522,11 @@ defmodule BlockScoutWeb.API.V2.AddressController do
     end
   end
 
+  # Address participants are loaded separately by
+  # `Chain.preload_address_participants/4`, which shares one query pass between
+  # `from`/`to`/`created_contract` instead of repeating it per role.
   defp address_transactions_necessity_by_association do
-    %{
-      [
-        created_contract_address: [
-          :scam_badge,
-          :names,
-          proxy_implementations_association()
-        ]
-      ] => :optional,
-      [
-        from_address: [
-          :scam_badge,
-          :names,
-          proxy_implementations_association()
-        ]
-      ] => :optional,
-      [
-        to_address: [
-          :scam_badge,
-          :names,
-          proxy_implementations_association()
-        ]
-      ] => :optional,
-      :block => :optional
-    }
+    %{:block => :optional}
     |> Map.merge(@chain_type_transaction_necessity_by_association)
   end
 
@@ -597,9 +622,13 @@ defmodule BlockScoutWeb.API.V2.AddressController do
           |> render(:token_transfers, %{
             token_transfers:
               token_transfers
+              |> Chain.preload_address_participants(
+                @token_transfer_address_fields,
+                @token_transfer_participant_necessity_by_association,
+                @api_true
+              )
               |> Instance.preload_nft(@api_true)
-              |> maybe_preload_ens_for_token_transfers()
-              |> maybe_preload_metadata(),
+              |> maybe_preload_ens_and_metadata(:token_transfers),
             next_page_params: next_page_params
           })
 
@@ -658,15 +687,15 @@ defmodule BlockScoutWeb.API.V2.AddressController do
     with {:ok, address_hash} <- validate_address_hash(address_hash_string, params) do
       case Address.check_address_exists(address_hash, @api_true) do
         :ok ->
+          # Nested address-info preloads are intentionally absent from
+          # `:address_preloads`: `address_to_internal_transactions/2` resolves the
+          # bare addresses and aligns the `*_address_hash` fields for both the
+          # hash-based and the address-id-based schema, after which
+          # `Chain.preload_address_participants/4` loads the info for all three
+          # roles in a single pass instead of one per role.
           full_options =
-            [
-              address_preloads: [
-                created_contract_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
-                from_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
-                to_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]
-              ]
-            ]
-            |> Keyword.merge(paging_options(params))
+            params
+            |> paging_options()
             |> Keyword.merge(current_filter(params))
             |> Keyword.merge(@api_true)
 
@@ -680,7 +709,14 @@ defmodule BlockScoutWeb.API.V2.AddressController do
           |> put_status(200)
           |> put_view(TransactionView)
           |> render(:internal_transactions, %{
-            internal_transactions: internal_transactions |> maybe_preload_ens() |> maybe_preload_metadata(),
+            internal_transactions:
+              internal_transactions
+              |> Chain.preload_address_participants(
+                @internal_transaction_address_fields,
+                @internal_transaction_participant_necessity_by_association,
+                @api_true
+              )
+              |> maybe_preload_ens_and_metadata(),
             next_page_params: next_page_params
           })
 
@@ -755,7 +791,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
           |> put_status(200)
           |> put_view(TransactionView)
           |> render(:logs, %{
-            logs: logs |> maybe_preload_ens() |> maybe_preload_metadata(),
+            logs: logs |> maybe_preload_ens_and_metadata(),
             next_page_params: next_page_params
           })
 
@@ -1085,7 +1121,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
           |> put_status(200)
           |> put_view(WithdrawalView)
           |> render(:withdrawals, %{
-            withdrawals: withdrawals |> maybe_preload_ens() |> maybe_preload_metadata(),
+            withdrawals: withdrawals |> maybe_preload_ens_and_metadata(),
             next_page_params: next_page_params
           })
 
@@ -1113,22 +1149,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
         {"List of native coin holders with their balances, with pagination.", "application/json",
          SchemasHelper.extend_schema(
            paginated_response(
-             items:
-               Schemas.Address.schema()
-               |> SchemasHelper.extend_schema(
-                 properties: %{
-                   coin_balance: Schemas.General.IntegerStringNullable,
-                   transactions_count: %Schema{
-                     anyOf: [
-                       Schemas.General.IntegerString,
-                       # TODO: replace empty string with null?
-                       Schemas.General.EmptyString
-                     ],
-                     nullable: true
-                   }
-                 },
-                 required: [:coin_balance, :transactions_count]
-               ),
+             items: Schemas.Address.TopAddress,
              next_page_params_example: %{
                "fetched_coin_balance" => "124355417998347240251800",
                "hash" => "0x59708733fbbf64378d9293ec56b977c011a08fd2",
@@ -1179,7 +1200,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
     conn
     |> put_status(200)
     |> render(:addresses, %{
-      addresses: addresses |> maybe_preload_ens() |> maybe_preload_metadata(),
+      addresses: addresses |> maybe_preload_ens_and_metadata(),
       next_page_params: next_page_params,
       exchange_rate: exchange_rate,
       total_supply: total_supply
@@ -1621,7 +1642,7 @@ defmodule BlockScoutWeb.API.V2.AddressController do
       |> put_status(200)
       |> put_view(DepositView)
       |> render(:deposits, %{
-        deposits: deposits |> maybe_preload_ens() |> maybe_preload_metadata(),
+        deposits: deposits |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end

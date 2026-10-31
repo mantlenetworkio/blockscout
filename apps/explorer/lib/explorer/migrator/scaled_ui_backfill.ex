@@ -708,7 +708,7 @@ defmodule Explorer.Migrator.ScaledUiBackfill do
 
     internal_transaction_block =
       InternalTransaction
-      |> InternalTransaction.where_address_match(:created_contract_address, token_hash)
+      |> InternalTransaction.where_address_match_by_hash(:created_contract_address, token_hash, [])
       |> InternalTransaction.join_transaction_query()
       |> select([internal_transaction, transaction: _transaction], min(internal_transaction.block_number))
       |> Repo.one(timeout: @timeout)

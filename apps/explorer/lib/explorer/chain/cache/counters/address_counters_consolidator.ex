@@ -1,0 +1,911 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
+defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
+  @moduledoc """
+  The single writer of the per-address counters columns
+  (`addresses.transactions_count`, `addresses.token_transfers_count`,
+  `addresses.gas_used`).
+
+  Periodically consolidates the counters of the addresses marked dirty in
+  `Explorer.Chain.Cache.Counters.AddressCounters` (a cycle is skipped entirely
+  when no address was marked since the last one):
+
+  * an address with a `counters_updated_at` watermark gets three cheap
+    range-bounded aggregates over `(counters_updated_at, safe_block]` whose
+    results are added to the columns;
+  * an address without a watermark (`NULL` — not yet backfilled, or reset by
+    a deep reorg) gets full aggregates bounded by `safe_block` written as
+    absolute values.
+
+  An address with more rows above its watermark than one step covers (the
+  `step_rows` setting, per row source: transactions from and to it, token
+  transfers from and to it) advances in block range steps instead, so that no
+  aggregate grows with the history of the address (the system addresses of OP
+  chains have a transaction in every block). A step ends at the block of the
+  last row it may cover and is stored on its own: absolute values for the
+  first step of an address without a watermark, increments afterwards. The
+  watermark keeps the progress. Such addresses take turns within a chunk, in a
+  random order, until a time budget is spent (the first one always takes a
+  step); one that is not caught up keeps its dirty marker for the next cycle,
+  which then starts after a short pause (`catch_up_pause`) instead of the
+  regular interval, unless something failed in the cycle.
+  `consolidate_addresses/2` (the backfill) adds the steps of an address up and
+  stores them at once instead.
+
+  `safe_block` stays a configurable lag behind the chain head so that shallow
+  reorgs never invalidate consolidated ranges, and never advances past the
+  lowest missing block range or block pending re-fetch counter correction, so
+  that catchup and block re-fetch cannot make consolidated ranges lose or
+  double-count rows.
+
+  Each cycle starts by settling pending block re-fetch corrections via
+  `Explorer.Chain.Cache.Counters.Consolidation.settle_pending_refetch_blocks/0`:
+  for every block whose old content was subtracted when it was queued for
+  re-fetch (see `Explorer.Utility.CountersRefetchBlock`) and which has been
+  fully re-imported since, the new content is added back to the counters
+  covered by the consolidation watermarks.
+
+  Known accepted limitations:
+
+  * pending transactions are not counted (all aggregates are bounded by block
+    number) — the legacy on-view counters included them;
+  * `transactions_count`/`token_transfers_count` are clamped at the int4
+    maximum of their columns;
+  * a reorg deeper than the safety lag that lands while a consolidation cycle
+    is aggregating the very same address can leave the forked content counted
+    until the address is recalculated (watermark reset) for another reason;
+  * an address catching up in steps shows the counters of the blocks
+    consolidated so far; as the dirty markers live in memory, one without
+    further activity stays there after a restart until its next activity
+    (like any address whose marker is lost).
+  """
+
+  use GenServer
+
+  import Ecto.Query
+
+  require Logger
+
+  alias Explorer.Chain.{Address, Hash, TokenTransfer, Transaction}
+  alias Explorer.Chain.Address.Counters
+  alias Explorer.Chain.Cache.BlockNumber
+  alias Explorer.Chain.Cache.Counters.{AddressCounters, Consolidation, Helper}
+  alias Explorer.Repo
+
+  @int4_max 2_147_483_647
+
+  @spec start_link(term()) :: GenServer.on_start()
+  def start_link(_) do
+    GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
+  end
+
+  @impl true
+  def init(_args) do
+    schedule_next_consolidation(:timer.seconds(10))
+
+    {:ok, %{cycle_task: nil, cycle_started_at: nil, last_cycle_finished_at: nil}}
+  end
+
+  # A cycle can run for a long time (draining a large dirty backlog, full
+  # recalculations of heavy addresses), so it runs in a separate supervised
+  # task: the process itself stays responsive to system messages
+  # (`:sys.get_state/1`, observer) and its state reports the running cycle.
+  # The next cycle is scheduled only once the previous one finished, so cycles
+  # never overlap.
+  @impl true
+  def handle_info(:consolidate, %{cycle_task: nil} = state) do
+    task = Task.Supervisor.async_nolink(Explorer.TaskSupervisor, &consolidate/0)
+
+    {:noreply, %{state | cycle_task: task, cycle_started_at: DateTime.utc_now()}}
+  end
+
+  # a stray tick while a cycle is still running — the next one is scheduled on
+  # its completion
+  def handle_info(:consolidate, state), do: {:noreply, state}
+
+  def handle_info({ref, result}, %{cycle_task: %Task{ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+
+    {:noreply, finish_cycle(state, result)}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{cycle_task: %Task{ref: ref}} = state) do
+    Logger.error(fn -> ["Address counters consolidation cycle crashed: ", inspect(reason)] end)
+
+    {:noreply, finish_cycle(state, :ok)}
+  end
+
+  def handle_info(_, state), do: {:noreply, state}
+
+  # an address left part-way by the time budget of the cycle gets the next one
+  # after a short pause instead of the regular interval
+  defp finish_cycle(state, result) do
+    schedule_next_consolidation(if(result == :catching_up, do: catch_up_pause(), else: interval()))
+
+    %{state | cycle_task: nil, cycle_started_at: nil, last_cycle_finished_at: DateTime.utc_now()}
+  end
+
+  @doc """
+  Runs one consolidation cycle synchronously. Exposed for tests and manual
+  runs; the supervised process runs it in a task on every `:consolidate` tick.
+  Returns `:catching_up` when the time budget left an address consolidated in
+  steps part-way and nothing failed, `:ok` otherwise.
+  """
+  @spec consolidate() :: :ok | :catching_up
+  def consolidate do
+    settlement = Consolidation.settle_pending_refetch_blocks()
+
+    with false <- AddressCounters.dirty_empty?(),
+         safe_block when is_integer(safe_block) <- safe_block(),
+         outcome = consolidate_dirty(AddressCounters.select_dirty(batch_size() * concurrency()), safe_block),
+         :catching_up <- combine(outcome, settlement) do
+      :catching_up
+    else
+      _ -> :ok
+    end
+  end
+
+  @doc """
+  See `Explorer.Chain.Cache.Counters.Consolidation.safe_block/0`.
+  """
+  defdelegate safe_block, to: Consolidation
+
+  @doc """
+  Consolidates the given addresses up to `safe_block` synchronously: full
+  aggregates for addresses without a `counters_updated_at` watermark,
+  incremental range aggregates for the rest. An address with more rows than
+  one step covers is aggregated in steps that are added up and stored at
+  once, at `safe_block`, without the time budget of the cycles: a failure
+  stores nothing. Used by `Explorer.Migrator.BackfillAddressCounters` and
+  available for on-demand recalculation.
+  """
+  @spec consolidate_addresses([Hash.Address.t()], non_neg_integer()) :: :ok
+  def consolidate_addresses(address_hashes, safe_block) do
+    address_hashes
+    |> Enum.map(& &1.bytes)
+    |> load_addresses()
+    |> Enum.reject(&(&1.counters_updated_at && &1.counters_updated_at >= safe_block))
+    |> case do
+      [] -> :ok
+      addresses -> consolidate_chunk(addresses, safe_block, :backfill)
+    end
+
+    :ok
+  end
+
+  # returns the outcome of the cycle, see `combine/2`
+  defp consolidate_dirty(:"$end_of_table", _safe_block), do: :ok
+
+  defp consolidate_dirty({entries, continuation}, safe_block) do
+    outcome = process_entries(entries, safe_block)
+
+    continuation
+    |> AddressCounters.select_dirty()
+    |> consolidate_dirty(safe_block)
+    |> combine(outcome)
+  end
+
+  defp process_entries(entries, safe_block) do
+    entry_bytes = Enum.map(entries, fn {bytes, _marker_block} -> bytes end)
+    addresses_by_bytes = Map.new(load_addresses(entry_bytes), &{&1.hash.bytes, &1})
+
+    {found_bytes, missing_bytes} = Enum.split_with(entry_bytes, &Map.has_key?(addresses_by_bytes, &1))
+
+    # markers without a corresponding address row are garbage
+    AddressCounters.delete_dirty_markers(missing_bytes, safe_block)
+
+    found_bytes
+    |> Enum.map(&Map.fetch!(addresses_by_bytes, &1))
+    |> Enum.reject(&(&1.counters_updated_at && &1.counters_updated_at >= safe_block))
+    |> Enum.chunk_every(batch_size())
+    |> Task.async_stream(&consolidate_chunk(&1, safe_block, :cycle), max_concurrency: concurrency(), timeout: :infinity)
+    |> Enum.reduce(:ok, fn {:ok, outcome}, acc -> combine(acc, outcome) end)
+  end
+
+  # The cycles store every step, so that a heavy address progresses across
+  # cycles; the backfill adds the steps of an address up and stores them at
+  # once (see `backfill_in_steps/3`).
+  defp consolidate_chunk(addresses, safe_block, mode) do
+    {found, unknown} =
+      addresses
+      |> Enum.map(&{&1, step_target(&1, safe_block)})
+      |> Enum.split_with(&match?({_address, {:ok, _target}}, &1))
+
+    {whole, stepped} =
+      found
+      |> Enum.map(fn {address, {:ok, target}} -> {address, target} end)
+      |> Enum.split_with(fn {_address, target} -> target == safe_block end)
+
+    results = Enum.map(whole, fn {address, _target} -> compute_address_deltas(address, safe_block) end)
+    computed = Enum.reject(results, &is_nil/1)
+    stored = store_results(computed, safe_block)
+    AddressCounters.delete_dirty_markers(stored, safe_block)
+
+    # a failed aggregate, a failed probe or a rejected write
+    whole_failed? = length(computed) < length(results) or length(stored) < length(computed) or unknown != []
+
+    # an address whose step could not be found is left to a later cycle,
+    # rather than aggregated over its whole history
+    unknown
+    |> Enum.map(fn {address, :error} -> address end)
+    |> keep_dirty(safe_block)
+
+    case mode do
+      :cycle ->
+        # a random order keeps an address that exhausts the time budget from
+        # starving the others of its chunk
+        stepped
+        |> Enum.shuffle()
+        |> consolidate_in_steps(safe_block, System.monotonic_time(:millisecond) + step_time_budget())
+        |> combine(if(whole_failed?, do: :failed, else: :ok))
+
+      :backfill ->
+        Enum.each(stepped, fn {address, target} -> backfill_in_steps(address, target, safe_block) end)
+        :ok
+    end
+  end
+
+  # The outcome of a chunk, a page or a cycle: `:failed` when the settlement
+  # of re-fetched blocks, an aggregate, a probe or a guarded write failed, so
+  # that the next cycle keeps the regular interval and a failing query is not
+  # retried after a short pause; otherwise `:catching_up` when the time budget
+  # left an address part-way.
+  defp combine(:failed, _outcome), do: :failed
+  defp combine(_outcome, :failed), do: :failed
+  defp combine(:catching_up, _outcome), do: :catching_up
+  defp combine(_outcome, :catching_up), do: :catching_up
+  defp combine(:ok, :ok), do: :ok
+
+  # Writes the given aggregates as consolidated up to `block_number` and
+  # re-bases the cached display values of the updated addresses on them.
+  # Returns the hash bytes of the updated addresses.
+  defp store_results(results, block_number) do
+    {increments, inits} = Enum.split_with(results, & &1.address.counters_updated_at)
+
+    updated_rows = apply_increments(increments, block_number) ++ apply_inits(inits, block_number)
+    updated_values_by_bytes = Map.new(updated_rows, &{&1.hash.bytes, &1})
+
+    updated_results =
+      Enum.filter(results, fn result -> Map.has_key?(updated_values_by_bytes, result.address.hash.bytes) end)
+
+    Enum.each(updated_results, fn result ->
+      bytes = result.address.hash.bytes
+      new_values = Map.fetch!(updated_values_by_bytes, bytes)
+
+      AddressCounters.refresh_from_consolidation(
+        bytes,
+        result.direction_field,
+        %{
+          transactions_count: new_values.transactions_count || 0,
+          token_transfers_count: new_values.token_transfers_count || 0,
+          gas_used: new_values.gas_used || 0
+        },
+        result.snapshot
+      )
+    end)
+
+    Enum.map(updated_results, & &1.address.hash.bytes)
+  end
+
+  # The addresses take turns until the time budget is spent; the first one
+  # always takes a step, so every chunk makes progress. An address that is not
+  # caught up keeps its dirty marker for the next cycle.
+  defp consolidate_in_steps(stepped, safe_block, deadline) do
+    statuses =
+      stepped
+      |> Enum.with_index()
+      |> Enum.map(fn {{address, target}, index} ->
+        if index == 0 or before?(deadline) do
+          take_steps(address, target, safe_block, deadline)
+        else
+          :unfinished
+        end
+      end)
+
+    cond do
+      :failed in statuses -> :failed
+      :unfinished in statuses -> :catching_up
+      true -> :ok
+    end
+  end
+
+  # a failed aggregate or a watermark moved concurrently leaves the address to
+  # a later cycle, which continues from the stored state
+  defp take_steps(address, target, safe_block, deadline) do
+    with %{} = result <- compute_address_deltas(address, target),
+         [_] <- store_results([result], target) do
+      after_step(%{address | counters_updated_at: target}, safe_block, deadline)
+    else
+      _ -> leave_part_way(address, safe_block, :failed)
+    end
+  end
+
+  defp after_step(%{counters_updated_at: safe_block} = address, safe_block, _deadline) do
+    AddressCounters.delete_dirty_markers([address.hash.bytes], safe_block)
+    :caught_up
+  end
+
+  defp after_step(address, safe_block, deadline) do
+    if before?(deadline) do
+      case step_target(address, safe_block) do
+        {:ok, target} -> take_steps(address, target, safe_block, deadline)
+        :error -> leave_part_way(address, safe_block, :failed)
+      end
+    else
+      leave_part_way(address, safe_block, :unfinished)
+    end
+  end
+
+  defp leave_part_way(address, safe_block, reason) do
+    keep_dirty([address], safe_block)
+    reason
+  end
+
+  # Adds the steps of the address up in memory and stores them at once, at the
+  # safe block. A failure stores nothing: the address keeps its watermark (NULL
+  # for the backfill), so the retry passes of the backfill take it again
+  # without relying on a dirty marker, which a full markers table drops.
+  defp backfill_in_steps(address, target, safe_block) do
+    case add_up_steps(address, address.counters_updated_at, target, safe_block, nil) do
+      %{} = total ->
+        [total]
+        |> store_results(safe_block)
+        |> AddressCounters.delete_dirty_markers(safe_block)
+
+      _ ->
+        keep_dirty([address], safe_block)
+    end
+  end
+
+  defp add_up_steps(address, reached, target, safe_block, total) do
+    with %{} = step <- compute_address_deltas(%{address | counters_updated_at: reached}, target) do
+      next_step(address, target, safe_block, add_step(total, step, address))
+    end
+  end
+
+  defp next_step(_address, safe_block, safe_block, total), do: total
+
+  defp next_step(address, reached, safe_block, total) do
+    with {:ok, target} <- step_target(%{address | counters_updated_at: reached}, safe_block) do
+      add_up_steps(address, reached, target, safe_block, total)
+    end
+  end
+
+  # the first step brings the display snapshot; the total keeps the address as
+  # loaded, so that it is stored against the watermark it was read with
+  defp add_step(nil, step, address), do: %{step | address: address}
+
+  defp add_step(total, step, _address) do
+    %{
+      total
+      | transactions_count: total.transactions_count + step.transactions_count,
+        token_transfers_count: total.token_transfers_count + step.token_transfers_count,
+        gas_used: total.gas_used + step.gas_used
+    }
+  end
+
+  # the marker may be missing when the call comes from the backfill
+  defp keep_dirty([], _safe_block), do: :ok
+
+  defp keep_dirty(addresses, safe_block) do
+    addresses
+    |> Enum.map(&{&1.hash.bytes, safe_block})
+    |> AddressCounters.mark_dirty()
+  end
+
+  defp before?(deadline), do: System.monotonic_time(:millisecond) < deadline
+
+  # The block a step of the address aggregates up to: `safe_block`, unless a
+  # row source of the address holds more than `step_rows()` rows above the
+  # watermark, in which case the step ends at the block of the last row it
+  # may cover; `:error` when that cannot be found. A range of at most
+  # `step_rows() / 20` blocks (the range of a regular cycle) is taken whole
+  # without looking: it holds more rows only for an address with over 20
+  # rows a block.
+  defp step_target(address, safe_block) do
+    from_block_number = address.counters_updated_at
+
+    if safe_block - (from_block_number || -1) <= div(step_rows(), 20) do
+      {:ok, safe_block}
+    else
+      {:ok, step_end(address, from_block_number, safe_block)}
+    end
+  rescue
+    error ->
+      Logger.warning(fn ->
+        [
+          "Failed to find the consolidation step of address #{to_string(address.hash)}: ",
+          Exception.format(:error, error, __STACKTRACE__)
+        ]
+      end)
+
+      :error
+  end
+
+  # The earliest step end among the row sources of the address (`safe_block`
+  # when none holds more than `step_rows()` rows above the watermark). The
+  # database cancels the probes at the query timeout, as it does the
+  # aggregates.
+  defp step_end(address, from_block_number, safe_block) do
+    probe = fn {schema, field} ->
+      schema
+      |> step_end_query(field, address.hash, from_block_number, safe_block)
+      |> Repo.one(timeout: query_timeout() + :timer.seconds(10))
+    end
+
+    sources = [
+      {Transaction, :from_address_hash},
+      {Transaction, :to_address_hash},
+      {TokenTransfer, :from_address_hash},
+      {TokenTransfer, :to_address_hash}
+    ]
+
+    case Helper.with_statement_timeout(query_timeout(), fn -> Enum.map(sources, probe) end) do
+      {:ok, ends} -> ends |> Enum.reject(&is_nil/1) |> Enum.min(fn -> safe_block end)
+      {:error, :timeout} -> raise "the step probes ran past the query timeout of #{query_timeout()} ms"
+    end
+  end
+
+  # the block of the `step_rows()`-th row of a row source above the
+  # watermark, read from the (address, block number) index of the source,
+  # with the address as a subquery result (see `where_in_range/3`)
+  defp step_end_query(schema, field, address_hash, from_block_number, safe_block) do
+    query =
+      from(row in schema,
+        where:
+          fragment("? = (SELECT ?::bytea)", field(row, ^field), ^address_hash.bytes) and
+            row.block_number <= ^safe_block,
+        order_by: [asc: row.block_number],
+        offset: ^(step_rows() - 1),
+        limit: 1,
+        select: row.block_number
+      )
+
+    if is_nil(from_block_number), do: query, else: where(query, [row], row.block_number > ^from_block_number)
+  end
+
+  defp compute_address_deltas(address, safe_block) do
+    from_block_number = address.counters_updated_at
+    direction_field = Counters.gas_usage_direction_field(address)
+    snapshot = AddressCounters.snapshot(address.hash.bytes)
+
+    # the database cancels the aggregates at the query timeout: a client that
+    # gives up does not stop a statement on the server
+    {transactions_count, token_transfers_count, gas_used} =
+      case Helper.with_statement_timeout(query_timeout(), fn ->
+             aggregate_counters(address, direction_field, from_block_number, safe_block)
+           end) do
+        {:ok, counters} -> counters
+        {:error, :timeout} -> raise "the aggregates ran past the query timeout of #{query_timeout()} ms"
+      end
+
+    %{
+      address: address,
+      direction_field: direction_field,
+      snapshot: snapshot,
+      transactions_count: transactions_count,
+      token_transfers_count: token_transfers_count,
+      gas_used: gas_used
+    }
+  rescue
+    error ->
+      Logger.warning(fn ->
+        [
+          "Failed to consolidate counters for address #{to_string(address.hash)}: ",
+          Exception.format(:error, error, __STACKTRACE__)
+        ]
+      end)
+
+      nil
+  end
+
+  defp aggregate_counters(address, direction_field, from_block_number, safe_block) do
+    # the database cancels a statement at the query timeout, before the client
+    # would give up on it
+    timeout = query_timeout() + :timer.seconds(10)
+    range = {address.hash.bytes, from_block_number || -1, safe_block}
+
+    # the same sides as `Transaction.where_transactions_to_from/1`: incoming
+    # transactions for smart contracts, both sides otherwise
+    transaction_fields =
+      if direction_field == :to_address_hash, do: [:to_address_hash], else: [:from_address_hash, :to_address_hash]
+
+    # one pass over the transactions for both of their counters: the gas sum
+    # reads the rows from the table anyway
+    {transactions_count, gas_used} =
+      Transaction
+      |> where_in_range(transaction_fields, range)
+      |> select(
+        [transaction],
+        {count(transaction.hash),
+         filter(sum(transaction.gas_used), field(transaction, ^direction_field) == ^address.hash)}
+      )
+      |> Repo.one!(timeout: timeout)
+
+    token_transfers_count =
+      TokenTransfer
+      |> where_in_range([:to_address_hash, :from_address_hash], range)
+      |> Repo.aggregate(:count, timeout: timeout)
+
+    {transactions_count, token_transfers_count, Helper.gas_to_integer(gas_used)}
+  end
+
+  # Rows whose `fields` (one of them) hold the address, in the block range
+  # (from, to]: each side is read from its (address, block number) index, from
+  # the first to the last row of the range. The address reaches the planner as
+  # a subquery result. Given the value itself, the planner expects millions of
+  # rows in the range for an address with a large share of the table (a busy
+  # token contract) and reads the whole table, or the block number index,
+  # instead.
+  defp where_in_range(query, fields, {address_bytes, from_block_number, to_block_number}) do
+    condition =
+      fields
+      |> Enum.map(fn field ->
+        dynamic(
+          [row],
+          fragment("? = (SELECT ?::bytea)", field(row, ^field), ^address_bytes) and
+            row.block_number > ^from_block_number and row.block_number <= ^to_block_number
+        )
+      end)
+      |> Enum.reduce(&dynamic(^&2 or ^&1))
+
+    where(query, ^condition)
+  end
+
+  defp apply_increments([], _safe_block), do: []
+
+  defp apply_increments(results, safe_block) do
+    hashes = Enum.map(results, & &1.address.hash.bytes)
+    expected_froms = Enum.map(results, & &1.address.counters_updated_at)
+    transactions_deltas = Enum.map(results, & &1.transactions_count)
+    token_transfers_deltas = Enum.map(results, & &1.token_transfers_count)
+    gas_deltas = Enum.map(results, & &1.gas_used)
+
+    query =
+      from(
+        address in Address,
+        join:
+          deltas in fragment(
+            """
+            (SELECT unnest(?::bytea[]) AS hash, unnest(?::bigint[]) AS expected_from,
+                    unnest(?::bigint[]) AS transactions_delta, unnest(?::bigint[]) AS token_transfers_delta,
+                    unnest(?::bigint[]) AS gas_delta)
+            """,
+            ^hashes,
+            ^expected_froms,
+            ^transactions_deltas,
+            ^token_transfers_deltas,
+            ^gas_deltas
+          ),
+        on: address.hash == deltas.hash,
+        where: address.hash in subquery(addresses_lock_query(hashes)),
+        where: address.counters_updated_at == deltas.expected_from,
+        update: [
+          set: [
+            transactions_count:
+              fragment("LEAST(COALESCE(?, 0) + ?, ?)", address.transactions_count, deltas.transactions_delta, @int4_max),
+            token_transfers_count:
+              fragment(
+                "LEAST(COALESCE(?, 0) + ?, ?)",
+                address.token_transfers_count,
+                deltas.token_transfers_delta,
+                @int4_max
+              ),
+            gas_used: fragment("COALESCE(?, 0) + ?", address.gas_used, deltas.gas_delta),
+            counters_updated_at: ^safe_block,
+            updated_at: ^DateTime.utc_now()
+          ]
+        ],
+        select: %{
+          hash: address.hash,
+          transactions_count: address.transactions_count,
+          token_transfers_count: address.token_transfers_count,
+          gas_used: address.gas_used
+        }
+      )
+
+    {_count, rows} = Repo.update_all(query, [], timeout: query_timeout())
+
+    rows
+  end
+
+  defp apply_inits([], _safe_block), do: []
+
+  defp apply_inits(results, safe_block) do
+    hashes = Enum.map(results, & &1.address.hash.bytes)
+    transactions_counts = Enum.map(results, & &1.transactions_count)
+    token_transfers_counts = Enum.map(results, & &1.token_transfers_count)
+    gas_sums = Enum.map(results, & &1.gas_used)
+
+    query =
+      from(
+        address in Address,
+        join:
+          values in fragment(
+            """
+            (SELECT unnest(?::bytea[]) AS hash, unnest(?::bigint[]) AS transactions_count,
+                    unnest(?::bigint[]) AS token_transfers_count, unnest(?::bigint[]) AS gas_used)
+            """,
+            ^hashes,
+            ^transactions_counts,
+            ^token_transfers_counts,
+            ^gas_sums
+          ),
+        on: address.hash == values.hash,
+        where: address.hash in subquery(addresses_lock_query(hashes)),
+        where: is_nil(address.counters_updated_at),
+        update: [
+          set: [
+            transactions_count: fragment("LEAST(?, ?)", values.transactions_count, @int4_max),
+            token_transfers_count: fragment("LEAST(?, ?)", values.token_transfers_count, @int4_max),
+            gas_used: values.gas_used,
+            counters_updated_at: ^safe_block,
+            updated_at: ^DateTime.utc_now()
+          ]
+        ],
+        select: %{
+          hash: address.hash,
+          transactions_count: address.transactions_count,
+          token_transfers_count: address.token_transfers_count,
+          gas_used: address.gas_used
+        }
+      )
+
+    {_count, rows} = Repo.update_all(query, [], timeout: query_timeout())
+
+    rows
+  end
+
+  defp load_addresses(hash_bytes_list) do
+    hashes = Enum.map(hash_bytes_list, &%Hash{byte_count: 20, bytes: &1})
+
+    query =
+      from(address in Address,
+        where: address.hash in ^hashes,
+        select:
+          struct(address, [
+            :hash,
+            :contract_code,
+            :transactions_count,
+            :token_transfers_count,
+            :gas_used,
+            :counters_updated_at
+          ])
+      )
+
+    Repo.all(query, timeout: query_timeout())
+  end
+
+  @doc """
+  Applies the per-address counter deltas of the given transactions and token
+  transfers directly to the `addresses` columns, restricted per address to the
+  blocks already covered by its `counters_updated_at` watermark (contributions
+  above the watermark are left to regular range consolidation). `sign` selects
+  whether the contributions are added (`:positive` — re-imported content of
+  re-fetched blocks) or subtracted (`:negative` — old content of blocks queued
+  for re-fetch, see `Explorer.Chain.Import.Runner.Blocks`).
+
+  Runs on `Explorer.Repo` unless another repo is given. Returns the hash bytes
+  of the updated addresses.
+  """
+  @spec apply_covered_deltas([map()], [map()], :positive | :negative, Ecto.Repo.t()) :: [binary()]
+  def apply_covered_deltas(transactions, token_transfers, sign, repo \\ Repo) do
+    watermarks =
+      transactions
+      |> participant_hashes(token_transfers)
+      |> load_watermarks(repo)
+
+    deltas =
+      AddressCounters.compute_deltas(transactions, token_transfers, fn bytes, block_number ->
+        case watermarks[bytes] do
+          nil -> false
+          watermark -> block_number <= watermark
+        end
+      end)
+
+    if map_size(deltas) == 0 do
+      []
+    else
+      apply_signed_deltas(deltas, watermarks, sign, repo)
+    end
+  end
+
+  @doc """
+  Resets the `counters_updated_at` watermark of the given addresses — forcing
+  a full counters recalculation on their next consolidation — when their
+  watermark already covers the given block number (a covered range changed
+  under it: deep reorg, or rows inserted below the watermark by an
+  out-of-band importer). Reset addresses are marked dirty so the recalculation
+  is actually scheduled. Returns the hash bytes of the reset addresses; the
+  caller is responsible for invalidating the display cache.
+  """
+  @spec reset_covered_watermarks(%{binary() => non_neg_integer()}, Ecto.Repo.t()) :: [binary()]
+  def reset_covered_watermarks(min_block_by_hash_bytes, repo \\ Repo)
+
+  def reset_covered_watermarks(min_block_by_hash_bytes, _repo) when map_size(min_block_by_hash_bytes) == 0, do: []
+
+  def reset_covered_watermarks(min_block_by_hash_bytes, repo) do
+    {hashes, min_blocks} = min_block_by_hash_bytes |> Enum.sort() |> Enum.unzip()
+
+    query =
+      from(
+        address in Address,
+        join:
+          affected in fragment(
+            "(SELECT unnest(?::bytea[]) AS hash, unnest(?::bigint[]) AS block_number)",
+            ^hashes,
+            ^min_blocks
+          ),
+        on: address.hash == affected.hash,
+        # addresses whose watermark is below every given block can't be reset, so
+        # they aren't locked: a reorg within the safety lag locks nothing
+        where: address.hash in subquery(covered_addresses_lock_query(hashes, Enum.min(min_blocks))),
+        where: not is_nil(address.counters_updated_at) and address.counters_updated_at >= affected.block_number,
+        update: [set: [counters_updated_at: nil, updated_at: ^DateTime.utc_now()]],
+        select: address.hash
+      )
+
+    {_count, reset_hashes} = repo.update_all(query, [], timeout: query_timeout())
+
+    reset_bytes = Enum.map(reset_hashes, & &1.bytes)
+
+    # a spurious marker on transaction rollback is harmless (the guarded
+    # consolidation of a non-reset address is a no-op)
+    AddressCounters.mark_dirty(Enum.map(reset_bytes, &{&1, BlockNumber.get_max()}))
+
+    reset_bytes
+  end
+
+  defp apply_signed_deltas(deltas, watermarks, sign, repo) do
+    multiplier = if sign == :negative, do: -1, else: 1
+
+    entries = Enum.to_list(deltas)
+    hashes = Enum.map(entries, fn {bytes, _delta} -> bytes end)
+    expected_watermarks = Enum.map(entries, fn {bytes, _delta} -> watermarks[bytes] end)
+    transactions_deltas = Enum.map(entries, fn {_bytes, delta} -> multiplier * delta.transactions_count end)
+    token_transfers_deltas = Enum.map(entries, fn {_bytes, delta} -> multiplier * delta.token_transfers_count end)
+    gas_in_deltas = Enum.map(entries, fn {_bytes, delta} -> multiplier * delta.gas_in end)
+    gas_out_deltas = Enum.map(entries, fn {_bytes, delta} -> multiplier * delta.gas_out end)
+
+    query =
+      from(
+        address in Address,
+        join:
+          deltas in fragment(
+            """
+            (SELECT unnest(?::bytea[]) AS hash, unnest(?::bigint[]) AS expected_watermark,
+                    unnest(?::bigint[]) AS transactions_delta, unnest(?::bigint[]) AS token_transfers_delta,
+                    unnest(?::bigint[]) AS gas_in_delta, unnest(?::bigint[]) AS gas_out_delta)
+            """,
+            ^hashes,
+            ^expected_watermarks,
+            ^transactions_deltas,
+            ^token_transfers_deltas,
+            ^gas_in_deltas,
+            ^gas_out_deltas
+          ),
+        on: address.hash == deltas.hash,
+        where: address.hash in subquery(addresses_lock_query(hashes)),
+        # only apply when the watermark is unchanged since the deltas were
+        # computed; changed addresses are reset below for a full recalculation
+        where: address.counters_updated_at == deltas.expected_watermark,
+        update: [
+          set: [
+            transactions_count:
+              fragment(
+                "LEAST(GREATEST(COALESCE(?, 0) + ?, 0), ?)",
+                address.transactions_count,
+                deltas.transactions_delta,
+                @int4_max
+              ),
+            token_transfers_count:
+              fragment(
+                "LEAST(GREATEST(COALESCE(?, 0) + ?, 0), ?)",
+                address.token_transfers_count,
+                deltas.token_transfers_delta,
+                @int4_max
+              ),
+            # incoming gas for smart contracts, outgoing for EOAs — including
+            # EIP-7702 EOAs with delegated code (code starts with 0xef0100)
+            gas_used:
+              fragment(
+                """
+                GREATEST(COALESCE(?, 0) + CASE
+                  WHEN ? IS NULL OR substring(? from 1 for 3) = decode('ef0100', 'hex') THEN ?
+                  ELSE ?
+                END, 0)
+                """,
+                address.gas_used,
+                address.contract_code,
+                address.contract_code,
+                deltas.gas_out_delta,
+                deltas.gas_in_delta
+              ),
+            updated_at: ^DateTime.utc_now()
+          ]
+        ],
+        select: address.hash
+      )
+
+    {_count, updated_hashes} = repo.update_all(query, [], timeout: query_timeout())
+
+    updated_bytes = Enum.map(updated_hashes, & &1.bytes)
+
+    # addresses whose watermark moved between the read and the guarded update
+    # cannot be corrected by a delta anymore — force a full recalculation
+    missed_reset_bytes =
+      (hashes -- updated_bytes)
+      |> Map.new(&{&1, 0})
+      |> reset_covered_watermarks(repo)
+
+    updated_bytes ++ missed_reset_bytes
+  end
+
+  defp participant_hashes(transactions, token_transfers) do
+    (transactions ++ token_transfers)
+    |> Enum.flat_map(fn row -> [row.from_address_hash, row.to_address_hash] end)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(&AddressCounters.hash_bytes/1)
+    |> Enum.uniq()
+  end
+
+  defp load_watermarks(participant_bytes, repo) do
+    hashes = Enum.map(participant_bytes, &%Hash{byte_count: 20, bytes: &1})
+
+    from(address in Address,
+      where: address.hash in ^hashes and not is_nil(address.counters_updated_at),
+      select: {address.hash, address.counters_updated_at}
+    )
+    |> repo.all(timeout: query_timeout())
+    |> Map.new(fn {hash, watermark} -> {hash.bytes, watermark} end)
+  end
+
+  # Enforce Address ShareLocks order (see docs: sharelocks.md)
+  defp addresses_lock_query(hashes_bytes) do
+    hashes = Enum.map(hashes_bytes, &%Hash{byte_count: 20, bytes: &1})
+
+    from(
+      address in Address,
+      where: address.hash in ^hashes,
+      select: address.hash,
+      order_by: address.hash,
+      lock: "FOR NO KEY UPDATE"
+    )
+  end
+
+  defp covered_addresses_lock_query(hashes_bytes, min_block_number) do
+    where(addresses_lock_query(hashes_bytes), [address], address.counters_updated_at >= ^min_block_number)
+  end
+
+  defp schedule_next_consolidation(timeout) do
+    Process.send_after(self(), :consolidate, timeout)
+  end
+
+  defp interval do
+    Application.get_env(:explorer, __MODULE__)[:interval] || :timer.minutes(10)
+  end
+
+  defp batch_size do
+    Application.get_env(:explorer, __MODULE__)[:batch_size] || 100
+  end
+
+  defp concurrency do
+    Application.get_env(:explorer, __MODULE__)[:concurrency] || 4
+  end
+
+  defp query_timeout do
+    Application.get_env(:explorer, __MODULE__)[:query_timeout] || :timer.minutes(5)
+  end
+
+  defp step_rows do
+    Application.get_env(:explorer, __MODULE__)[:step_rows] || 5_000
+  end
+
+  defp catch_up_pause do
+    Application.get_env(:explorer, __MODULE__)[:catch_up_pause] || :timer.seconds(30)
+  end
+
+  # the time a chunk spends on addresses consolidated in steps
+  defp step_time_budget do
+    Application.get_env(:explorer, __MODULE__)[:step_time_budget] || query_timeout()
+  end
+end

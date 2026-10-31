@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Fetcher.TokenInstance.RealtimeTest do
   use EthereumJSONRPC.Case
   use Explorer.DataCase
@@ -111,7 +112,7 @@ defmodule Indexer.Fetcher.TokenInstance.RealtimeTest do
         )
 
       TokenInstanceRealtime.async_fetch([
-        %{token_contract_address_hash: token.contract_address_hash, token_ids: [Decimal.new(777)]}
+        %{token_contract_address_hash: token.contract_address_hash, token_id: Decimal.new(777)}
       ])
 
       instance =

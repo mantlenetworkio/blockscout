@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.API.V2.BlockController do
   use BlockScoutWeb, :controller
 
@@ -27,10 +28,9 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       internal_transaction_call_type_options: 1
     ]
 
-  import Explorer.MicroserviceInterfaces.BENS,
-    only: [maybe_preload_ens: 1, maybe_preload_ens_for_blocks: 1, maybe_preload_ens_for_transactions: 1]
+  import Explorer.Chain.Address.MetadataPreloader,
+    only: [maybe_preload_ens_and_metadata: 1, maybe_preload_ens_and_metadata: 2]
 
-  import Explorer.MicroserviceInterfaces.Metadata, only: [maybe_preload_metadata: 1]
   import Explorer.Chain.Address.Reputation, only: [reputation_association: 0]
 
   alias BlockScoutWeb.API.V2.{
@@ -41,6 +41,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
   }
 
   alias BlockScoutWeb.Schemas.API.V2.ErrorResponses.NotFoundResponse
+  alias BlockScoutWeb.Schemas.API.V2.ErrorResponses.NotImplementedResponse
   alias Explorer.Chain
   alias Explorer.Chain.Arbitrum.Reader.API.Settlement, as: ArbitrumSettlementReader
   alias Explorer.Chain.Beacon.Deposit
@@ -177,7 +178,18 @@ defmodule BlockScoutWeb.API.V2.BlockController do
 
   operation :blocks,
     summary: "List blocks with optional filtering by block type",
-    description: "Retrieves a paginated list of blocks with optional filtering by block type.",
+    description: """
+    Retrieves a paginated list of blocks ordered by descending block number.
+
+    When the `type` query parameter is omitted, only main-chain consensus blocks
+    (equivalent to `type=block`) are returned. Use `type=uncle` to list ommer
+    blocks (valid but not in the main chain) and `type=reorg` to list blocks
+    that lost consensus during a chain reorganization.
+
+    Pagination is cursor-based: the response contains `next_page_params` with
+    `block_number` and `items_count` — pass these back as query parameters on
+    the next request to fetch the following page.
+    """,
     parameters:
       base_params() ++
         [block_type_param()] ++
@@ -191,7 +203,8 @@ defmodule BlockScoutWeb.API.V2.BlockController do
              "block_number" => 22_566_361,
              "items_count" => 50
            }
-         )}
+         )},
+      unprocessable_entity: JsonErrorResponse.response()
     ]
 
   @doc """
@@ -214,7 +227,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -261,7 +274,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -309,7 +322,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -364,7 +377,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
         conn
         |> put_status(200)
         |> render(:blocks, %{
-          blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+          blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
           next_page_params: next_page_params
         })
     end
@@ -413,7 +426,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     conn
     |> put_status(200)
     |> render(:blocks, %{
-      blocks: blocks |> maybe_preload_ens_for_blocks() |> maybe_preload_metadata(),
+      blocks: blocks |> maybe_preload_ens_and_metadata(:blocks),
       next_page_params: next_page_params
     })
   end
@@ -467,7 +480,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       |> put_status(200)
       |> put_view(TransactionView)
       |> render(:transactions, %{
-        transactions: transactions |> maybe_preload_ens_for_transactions() |> maybe_preload_metadata(),
+        transactions: transactions |> maybe_preload_ens_and_metadata(:transactions),
         next_page_params: next_page_params
       })
     end
@@ -589,7 +602,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       |> put_status(200)
       |> put_view(WithdrawalView)
       |> render(:withdrawals, %{
-        withdrawals: withdrawals |> maybe_preload_ens() |> maybe_preload_metadata(),
+        withdrawals: withdrawals |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end
@@ -603,7 +616,8 @@ defmodule BlockScoutWeb.API.V2.BlockController do
     responses: [
       ok: {"Block countdown information.", "application/json", Schemas.Block.Countdown},
       unprocessable_entity: JsonErrorResponse.response(),
-      not_found: NotFoundResponse.response()
+      not_found: NotFoundResponse.response(),
+      not_implemented: NotImplementedResponse.response()
     ]
 
   @doc """
@@ -726,7 +740,7 @@ defmodule BlockScoutWeb.API.V2.BlockController do
       |> put_status(200)
       |> put_view(DepositView)
       |> render(:deposits, %{
-        deposits: deposits |> maybe_preload_ens() |> maybe_preload_metadata(),
+        deposits: deposits |> maybe_preload_ens_and_metadata(),
         next_page_params: next_page_params
       })
     end

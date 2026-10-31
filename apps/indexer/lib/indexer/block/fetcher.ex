@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Indexer.Block.Fetcher do
   @moduledoc """
   Fetches and indexes block ranges.
@@ -41,13 +42,16 @@ defmodule Indexer.Block.Fetcher do
 
   alias Indexer.Fetcher.{
     AddressImporter,
+    AddressNonceUpdater,
     Beacon.Blob,
     BlockReward,
     ContractCode,
+    CurrentTokenBalanceImporter,
     InternalTransaction,
     ReplacedTransaction,
     SignedAuthorizationStatus,
     Token,
+    TokenInstanceImporter,
     UncleBlock
   }
 
@@ -96,8 +100,8 @@ defmodule Indexer.Block.Fetcher do
   @callback import(
               t(module()),
               %{
-                address_hash_to_fetched_balance_block_number: address_hash_to_fetched_balance_block_number,
-                addresses: Import.Runner.options(),
+                optional(:address_hash_to_fetched_balance_block_number) => address_hash_to_fetched_balance_block_number,
+                optional(:addresses) => Import.Runner.options(),
                 address_coin_balances: Import.Runner.options(),
                 address_coin_balances_daily: Import.Runner.options(),
                 address_token_balances: Import.Runner.options(),
@@ -253,15 +257,11 @@ defmodule Indexer.Block.Fetcher do
          token_transfers_with_token = token_transfers_merge_token(token_transfers, tokens),
          address_token_balances =
            AddressTokenBalances.params_set(%{token_transfers_params: token_transfers_with_token}),
-         token_instances = TokenInstances.params_set(%{token_transfers_params: token_transfers}),
          stability_validators = StabilityValidators.parse(blocks),
          basic_import_options = %{
            addresses: %{params: addresses},
            address_coin_balances: %{params: coin_balances_params_set},
            address_token_balances: %{params: address_token_balances},
-           address_current_token_balances: %{
-             params: address_token_balances |> MapSet.to_list() |> TokenBalances.to_address_current_token_balances()
-           },
            blocks: %{params: blocks},
            block_second_degree_relations: %{params: block_second_degree_relations_params},
            block_rewards: %{errors: beneficiaries_errors, params: beneficiaries_with_gas_payment},
@@ -269,10 +269,8 @@ defmodule Indexer.Block.Fetcher do
            scaled_ui_multiplier_updates: %{params: scaled_ui_multiplier_updates},
            scaled_ui_token_states: %{params: scaled_ui_token_states},
            token_transfers: %{params: token_transfers},
-           tokens: %{params: tokens},
            transactions: %{params: transactions_with_receipts},
            withdrawals: %{params: withdrawals_params},
-           token_instances: %{params: token_instances},
            signed_authorizations: %{params: SignedAuthorizations.parse(transactions_with_receipts)},
            fhe_operations: %{params: fhe_operations}
          },
@@ -292,18 +290,26 @@ defmodule Indexer.Block.Fetcher do
          {:ok, inserted} <-
            __MODULE__.import(
              state,
-             basic_import_options |> Map.merge(additional_options) |> import_options(chain_type_import_options)
+             merge_options(basic_import_options, additional_options)
+             |> import_options(chain_type_import_options)
+             |> extend_with_asyncable_import_options(tokens, token_transfers, address_token_balances, callback_module)
            ) do
       Prometheus.Instrumenter.set_block_batch_fetch(fetch_time, callback_module)
       result = {:ok, %{inserted: inserted, errors: blocks_errors}}
 
-      Task.Supervisor.start_child(task_supervisor, fn ->
-        update_block_cache(inserted[:blocks], inserted)
-        update_transactions_cache(inserted[:transactions], inserted)
-        update_addresses_cache(inserted[:addresses])
-        update_uncles_cache(inserted[:block_second_degree_relations])
-        update_withdrawals_cache(inserted[:withdrawals])
-      end)
+      # only what the caches need is captured by the task, not the whole import result
+      inserted_for_caches =
+        Map.take(inserted, [
+          :blocks,
+          :transactions,
+          :block_rewards,
+          :token_transfers,
+          :addresses,
+          :block_second_degree_relations,
+          :withdrawals
+        ])
+
+      Task.Supervisor.start_child(task_supervisor, fn -> update_caches(inserted_for_caches) end)
 
       async_match_arbitrum_messages_to_l2(arbitrum_transactions_for_further_handling)
 
@@ -440,10 +446,14 @@ defmodule Indexer.Block.Fetcher do
     import_options
     |> Map.put_new(:celo_pending_account_operations, %{params: celo_pending_account_operations})
     |> Map.put_new(:celo_epochs, %{params: celo_epochs})
-    |> Map.put(
-      :tokens,
-      %{params: (tokens ++ celo_gas_tokens) |> Enum.uniq()}
-    )
+    |> then(fn options ->
+      if enable_partial_async_import?() do
+        TokenInstanceImporter.add(celo_gas_tokens, [])
+        options
+      else
+        Map.put(options, :tokens, %{params: Enum.uniq(tokens ++ celo_gas_tokens)})
+      end
+    end)
   end
 
   defp do_chain_identity_import_options(_, basic_import_options, _chain_specific_import_options) do
@@ -457,6 +467,69 @@ defmodule Indexer.Block.Fetcher do
       zilliqa_aggregate_quorum_certificates: Map.get(fetched_blocks, :zilliqa_aggregate_quorum_certificates_params, []),
       zilliqa_nested_quorum_certificates: Map.get(fetched_blocks, :zilliqa_nested_quorum_certificates_params, [])
     })
+  end
+
+  defp merge_options(left, right) when is_map(left) and is_map(right) do
+    Map.merge(left, right, fn _key, value1, value2 -> merge_option_values(value1, value2) end)
+  end
+
+  defp merge_option_values(%{params: params1} = map1, %{params: params2} = map2) do
+    merged_map = Map.merge(map1, map2)
+    merged_params = Enum.uniq(List.wrap(params1) ++ List.wrap(params2))
+    Map.put(merged_map, :params, merged_params)
+  end
+
+  defp merge_option_values(list1, list2) when is_list(list1) and is_list(list2) do
+    Enum.uniq(list1 ++ list2)
+  end
+
+  defp merge_option_values(_value1, value2), do: value2
+
+  defp extend_with_asyncable_import_options(import_options, tokens, token_transfers, token_balances, callback_module) do
+    current_token_balances_params =
+      token_balances
+      |> MapSet.to_list()
+      |> TokenBalances.to_address_current_token_balances()
+
+    if enable_partial_async_import?() do
+      TokenInstanceImporter.add(tokens, token_transfers)
+      CurrentTokenBalanceImporter.add(current_token_balances_params, callback_module == Indexer.Block.Realtime.Fetcher)
+      import_options
+    else
+      token_instances = TokenInstances.params_set(%{token_transfers_params: token_transfers})
+      addresses_without_nonce = process_addresses_nonce(import_options[:addresses][:params])
+
+      merge_options(import_options, %{
+        addresses: %{params: addresses_without_nonce},
+        address_current_token_balances: %{params: current_token_balances_params},
+        tokens: %{params: tokens},
+        token_instances: %{params: token_instances}
+      })
+    end
+  end
+
+  defp enable_partial_async_import?, do: Application.get_env(:indexer, :enable_partial_async_import?)
+
+  # Every cache is refreshed independently: a failure while updating one of them
+  # must not leave the others stale.
+  defp update_caches(inserted) do
+    update_cache_safely("blocks", fn -> update_block_cache(inserted[:blocks], inserted) end)
+    update_cache_safely("transactions", fn -> update_transactions_cache(inserted[:transactions], inserted) end)
+    update_cache_safely("addresses", fn -> update_addresses_cache(inserted[:addresses]) end)
+    update_cache_safely("uncles", fn -> update_uncles_cache(inserted[:block_second_degree_relations]) end)
+    update_cache_safely("withdrawals", fn -> update_withdrawals_cache(inserted[:withdrawals]) end)
+  end
+
+  defp update_cache_safely(cache_name, fun) do
+    fun.()
+  rescue
+    error ->
+      Logger.error(fn ->
+        ["Failed to update ", cache_name, " cache: ", Exception.format(:error, error, __STACKTRACE__)]
+      end)
+  catch
+    :exit, reason ->
+      Logger.error(fn -> ["Failed to update ", cache_name, " cache: ", inspect(reason)] end)
   end
 
   defp update_block_cache([], _), do: :ok
@@ -531,15 +604,22 @@ defmodule Indexer.Block.Fetcher do
     {address_hash_to_fetched_balance_block_number, import_options} =
       pop_address_hash_to_fetched_balance_block_number(options)
 
-    AddressImporter.add(import_options[:addresses][:params])
-
     options_with_broadcast =
-      import_options
-      |> keep_scaled_ui_addresses()
-      |> Map.merge(%{
-        address_hash_to_fetched_balance_block_number: address_hash_to_fetched_balance_block_number,
-        broadcast: broadcast
-      })
+      if enable_partial_async_import?() do
+        AddressImporter.add(import_options[:addresses][:params])
+
+        import_options
+        |> Map.merge(%{broadcast: broadcast})
+        |> keep_scaled_ui_addresses()
+      else
+        Map.merge(
+          import_options,
+          %{
+            address_hash_to_fetched_balance_block_number: address_hash_to_fetched_balance_block_number,
+            broadcast: broadcast
+          }
+        )
+      end
 
     {import_time, result} = :timer.tc(fn -> callback_module.import(state, options_with_broadcast) end)
 
@@ -552,6 +632,8 @@ defmodule Indexer.Block.Fetcher do
     result
   end
 
+  # With the partial async import, addresses are imported by `AddressImporter`. The ERC-8056 capability rows and
+  # multiplier updates reference their token's address, so those addresses stay in the synchronous import.
   defp keep_scaled_ui_addresses(
          %{
            addresses: %{params: addresses},
@@ -569,8 +651,8 @@ defmodule Indexer.Block.Fetcher do
 
   defp keep_scaled_ui_addresses(options), do: Map.delete(options, :addresses)
 
-  def async_import_token_instances(%{token_transfers: token_transfers}) do
-    TokenInstanceRealtime.async_fetch(token_transfers)
+  def async_import_token_instances(%{token_instances: token_instances}) do
+    TokenInstanceRealtime.async_fetch(token_instances)
   end
 
   def async_import_token_instances(_), do: :ok
@@ -596,50 +678,17 @@ defmodule Indexer.Block.Fetcher do
     |> BlockReward.async_fetch(realtime?)
   end
 
-  def async_import_coin_balances(imported, options \\ %{})
-
-  def async_import_coin_balances(_imported, %{
-        address_hash_to_fetched_balance_block_number: address_hash_to_block_number
-      })
-      when map_size(address_hash_to_block_number) > 0 do
-    address_hash_to_block_number
-    |> fetched_balance_block_numbers_to_balance_fields()
-    |> CoinBalanceCatchup.async_fetch_balances()
-  end
-
-  def async_import_coin_balances(%{address_coin_balances: balances}, _options) do
+  def async_import_coin_balances(%{address_coin_balances: balances}) do
     CoinBalanceCatchup.async_fetch_balances(balances)
   end
 
-  def async_import_coin_balances(_, _), do: :ok
+  def async_import_coin_balances(_), do: :ok
 
-  def async_import_realtime_coin_balances(imported, options \\ %{})
-
-  def async_import_realtime_coin_balances(_imported, %{
-        address_hash_to_fetched_balance_block_number: address_hash_to_block_number
-      })
-      when map_size(address_hash_to_block_number) > 0 do
-    address_hash_to_block_number
-    |> fetched_balance_block_numbers_to_balance_fields()
-    |> CoinBalanceRealtime.async_fetch_balances()
-  end
-
-  def async_import_realtime_coin_balances(%{address_coin_balances: balances}, _options) do
+  def async_import_realtime_coin_balances(%{address_coin_balances: balances}) do
     CoinBalanceRealtime.async_fetch_balances(balances)
   end
 
-  def async_import_realtime_coin_balances(_, _), do: :ok
-
-  defp fetched_balance_block_numbers_to_balance_fields(address_hash_to_block_number) do
-    Enum.flat_map(address_hash_to_block_number, fn
-      {address_hash_string, block_number} when is_integer(block_number) ->
-        {:ok, address_hash} = Hash.Address.cast(address_hash_string)
-        [%{address_hash: address_hash, block_number: block_number}]
-
-      _ ->
-        []
-    end)
-  end
+  def async_import_realtime_coin_balances(_), do: :ok
 
   def async_import_created_contract_codes(%{transactions: transactions}, realtime?) do
     ContractCode.async_fetch(transactions, realtime?, 10_000)
@@ -652,7 +701,7 @@ defmodule Indexer.Block.Fetcher do
   def async_import_internal_transactions(%{blocks: blocks} = imported, realtime?) do
     blocks
     |> Enum.map(fn %Block{number: block_number} -> block_number end)
-    |> InternalTransaction.async_fetch(Map.get(imported, :transactions, []), realtime?, false, 10_000)
+    |> InternalTransaction.async_fetch(Map.get(imported, :transactions, []), realtime?, 10_000)
   end
 
   def async_import_internal_transactions(_, _), do: :ok
@@ -992,6 +1041,25 @@ defmodule Indexer.Block.Fetcher do
 
       Map.put(token_transfer, :token, token)
     end)
+  end
+
+  defp process_addresses_nonce(addresses) do
+    {addresses_excluding_nonce_update, addresses_nonce_update_params} =
+      Enum.reduce(addresses, {[], []}, fn address,
+                                          {addresses_excluding_nonce_update_acc, addresses_nonce_update_params_acc} ->
+        case Map.get(address, :nonce) do
+          nil ->
+            {[address | addresses_excluding_nonce_update_acc], addresses_nonce_update_params_acc}
+
+          nonce ->
+            {[Map.delete(address, :nonce) | addresses_excluding_nonce_update_acc],
+             [%{hash: address.hash, nonce: nonce} | addresses_nonce_update_params_acc]}
+        end
+      end)
+
+    AddressNonceUpdater.add(addresses_nonce_update_params)
+
+    Enum.reverse(addresses_excluding_nonce_update)
   end
 
   @doc false

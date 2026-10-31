@@ -1,12 +1,21 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.BlockTest do
   use Explorer.DataCase
 
+  import Explorer.QuerySources, only: [with_query_sources: 1]
+  import Mox
+
   alias Ecto.Changeset
   alias Explorer.Chain.{Address, Block, PendingBlockOperation, Wei}
+  alias Explorer.Chain.Cache.ChainId
   alias Explorer.Chain.InternalTransaction.DeleteQueue, as: InternalTransactionDeleteQueue
+  alias Explorer.Chain.MultichainSearchDb.{BalancesExportQueue, MainExportQueue}
   alias Explorer.Chain.Optimism.EIP1559ConfigUpdate
+  alias Explorer.MicroserviceInterfaces.MultichainSearch
   alias Explorer.PagingOptions
   alias Explorer.Repo
+  alias Explorer.Utility.MissingBlockRange
+  alias Explorer.TestHelper
 
   describe "changeset/2" do
     test "with valid attributes" do
@@ -213,6 +222,56 @@ defmodule Explorer.Chain.BlockTest do
       })
 
       assert Block.next_block_base_fee_per_gas() == nil
+    end
+  end
+
+  describe "preload_eip1559_config/1" do
+    if Application.compile_env(:explorer, :chain_type) == :optimism do
+      test "resolves the config of a batch of blocks with a single query" do
+        %Explorer.Chain.Optimism.EIP1559ConfigUpdate{}
+        |> Explorer.Chain.Optimism.EIP1559ConfigUpdate.changeset(%{
+          l2_block_number: 10,
+          l2_block_hash: block_hash(),
+          base_fee_max_change_denominator: 50,
+          elasticity_multiplier: 4
+        })
+        |> Repo.insert!()
+
+        blocks =
+          for number <- [5, 15] do
+            insert(:block, number: number, gas_limit: Decimal.new(30_000_000), gas_used: Decimal.new(15_000_000))
+          end
+
+        {[before_update, after_update], preload_query_sources} =
+          with_query_sources(fn -> Block.preload_eip1559_config(blocks) end)
+
+        assert preload_query_sources == ["op_eip1559_config_updates"]
+
+        # The env defaults apply before the first update
+        assert before_update.eip1559_config ==
+                 {Application.get_env(:explorer, :base_fee_max_change_denominator),
+                  Application.get_env(:explorer, :elasticity_multiplier)}
+
+        assert after_update.eip1559_config == {50, 4}
+
+        {gas_targets, gas_target_query_sources} =
+          with_query_sources(fn -> Enum.map([before_update, after_update], &Block.gas_target/1) end)
+
+        assert gas_targets == [0.0, 100.0]
+        assert gas_target_query_sources == []
+
+        # Not preloaded blocks still resolve the config on their own
+        {gas_targets, gas_target_query_sources} = with_query_sources(fn -> Enum.map(blocks, &Block.gas_target/1) end)
+
+        assert gas_targets == [0.0, 100.0]
+        assert gas_target_query_sources == ["op_eip1559_config_updates", "op_eip1559_config_updates"]
+      end
+    else
+      test "leaves the blocks as is without queries" do
+        blocks = insert_list(2, :block)
+
+        assert with_query_sources(fn -> Block.preload_eip1559_config(blocks) end) == {blocks, []}
+      end
     end
   end
 
@@ -472,6 +531,9 @@ defmodule Explorer.Chain.BlockTest do
   end
 
   describe "full_refetch/1" do
+    setup :set_mox_global
+    setup :verify_on_exit!
+
     test "with block numbers" do
       Enum.each(1..5, fn _i ->
         insert(:block)
@@ -528,6 +590,86 @@ defmodule Explorer.Chain.BlockTest do
       assert Repo.one(Block).refetch_needed == true
 
       assert [%{block_number: ^block_number}] = Repo.all(InternalTransactionDeleteQueue)
+    end
+
+    test "processes multiple batches and populates the multichain main export queue (blocks, transactions, addresses), leaving the balances queue empty" do
+      Supervisor.terminate_child(Explorer.Supervisor, ChainId.child_id())
+      Supervisor.restart_child(Explorer.Supervisor, ChainId.child_id())
+
+      multichain_configuration = Application.get_env(:explorer, MultichainSearch)
+      full_refetch_batch_size_config = Application.get_env(:explorer, :full_refetch_batch_size)
+
+      on_exit(fn ->
+        Application.put_env(:explorer, MultichainSearch, multichain_configuration)
+
+        if full_refetch_batch_size_config do
+          Application.put_env(:explorer, :full_refetch_batch_size, full_refetch_batch_size_config)
+        else
+          Application.delete_env(:explorer, :full_refetch_batch_size)
+        end
+      end)
+
+      bypass = Bypass.open()
+
+      Application.put_env(
+        :explorer,
+        MultichainSearch,
+        Keyword.merge(multichain_configuration || [],
+          service_url: "http://localhost:#{bypass.port}",
+          addresses_chunk_size: 7_000
+        )
+      )
+
+      # Batch size smaller than the number of blocks forces more than one batch.
+      Application.put_env(:explorer, :full_refetch_batch_size, 2)
+
+      blocks = for number <- 1..3, do: insert(:block, number: number)
+      transactions = for block <- blocks, do: :transaction |> insert() |> with_block(block)
+
+      TestHelper.get_chain_id_mock()
+
+      assert :ok = Block.full_refetch(Enum.map(blocks, & &1.number))
+
+      # All batches were processed.
+      assert Enum.all?(Repo.all(Block), &(&1.refetch_needed == true))
+      assert Repo.aggregate(InternalTransactionDeleteQueue, :count, :block_number) == 3
+
+      main_queue = Repo.all(MainExportQueue)
+
+      queued_hashes = fn hash_type ->
+        main_queue |> Enum.filter(&(&1.hash_type == hash_type)) |> Enum.map(& &1.hash) |> MapSet.new()
+      end
+
+      queued_block_hashes = queued_hashes.(:block)
+      queued_transaction_hashes = queued_hashes.(:transaction)
+      queued_address_hashes = queued_hashes.(:address)
+
+      for block <- blocks do
+        assert MapSet.member?(queued_block_hashes, block.hash.bytes)
+      end
+
+      for transaction <- transactions do
+        assert MapSet.member?(queued_transaction_hashes, transaction.hash.bytes)
+        assert MapSet.member?(queued_address_hashes, transaction.from_address_hash.bytes)
+      end
+
+      # Balances are intentionally excluded from `full_refetch/1`.
+      assert Repo.aggregate(BalancesExportQueue, :count, :id) == 0
+    end
+  end
+
+  describe "set_refetch_needed_for_other_consensus_blocks/2" do
+    test "marks only the consensus blocks with other hashes and adds their numbers to the missing ranges" do
+      other_block = insert(:block, number: 10)
+      non_consensus_block = insert(:block, number: 10, consensus: false)
+      given_block = insert(:block, number: 11)
+
+      assert [10] = Block.set_refetch_needed_for_other_consensus_blocks([10, 11], [given_block.hash])
+
+      assert %Block{refetch_needed: true} = Repo.get(Block, other_block.hash)
+      assert %Block{refetch_needed: false} = Repo.get(Block, non_consensus_block.hash)
+      assert %Block{refetch_needed: false} = Repo.get(Block, given_block.hash)
+      assert [%MissingBlockRange{from_number: 10, to_number: 10}] = Repo.all(MissingBlockRange)
     end
   end
 end

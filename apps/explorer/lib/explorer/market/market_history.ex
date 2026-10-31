@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.MarketHistory do
   @moduledoc """
   Represents market history of configured coin to USD.
@@ -40,6 +41,23 @@ defmodule Explorer.Market.MarketHistory do
     Chain.select_repo(options).one(query)
   end
 
+  @doc """
+  Returns the market history (for the secondary coin if specified) for the given dates.
+  """
+  @spec prices_at_dates([Date.t()], boolean(), [Chain.api?()]) :: [t()]
+  def prices_at_dates(dates, secondary_coin? \\ false, options \\ [])
+  def prices_at_dates([], _secondary_coin?, _options), do: []
+
+  def prices_at_dates(dates, secondary_coin?, options) do
+    query =
+      from(
+        mh in __MODULE__,
+        where: mh.date in ^dates and mh.secondary_coin == ^secondary_coin?
+      )
+
+    Chain.select_repo(options).all(query)
+  end
+
   @doc false
   @spec bulk_insert([map()]) :: {:ok, {non_neg_integer(), nil | [term()]}} | {:error, term()}
   def bulk_insert(records) do
@@ -74,7 +92,8 @@ defmodule Explorer.Market.MarketHistory do
       name: nil,
       symbol: nil,
       volume_24h: nil,
-      image_url: nil
+      image_url: nil,
+      circulating_supply: nil
     }
   end
 

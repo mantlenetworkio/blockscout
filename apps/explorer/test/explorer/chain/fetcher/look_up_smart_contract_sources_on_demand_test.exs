@@ -31,8 +31,7 @@ defmodule Explorer.Chain.Fetcher.LookUpSmartContractSourcesOnDemandTest do
   end
 
   describe "bytecode proxy exclusion" do
-    # :minimal_proxy is left out: that proxy type (upstream #14426) does not exist on this fork
-    @bytecode_proxy_types [:eip1167, :eip7702, :clone_with_immutable_arguments, :erc7760]
+    @bytecode_proxy_types [:eip1167, :eip7702, :minimal_proxy, :clone_with_immutable_arguments, :erc7760]
 
     for proxy_type <- @bytecode_proxy_types do
       test "skips verification for #{proxy_type} proxy" do

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.PagingHelper do
   @moduledoc """
     Helper for fetching filters and other url query parameters
@@ -278,9 +279,11 @@ defmodule BlockScoutWeb.PagingHelper do
       :address_hash_param,
       :batch_number_param,
       :output_root_index_param,
+      :batch_numbers,
+      :data_hash,
       :block_hash_or_number_param,
+      :direction,
       :transaction_hash_param,
-      :batch_number_param,
       :scale,
       :token_id_param,
       :token_id,

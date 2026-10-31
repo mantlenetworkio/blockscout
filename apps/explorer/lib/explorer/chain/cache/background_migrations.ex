@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Cache.BackgroundMigrations do
   @moduledoc """
   Caches the completion status of various background database operations in the Blockscout system.
@@ -71,6 +72,10 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
     key: :heavy_indexes_drop_transactions_created_contract_address_hash_with_pending_index_a_finished,
     key: :heavy_indexes_create_address_ids_internal_transactions_indexes_finished,
     key: :fill_internal_transactions_address_ids_finished,
+    key: :backfill_address_counters_finished,
+    key: :backfill_token_counters_finished,
+    key: :heavy_indexes_create_logs_address_hash_first_topic_second_topic_block_number_index_finished,
+    key: :heavy_indexes_create_address_current_token_balances_address_hash_block_number_index_finished,
     key: :optimism_withdrawal_transfers_finished,
     key: :optimism_deposit_transfers_finished
 
@@ -80,7 +85,9 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
     AddressCurrentTokenBalanceTokenType,
     AddressTokenBalanceTokenType,
     ArbitrumDaRecordsNormalization,
+    BackfillAddressCounters,
     BackfillMultichainSearchDB,
+    BackfillTokenCounters,
     EmptyInternalTransactionsData,
     FillInternalTransactionsAddressIds,
     OptimismDepositTransfers,
@@ -91,6 +98,7 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
   }
 
   alias Explorer.Migrator.HeavyDbIndexOperation.{
+    CreateAddressCurrentTokenBalancesAddressHashBlockNumberIndex,
     CreateAddressesHashContractCodeNotNullIndex,
     CreateAddressesTransactionsCountAscCoinBalanceDescHashPartialIndex,
     CreateAddressesTransactionsCountDescPartialIndex,
@@ -102,6 +110,7 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
     CreateInternalTransactionsBlockNumberDescTransactionIndexDescIndexDescIndex,
     CreateLogsAddressHashBlockNumberDescIndexDescIndex,
     CreateLogsAddressHashFirstTopicBlockNumberIndexIndex,
+    CreateLogsAddressHashFirstTopicSecondTopicBlockNumberIndex,
     CreateLogsBlockHashIndex,
     CreateLogsDepositsWithdrawalsIndex,
     CreateSmartContractsLanguageIndex,
@@ -315,6 +324,13 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
     )
   end
 
+  defp handle_fallback(:heavy_indexes_create_address_current_token_balances_address_hash_block_number_index_finished) do
+    set_and_return_migration_status(
+      CreateAddressCurrentTokenBalancesAddressHashBlockNumberIndex,
+      &set_heavy_indexes_create_address_current_token_balances_address_hash_block_number_index_finished/1
+    )
+  end
+
   defp handle_fallback(:heavy_indexes_drop_transactions_created_contract_address_hash_with_pending_index) do
     set_and_return_migration_status(
       DropTransactionsCreatedContractAddressHashWithPendingIndex,
@@ -440,6 +456,27 @@ defmodule Explorer.Chain.Cache.BackgroundMigrations do
     set_and_return_migration_status(
       FillInternalTransactionsAddressIds,
       &set_fill_internal_transactions_address_ids_finished/1
+    )
+  end
+
+  defp handle_fallback(:backfill_address_counters_finished) do
+    set_and_return_migration_status(
+      BackfillAddressCounters,
+      &set_backfill_address_counters_finished/1
+    )
+  end
+
+  defp handle_fallback(:backfill_token_counters_finished) do
+    set_and_return_migration_status(
+      BackfillTokenCounters,
+      &set_backfill_token_counters_finished/1
+    )
+  end
+
+  defp handle_fallback(:heavy_indexes_create_logs_address_hash_first_topic_second_topic_block_number_index_finished) do
+    set_and_return_migration_status(
+      CreateLogsAddressHashFirstTopicSecondTopicBlockNumberIndex,
+      &set_heavy_indexes_create_logs_address_hash_first_topic_second_topic_block_number_index_finished/1
     )
   end
 

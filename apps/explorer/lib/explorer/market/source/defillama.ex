@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Market.Source.DefiLlama do
   @moduledoc """
   Adapter for fetching market history from https://defillama.com/.
@@ -53,7 +54,9 @@ defmodule Explorer.Market.Source.DefiLlama do
          {:ok, data} when is_list(data) <-
            Source.http_request(
              base_url() |> URI.append_path("/historicalChainTvl/#{URI.encode(coin_id)}") |> URI.to_string(),
-             headers()
+             headers(),
+             __MODULE__,
+             :historical_chain_tvl
            ) do
       result =
         Enum.map(data, fn %{"date" => date, "tvl" => tvl} ->

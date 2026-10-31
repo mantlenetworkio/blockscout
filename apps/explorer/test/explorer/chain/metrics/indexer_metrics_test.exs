@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.Chain.Metrics.Queries.IndexerMetricsTest do
   use Explorer.DataCase, async: false
 
@@ -69,6 +70,71 @@ defmodule Explorer.Chain.Metrics.Queries.IndexerMetricsTest do
     end
   end
 
+  describe "blocks_realtime_indexing_delay_percentiles/0" do
+    test "measures the indexing delay of the consensus blocks of the last 5 minutes" do
+      now = DateTime.utc_now()
+
+      insert(:block,
+        consensus: true,
+        timestamp: DateTime.add(now, -60, :second),
+        inserted_at: DateTime.add(now, -58, :second)
+      )
+
+      # a non-consensus block and a block older than the window do not count
+      insert(:block,
+        consensus: false,
+        timestamp: DateTime.add(now, -60, :second),
+        inserted_at: DateTime.add(now, -30, :second)
+      )
+
+      insert(:block,
+        consensus: true,
+        timestamp: DateTime.add(now, -600, :second),
+        inserted_at: DateTime.add(now, -500, :second)
+      )
+
+      # the session's TimeZone must not move the window
+      for time_zone <- ["UTC", "Asia/Shanghai"] do
+        Repo.query!("SET LOCAL TIME ZONE '#{time_zone}'")
+        percentiles = IndexerMetrics.blocks_realtime_indexing_delay_percentiles()
+
+        assert percentiles["p50"] == 2_000_000_000
+        assert percentiles["p99"] == 2_000_000_000
+      end
+    end
+
+    test "reads the window of recent blocks through the timestamp index" do
+      # as on a live chain, nearly all blocks are older than the window
+      miner = insert(:address)
+      insert_list(1_000, :block, miner: miner, timestamp: DateTime.add(DateTime.utc_now(), -86_400, :second))
+      insert(:block, miner: miner)
+      Repo.query!("ANALYZE blocks")
+
+      test_pid = self()
+      handler_id = {__MODULE__, :blocks_delay_query}
+
+      :telemetry.attach(
+        handler_id,
+        [:explorer, :repo, :query],
+        fn _event, _measurements, %{query: query}, _config ->
+          if query =~ "delay_nanoseconds", do: send(test_pid, {:delay_query, query})
+        end,
+        nil
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      IndexerMetrics.blocks_realtime_indexing_delay_percentiles()
+      assert_received {:delay_query, query}
+
+      # the test table is tiny, so the planner would scan it whatever the filter
+      Repo.query!("SET LOCAL enable_seqscan = off")
+      %{rows: rows} = Repo.query!("EXPLAIN " <> query)
+
+      assert Enum.any?(rows, fn [line] -> line =~ "blocks_timestamp_index" end)
+    end
+  end
+
   describe "missing_blocks_count/0" do
     test "counts only within configured ranges and latest tail" do
       previous_block_ranges = Application.get_env(:indexer, :block_ranges)
@@ -94,6 +160,41 @@ defmodule Explorer.Chain.Metrics.Queries.IndexerMetricsTest do
       end)
 
       assert IndexerMetrics.missing_blocks_count() == 1
+    end
+  end
+
+  describe "refetch_needed_blocks_count/0" do
+    test "counts only consensus blocks marked for refetch within configured ranges and latest tail" do
+      previous_block_ranges = Application.get_env(:indexer, :block_ranges)
+      on_exit(fn -> Application.put_env(:indexer, :block_ranges, previous_block_ranges) end)
+
+      Application.put_env(:indexer, :block_ranges, "1..3,5..latest")
+
+      # within ranges, consensus and refetch_needed -> counted
+      insert(:block, number: 1, consensus: true, refetch_needed: true)
+      insert(:block, number: 7, consensus: true, refetch_needed: true)
+      # within ranges but not marked -> not counted
+      insert(:block, number: 2, consensus: true, refetch_needed: false)
+      # marked but not consensus -> not counted
+      insert(:block, number: 3, consensus: false, refetch_needed: true)
+      # marked and consensus but outside the ranges -> not counted
+      insert(:block, number: 4, consensus: true, refetch_needed: true)
+
+      assert IndexerMetrics.refetch_needed_blocks_count() == 2
+    end
+
+    test "counts only within finite ranges" do
+      previous_block_ranges = Application.get_env(:indexer, :block_ranges)
+      on_exit(fn -> Application.put_env(:indexer, :block_ranges, previous_block_ranges) end)
+
+      Application.put_env(:indexer, :block_ranges, "10..12,20..22")
+
+      insert(:block, number: 11, consensus: true, refetch_needed: true)
+      insert(:block, number: 21, consensus: true, refetch_needed: true)
+      # outside the finite ranges -> not counted
+      insert(:block, number: 30, consensus: true, refetch_needed: true)
+
+      assert IndexerMetrics.refetch_needed_blocks_count() == 2
     end
   end
 
@@ -170,6 +271,49 @@ defmodule Explorer.Chain.Metrics.Queries.IndexerMetricsTest do
       insert(:pending_transaction_operation, transaction_hash: transaction2.hash)
 
       assert IndexerMetrics.missing_internal_transactions_count() == 2
+    end
+  end
+
+  describe "missing_address_native_coin_balances_count/0" do
+    test "counts only unfetched coin balances within configured ranges and latest tail" do
+      previous_block_ranges = Application.get_env(:indexer, :block_ranges)
+      on_exit(fn -> Application.put_env(:indexer, :block_ranges, previous_block_ranges) end)
+
+      Application.put_env(:indexer, :block_ranges, "1..3,5..latest")
+
+      address = insert(:address)
+
+      # within ranges and unfetched -> counted
+      insert(:unfetched_balance, address_hash: address.hash, block_number: 1)
+      insert(:unfetched_balance, address_hash: address.hash, block_number: 7)
+      # within ranges but fetched -> not counted
+      insert(:unfetched_balance,
+        address_hash: address.hash,
+        block_number: 2,
+        value: 100,
+        value_fetched_at: DateTime.utc_now()
+      )
+
+      # unfetched but outside the ranges -> not counted
+      insert(:unfetched_balance, address_hash: address.hash, block_number: 4)
+
+      assert IndexerMetrics.missing_address_native_coin_balances_count() == 2
+    end
+
+    test "counts only within finite ranges" do
+      previous_block_ranges = Application.get_env(:indexer, :block_ranges)
+      on_exit(fn -> Application.put_env(:indexer, :block_ranges, previous_block_ranges) end)
+
+      Application.put_env(:indexer, :block_ranges, "10..12,20..22")
+
+      address = insert(:address)
+
+      insert(:unfetched_balance, address_hash: address.hash, block_number: 11)
+      insert(:unfetched_balance, address_hash: address.hash, block_number: 21)
+      # outside the finite ranges -> not counted
+      insert(:unfetched_balance, address_hash: address.hash, block_number: 30)
+
+      assert IndexerMetrics.missing_address_native_coin_balances_count() == 2
     end
   end
 

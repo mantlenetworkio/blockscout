@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 # credo:disable-for-this-file
 defmodule Explorer.SmartContract.Solidity.Verifier do
   @moduledoc """
@@ -480,6 +481,7 @@ defmodule Explorer.SmartContract.Solidity.Verifier do
       {meta, last_2_bytes}
     else
       _ ->
+        Logger.warning("Could not extract CBOR metadata from deployed bytecode")
         {"", ""}
     end
   end
@@ -490,6 +492,7 @@ defmodule Explorer.SmartContract.Solidity.Verifier do
       decoded_meta
     else
       _ ->
+        Logger.warning("Failed to decode CBOR metadata from bytecode, falling back to empty metadata")
         %{}
     end
   end

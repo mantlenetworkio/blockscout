@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule EthereumJSONRPC.Transaction do
   @moduledoc """
   Transaction format included in the return of
@@ -26,6 +27,12 @@ defmodule EthereumJSONRPC.Transaction do
   alias EthereumJSONRPC
   alias EthereumJSONRPC.SignedAuthorization
 
+  # EIP-2718 type of the Eden sponsored (batched) transaction: `0x76`.
+  @eden_sponsored_transaction_type 118
+
+  @post_exec_tx_type 0x7D
+  @zero_address_hash_string "0x0000000000000000000000000000000000000000"
+
   case @chain_type do
     :ethereum ->
       @chain_type_fields quote(
@@ -47,6 +54,18 @@ defmodule EthereumJSONRPC.Transaction do
       @chain_type_fields quote(
                            do: [
                              queue_index: non_neg_integer()
+                           ]
+                         )
+
+    :eden ->
+      @chain_type_fields quote(
+                           do: [
+                             fee_payer_address_hash: EthereumJSONRPC.address(),
+                             calls: [
+                               %{
+                                 String.t() => EthereumJSONRPC.address() | non_neg_integer() | String.t() | nil
+                               }
+                             ]
                            ]
                          )
 
@@ -150,6 +169,11 @@ defmodule EthereumJSONRPC.Transaction do
     :suave -> """
        * `"executionNode"` - `t:EthereumJSONRPC.address/0` of execution node (used by Suave).
        * `"requestRecord"` - map of wrapped transaction data (used by Suave).
+      """
+    :eden -> """
+       * `"gasLimit"` - `t:EthereumJSONRPC.quantity/0` of gas provided by the sender of a sponsored transaction (used by Eden).
+       * `"calls"` - `t:list/0` of the calls batched in a sponsored transaction (used by Eden).
+       * `"feePayer"` - `t:EthereumJSONRPC.address/0` of the sponsor which pays for the transaction (used by Eden).
       """
     _ -> ""
   end}
@@ -319,10 +343,12 @@ defmodule EthereumJSONRPC.Transaction do
   """
   @spec elixir_to_params(elixir) :: params
   def elixir_to_params(elixir) do
-    elixir
+    normalized_elixir = chain_type_normalization(elixir)
+
+    normalized_elixir
     |> do_elixir_to_params()
-    |> chain_type_fields(elixir)
-    |> chain_identity_fields(elixir)
+    |> chain_type_fields(normalized_elixir)
+    |> chain_identity_fields(normalized_elixir)
   end
 
   # Converts a map of the transaction parameters to the map with the corresponding atom parameters.
@@ -544,6 +570,58 @@ defmodule EthereumJSONRPC.Transaction do
     ])
   end
 
+  @spec chain_type_normalization(%{String.t() => any()}) :: %{String.t() => any()}
+  defp chain_type_normalization(elixir) do
+    case chain_type() do
+      :eden -> eden_compatibility_fields(elixir)
+      :optimism -> optimism_compatibility_fields(elixir)
+      _ -> elixir
+    end
+  end
+
+  # OP Stack post-exec transactions only carry post-execution metadata. Add compatibility values
+  # for fields required by the standard transaction parser while retaining the block context
+  # supplied by the execution client.
+  @spec optimism_compatibility_fields(%{String.t() => any()}) :: %{String.t() => any()}
+  defp optimism_compatibility_fields(%{"type" => @post_exec_tx_type} = elixir) do
+    Enum.reduce(
+      %{
+        "from" => @zero_address_hash_string,
+        "gas" => 0,
+        "gasPrice" => 0,
+        "nonce" => 0,
+        "r" => 0,
+        "s" => 0,
+        "v" => 0,
+        "value" => 0
+      },
+      elixir,
+      fn {key, default}, transaction ->
+        if Map.get(transaction, key), do: transaction, else: Map.put(transaction, key, default)
+      end
+    )
+  end
+
+  defp optimism_compatibility_fields(elixir), do: elixir
+
+  # Eden sponsored transactions (EIP-2718 type `0x76`) carry `gasLimit` and an ordered `calls`
+  # array instead of the standard `gas`, `to`, `input` and `value` fields. The first call provides
+  # the compatibility values for `to` and `input`, while `value` is the sum across all the calls.
+  # An empty `calls` array produces an empty input and a zero value.
+  @spec eden_compatibility_fields(%{String.t() => any()}) :: %{String.t() => any()}
+  defp eden_compatibility_fields(%{"type" => @eden_sponsored_transaction_type} = elixir) do
+    calls = Map.get(elixir, "calls") || []
+    first_call = List.first(calls) || %{}
+
+    elixir
+    |> Map.put("gas", Map.get(elixir, "gasLimit") || Map.get(elixir, "gas"))
+    |> Map.put("to", Map.get(first_call, "to"))
+    |> Map.put("input", Map.get(first_call, "input") || "0x")
+    |> Map.put("value", Enum.reduce(calls, 0, &((Map.get(&1, "value") || 0) + &2)))
+  end
+
+  defp eden_compatibility_fields(elixir), do: elixir
+
   defp chain_type_fields(params, elixir) do
     case chain_type() do
       :ethereum ->
@@ -593,6 +671,12 @@ defmodule EthereumJSONRPC.Transaction do
       :arbitrum ->
         put_if_present(params, elixir, [
           {"requestId", :request_id}
+        ])
+
+      :eden ->
+        put_if_present(params, elixir, [
+          {"feePayer", :fee_payer_address_hash},
+          {"calls", :calls}
         ])
 
       _ ->
@@ -774,7 +858,28 @@ defmodule EthereumJSONRPC.Transaction do
       do: {key, quantity_or_nil && quantity_to_integer(quantity_or_nil)}
   end
 
+  if @chain_type == :eden do
+    defp entry_to_elixir({"feePayer" = key, value}), do: {key, value}
+
+    defp entry_to_elixir({"gasLimit" = key, quantity_or_nil}),
+      do: {key, quantity_or_nil && quantity_to_integer(quantity_or_nil)}
+
+    defp entry_to_elixir({"calls" = key, calls}) when is_list(calls),
+      do: {key, Enum.map(calls, &call_to_elixir/1)}
+  end
+
   defp entry_to_elixir(_) do
     {:ignore, :ignore}
+  end
+
+  if @chain_type == :eden do
+    @spec call_to_elixir(%{String.t() => any()}) :: %{String.t() => any()}
+    defp call_to_elixir(call) do
+      %{
+        "to" => Map.get(call, "to"),
+        "value" => quantity_to_integer(Map.get(call, "value")) || 0,
+        "input" => Map.get(call, "input") || "0x"
+      }
+    end
   end
 end

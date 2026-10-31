@@ -1,20 +1,26 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule Explorer.MicroserviceInterfaces.BENS do
   @moduledoc """
     Interface to interact with Blockscout ENS microservice
   """
 
-  alias Explorer.{Chain, HttpClient}
+  alias Explorer.Chain
   alias Explorer.Chain.Address.MetadataPreloader
 
-  alias Explorer.Chain.{Address, Block, Transaction}
+  alias Explorer.Chain.{Address, Transaction}
 
+  alias Explorer.MicroserviceInterfaces.HttpClient
   alias Explorer.Utility.Microservice
 
   require Logger
 
   import Explorer.Chain.Address.MetadataPreloader, only: [maybe_preload_meta: 3]
 
-  @post_timeout :timer.seconds(5)
+  # The batch resolve is only used to decorate API responses with ENS names, so
+  # it is kept short on purpose: a slow BENS should cost the response its names,
+  # not its latency. A longer timeout also keeps a pooled connection held for
+  # longer, which multiplies into pool pressure under load.
+  @preload_timeout :timer.seconds(1)
   @request_error_msg "Error while sending request to BENS microservice"
 
   @doc """
@@ -98,7 +104,15 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   """
   @spec ens_domain_name_lookup(binary()) ::
           nil
-          | %{address_hash: binary() | nil, expiry_date: any(), name: any(), names_count: integer(), protocol: any()}
+          | %{
+              address_hash: binary() | nil,
+              expiry_date: any(),
+              name: any(),
+              names_count: integer(),
+              protocol: any(),
+              protocol_dapp_url: binary() | nil,
+              protocol_dapp_logo: binary() | nil
+            }
   def ens_domain_name_lookup(domain) do
     domain |> ens_domain_lookup() |> parse_lookup_response()
   end
@@ -106,7 +120,7 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   defp http_post_request(url, body) do
     headers = [{"Content-Type", "application/json"}]
 
-    case HttpClient.post(url, Jason.encode!(body), headers, recv_timeout: @post_timeout) do
+    case HttpClient.post(url, Jason.encode!(body), headers, recv_timeout: @preload_timeout) do
       {:ok, %{body: body, status_code: 200}} ->
         Jason.decode(body)
 
@@ -243,7 +257,7 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
                   "expiry_date" => expiry_date,
                   "resolved_address" => resolved_address,
                   "protocol" => protocol
-                }
+                } = first_item
                 | _other
               ] = items
           }}
@@ -256,7 +270,9 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
       expiry_date: expiry_date,
       names_count: Enum.count(items),
       address_hash: address_hash,
-      protocol: protocol
+      protocol: protocol,
+      protocol_dapp_url: first_item["protocol_dapp_url"],
+      protocol_dapp_logo: first_item["protocol_dapp_logo"]
     }
   end
 
@@ -265,11 +281,12 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   defp parse_get_address_response(
          {:ok,
           %{
-            "domain" => %{
-              "name" => name,
-              "expiry_date" => expiry_date,
-              "resolved_address" => %{"hash" => address_hash_string}
-            },
+            "domain" =>
+              %{
+                "name" => name,
+                "expiry_date" => expiry_date,
+                "resolved_address" => %{"hash" => address_hash_string}
+              } = domain,
             "resolved_domains_count" => resolved_domains_count
           }}
        ) do
@@ -279,7 +296,9 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
       name: name,
       expiry_date: expiry_date,
       names_count: resolved_domains_count,
-      address_hash: Address.checksum(hash)
+      address_hash: Address.checksum(hash),
+      protocol_dapp_url: domain["protocol_dapp_url"],
+      protocol_dapp_logo: domain["protocol_dapp_logo"]
     }
   end
 
@@ -318,14 +337,6 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   end
 
   @doc """
-  Preloads ENS data to the block if BENS is enabled
-  """
-  @spec maybe_preload_ens_to_block(Block.t()) :: Block.t()
-  def maybe_preload_ens_to_block(block) do
-    maybe_preload_meta(block, __MODULE__, &MetadataPreloader.preload_ens_to_block/1)
-  end
-
-  @doc """
   Preloads ENS data to the list of blocks unless disabled via DISABLE_BLOCKS_BENS_PRELOAD.
 
   Checks `Application.get_env(:explorer, __MODULE__, [])[:disable_blocks_bens_preload]`;
@@ -347,7 +358,7 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   @spec maybe_preload_ens_for_blocks(MetadataPreloader.supported_input()) ::
           MetadataPreloader.supported_input()
   def maybe_preload_ens_for_blocks(blocks) do
-    if Application.get_env(:explorer, __MODULE__, [])[:disable_blocks_bens_preload] do
+    if ens_preload_disabled?(:blocks) do
       blocks
     else
       maybe_preload_ens(blocks)
@@ -355,12 +366,25 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   end
 
   @doc """
+  Returns `true` if the ENS preload is disabled for the given entity kind via the
+  corresponding `DISABLE_*_BENS_PRELOAD` environment variable.
+  """
+  @spec ens_preload_disabled?(MetadataPreloader.entity_kind()) :: boolean()
+  def ens_preload_disabled?(:blocks), do: !!config()[:disable_blocks_bens_preload]
+
+  def ens_preload_disabled?(:token_transfers), do: !!config()[:disable_token_transfers_bens_preload]
+
+  def ens_preload_disabled?(:transactions), do: !!config()[:disable_transactions_bens_preload]
+
+  def ens_preload_disabled?(:any), do: false
+
+  @doc """
   Preloads ENS data to the list of token transfers unless disabled via DISABLE_TOKEN_TRANSFERS_BENS_PRELOAD
   """
   @spec maybe_preload_ens_for_token_transfers(MetadataPreloader.supported_input()) ::
           MetadataPreloader.supported_input()
   def maybe_preload_ens_for_token_transfers(token_transfers) do
-    if Application.get_env(:explorer, __MODULE__, [])[:disable_token_transfers_bens_preload] do
+    if ens_preload_disabled?(:token_transfers) do
       token_transfers
     else
       maybe_preload_ens(token_transfers)
@@ -373,10 +397,12 @@ defmodule Explorer.MicroserviceInterfaces.BENS do
   @spec maybe_preload_ens_for_transactions(MetadataPreloader.supported_input()) ::
           MetadataPreloader.supported_input()
   def maybe_preload_ens_for_transactions(transactions) do
-    if Application.get_env(:explorer, __MODULE__, [])[:disable_transactions_bens_preload] do
+    if ens_preload_disabled?(:transactions) do
       transactions
     else
       maybe_preload_ens(transactions)
     end
   end
+
+  defp config, do: Application.get_env(:explorer, __MODULE__, [])
 end

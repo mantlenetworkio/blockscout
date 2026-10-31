@@ -1,9 +1,11 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.Schemas.API.V2.Search.Results do
   @moduledoc """
   This module defines the schema for search results response.
   """
   require OpenApiSpex
 
+  alias BlockScoutWeb.Schemas.API.V2.Search.ResultItem
   alias OpenApiSpex.Schema
 
   OpenApiSpex.schema(%{
@@ -11,8 +13,8 @@ defmodule BlockScoutWeb.Schemas.API.V2.Search.Results do
     description: "Search results containing blocks, transactions, and addresses",
     type: :object,
     properties: %{
-      items: %Schema{type: :array, items: %Schema{type: :object}},
-      next_page_params: %Schema{type: :object, nullable: true}
+      items: %Schema{type: :array, items: ResultItem},
+      next_page_params: %Schema{type: :object, nullable: true, additionalProperties: true}
     },
     required: []
   })

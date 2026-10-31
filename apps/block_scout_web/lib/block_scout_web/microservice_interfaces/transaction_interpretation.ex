@@ -1,7 +1,10 @@
+# SPDX-License-Identifier: LicenseRef-Blockscout
 defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
   @moduledoc """
     Module to interact with Transaction Interpretation Service
   """
+
+  use Utils.CompileTimeEnvHelper, chain_type: [:explorer, :chain_type]
 
   import BlockScoutWeb.Chain, only: [transaction_to_internal_transactions: 2]
 
@@ -24,12 +27,29 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
   @request_error_msg "Error while sending request to Transaction Interpretation Service"
   @api_true api?: true
   @items_limit 50
+
+  case @chain_type do
+    :filecoin ->
+      @chain_type_token_necessity_by_association %{contract_address: :optional}
+
+    :zilliqa ->
+      @chain_type_token_necessity_by_association %{contract_address: :optional}
+
+    _ ->
+      @chain_type_token_necessity_by_association %{}
+  end
+
   @token_options [
     api?: true,
-    necessity_by_association: %{
-      reputation_association() => :optional
-    }
+    necessity_by_association:
+      Map.merge(
+        %{
+          reputation_association() => :optional
+        },
+        @chain_type_token_necessity_by_association
+      )
   ]
+
   @internal_transaction_address_preloads [
     address_preloads: [
       created_contract_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()],
@@ -141,12 +161,15 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
 
   defp prepare_request_body(transaction) do
     transaction =
-      Chain.select_repo(@api_true).preload(transaction, [
-        :block,
-        to_address: [:scam_badge, :names, :smart_contract],
-        from_address: [:scam_badge, :names, :smart_contract],
-        created_contract_address: [:scam_badge, :names, :token, :smart_contract]
-      ])
+      Chain.select_repo(@api_true).preload(
+        transaction,
+        [
+          :block,
+          to_address: [:scam_badge, :names, :smart_contract],
+          from_address: [:scam_badge, :names, :smart_contract],
+          created_contract_address: [:scam_badge, :names, :token, :smart_contract]
+        ] ++ chain_type_address_preloads()
+      )
 
     token_transfers = transaction |> fetch_token_transfers() |> Enum.reverse()
     internal_transactions = transaction |> fetch_internal_transactions() |> Enum.reverse()
@@ -180,30 +203,49 @@ defmodule BlockScoutWeb.MicroserviceInterfaces.TransactionInterpretation do
     decoded_input_data = decoded_input |> Transaction.format_decoded_input() |> TransactionView.decoded_input()
 
     %{
-      data: %{
-        to:
-          Helper.address_with_info(nil, transaction_with_meta.to_address, transaction_with_meta.to_address_hash, true),
-        from:
-          Helper.address_with_info(
-            nil,
-            transaction_with_meta.from_address,
-            transaction_with_meta.from_address_hash,
-            true
-          ),
-        hash: transaction_with_meta.hash,
-        type: transaction_with_meta.type,
-        value: transaction_with_meta.value,
-        method: Transaction.method_name(transaction_with_meta, Transaction.format_decoded_input(decoded_input)),
-        status: transaction_with_meta.status,
-        transaction_types: TransactionView.transaction_types(transaction_with_meta),
-        raw_input: transaction_with_meta.input,
-        decoded_input: decoded_input_data,
-        token_transfers: prepare_token_transfers(token_transfers_with_meta, decoded_input),
-        internal_transactions: prepare_internal_transactions(internal_transactions_with_meta, transaction_with_meta)
-      },
+      data:
+        %{
+          to:
+            Helper.address_with_info(nil, transaction_with_meta.to_address, transaction_with_meta.to_address_hash, true),
+          from:
+            Helper.address_with_info(
+              nil,
+              transaction_with_meta.from_address,
+              transaction_with_meta.from_address_hash,
+              true
+            ),
+          hash: transaction_with_meta.hash,
+          type: transaction_with_meta.type,
+          value: transaction_with_meta.value,
+          method: Transaction.method_name(transaction_with_meta, Transaction.format_decoded_input(decoded_input)),
+          status: transaction_with_meta.status,
+          transaction_types: TransactionView.transaction_types(transaction_with_meta),
+          raw_input: transaction_with_meta.input,
+          decoded_input: decoded_input_data,
+          token_transfers: prepare_token_transfers(token_transfers_with_meta, decoded_input),
+          internal_transactions: prepare_internal_transactions(internal_transactions_with_meta, transaction_with_meta)
+        }
+        |> extend_data_with_chain_type_fields(transaction_with_meta),
       logs_data: %{items: prepare_logs(logs_with_meta, transaction_with_meta)},
       chain_id: :block_scout_web |> Application.get_env(:chain_id) |> ExplorerHelper.parse_integer()
     }
+  end
+
+  @spec extend_data_with_chain_type_fields(map(), Transaction.t()) :: map()
+  case @chain_type do
+    :eden ->
+      defp chain_type_address_preloads,
+        do: [fee_payer_address: [:scam_badge, :names, :smart_contract, proxy_implementations_association()]]
+
+      defp extend_data_with_chain_type_fields(data, transaction) do
+        # credo:disable-for-next-line Credo.Check.Design.AliasUsage
+        BlockScoutWeb.API.V2.EdenView.extend_transaction_interpretation_request(data, transaction)
+      end
+
+    _ ->
+      defp chain_type_address_preloads, do: []
+
+      defp extend_data_with_chain_type_fields(data, _transaction), do: data
   end
 
   defp fetch_token_transfers(transaction) do
