@@ -109,6 +109,45 @@ defmodule Indexer.Fetcher.OnDemand.CoinBalanceTest do
     end
   end
 
+  describe "trigger_fetch/1 within the stale window" do
+    setup do
+      now = Timex.now()
+
+      # one block a second, past the 100 newest blocks that the average block time skips: the stale window (the
+      # threshold over the average block time) covers all of them
+      Enum.each(0..120, fn i ->
+        insert(:block, number: i, timestamp: Timex.shift(now, seconds: i - 120))
+      end)
+
+      AverageBlockTime.refresh()
+
+      stub(EthereumJSONRPC.Mox, :json_rpc, fn _json, _options ->
+        {:ok, []}
+      end)
+
+      %{address: insert(:address, fetched_coin_balance: 1, fetched_coin_balance_block_number: 118)}
+    end
+
+    test "an unfetched balance older than the fetched one leaves the address current", %{address: address} do
+      insert(:unfetched_balance, address_hash: address.hash, block_number: 115)
+
+      assert CoinBalanceOnDemand.trigger_fetch(address) == :current
+    end
+
+    test "an unfetched balance newer than the fetched one makes the address pending", %{address: address} do
+      insert(:unfetched_balance, address_hash: address.hash, block_number: 115)
+      insert(:unfetched_balance, address_hash: address.hash, block_number: 119)
+
+      assert CoinBalanceOnDemand.trigger_fetch(address) == {:pending, 119}
+    end
+
+    test "an unfetched balance at the fetched block makes the address pending", %{address: address} do
+      insert(:unfetched_balance, address_hash: address.hash, block_number: 118)
+
+      assert CoinBalanceOnDemand.trigger_fetch(address) == {:pending, 118}
+    end
+  end
+
   describe "trigger_historic_fetch/2" do
     test "fetches and imports balance for any block" do
       address = insert(:address)

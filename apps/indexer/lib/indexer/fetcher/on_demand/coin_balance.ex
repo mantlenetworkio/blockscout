@@ -42,8 +42,8 @@ defmodule Indexer.Fetcher.OnDemand.CoinBalance do
   @typedoc """
   `block_number` represents the block that we will be updating the address to.
 
-  If there is a pending balance in the window, we will not fetch the balance
-  as of the latest block, we will instead fetch that pending balance.
+  If there is a pending balance at or above the fetched one, we will not fetch the
+  balance as of the latest block, we will instead fetch that pending balance.
   """
   @type balance_status ::
           :current
@@ -168,7 +168,13 @@ defmodule Indexer.Fetcher.OnDemand.CoinBalance do
 
   defp do_trigger_fetch(address, _latest_block_number, stale_balance_window)
        when address.fetched_coin_balance_block_number >= stale_balance_window do
-    latest_balances_query = CoinBalance.latest_coin_balance_query(address.hash, stale_balance_window)
+    # Only an unfetched balance at or above the fetched one can change the balance the address shows (the address import
+    # keeps the balance of the highest block); older ones are left to the coin balance fetchers. Starting the scan there
+    # instead of at the stale window keeps it short for an address with a balance in every block (the L1 attributes
+    # depositor and L1Block): each fetched balance leaves a dead entry in the partial index the scan reads, and a window
+    # of them took up to a minute per request.
+    latest_balances_query =
+      CoinBalance.latest_coin_balance_query(address.hash, address.fetched_coin_balance_block_number)
 
     case Repo.replica().one(latest_balances_query) do
       %CoinBalance{value_fetched_at: nil, block_number: block_number} ->
