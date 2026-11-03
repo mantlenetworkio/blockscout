@@ -7,16 +7,33 @@
         "url": "https://www.mantle.xyz/"
       },
       {
-        "text": "Governance",
-        "url": "https://snapshot.org/#/bitdao.eth"
+        "text": "Ecosystem",
+        "url": "https://www.mantle.xyz/ecosystem"
       },
       {
-        "text": "Bridge",
+        "text": "Forum",
+        "url": "https://forum.mantle.xyz/"
+      },
+      {
+        "text": "Vote",
+        "url": "https://snapshot.box/#/s:bitdao.eth"
+      },
+      {
+        "text": "Treasury Monitor",
+        "url": "https://treasurymonitor.mantle.xyz/"
+      }
+    ]
+  },
+  {
+    "title": "Network",
+    "links": [
+      {
+        "text": "Sepolia Bridge",
         "url": "https://app.mantle.xyz/bridge?network=sepolia"
       },
       {
-        "text": "Ecosystem",
-        "url": "https://www.mantle.xyz/dapp"
+        "text": "Sepolia Faucet",
+        "url": "https://faucet.mantle.xyz/"
       }
     ]
   },
@@ -28,16 +45,20 @@
         "url": "https://docs.mantle.xyz/network"
       },
       {
-        "text": "Grants",
-        "url": "https://www.mantle.xyz/grants"
+        "text": "Mantle Hackathons",
+        "url": "https://devhub.mantle.xyz/"
       },
       {
-        "text": "Faucet",
-        "url": "https://faucet.sepolia.mantle.xyz/"
+        "text": "Mantle Subgraph",
+        "url": "https://subgraph.mantle.xyz/"
+      },
+      {
+        "text": "Status",
+        "url": "https://0xmantle.instatus.com/"
       },
       {
         "text": "GitHub",
-        "url": "https://github.com/mantlenetworkio"
+        "url": "https://github.com/mantle-xyz"
       }
     ]
   },
@@ -45,24 +66,24 @@
     "title": "Community",
     "links": [
       {
-        "text": "Discord",
-        "url": "https://discord.com/invite/0xMantle"
+        "text": "X",
+        "url": "https://x.com/Mantle_Official"
       },
       {
-        "text": "Twitter",
-        "url": "https://twitter.com/0xMantle"
+        "text": "Discord",
+        "url": "https://discord.com/invite/0xMantle"
       },
       {
         "text": "Telegram",
         "url": "https://t.me/mantlenetwork"
       },
       {
-        "text": "Blog",
-        "url": "https://www.mantle.xyz/blog"
+        "text": "LinkedIn",
+        "url": "https://www.linkedin.com/company/0xmantle/posts/?feedView=all"
       },
       {
         "text": "Events",
-        "url": "https://www.mantle.xyz/events"
+        "url": "https://luma.com/mantleeventscal"
       }
     ]
   }
