@@ -58,6 +58,26 @@ defmodule Explorer.Chain.Cache.Counters.Consolidation do
   end
 
   @doc """
+  Returns `true` when `safe_block` is below the lagged chain head, capped by a
+  missing block range or a block pending a re-fetch counter correction.
+
+  A recalculation from scratch (a `NULL` watermark) stored at a capped safe
+  block would leave the rows above the cap to no dirty marker (an import marks
+  only the rows it brings), and the address or token would keep the counters
+  of the capped range until its next activity. So the consolidators leave
+  `NULL` watermarks alone and the backfills wait while the safe block is
+  capped. A block that arrives between `safe_block/0` and this check only
+  delays them by one round.
+  """
+  @spec capped?(non_neg_integer()) :: boolean()
+  def capped?(safe_block) do
+    case lagged_head() do
+      head when is_integer(head) -> safe_block < head
+      _ -> false
+    end
+  end
+
+  @doc """
   Returns the configured number of blocks the consolidation watermarks stay
   behind the chain head.
   """

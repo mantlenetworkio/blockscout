@@ -14,7 +14,8 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
     results are added to the columns;
   * an address without a watermark (`NULL` — not yet backfilled, or reset by
     a deep reorg) gets full aggregates bounded by `safe_block` written as
-    absolute values.
+    absolute values, once the safe block is not capped below the chain head
+    (see `Consolidation.capped?/1`); it keeps its marker until then.
 
   An address with more rows above its watermark than one step covers (the
   `step_rows` setting, per row source: transactions from and to it, token
@@ -136,7 +137,12 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
 
     with false <- AddressCounters.dirty_empty?(),
          safe_block when is_integer(safe_block) <- safe_block(),
-         outcome = consolidate_dirty(AddressCounters.select_dirty(batch_size() * concurrency()), safe_block),
+         outcome =
+           consolidate_dirty(
+             AddressCounters.select_dirty(batch_size() * concurrency()),
+             safe_block,
+             Consolidation.capped?(safe_block)
+           ),
          :catching_up <- combine(outcome, settlement) do
       :catching_up
     else
@@ -156,7 +162,8 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
   one step covers is aggregated in steps that are added up and stored at
   once, at `safe_block`, without the time budget of the cycles: a failure
   stores nothing. Used by `Explorer.Migrator.BackfillAddressCounters` and
-  available for on-demand recalculation.
+  available for on-demand recalculation. `safe_block` must not be capped below
+  the chain head (see `Consolidation.capped?/1`).
   """
   @spec consolidate_addresses([Hash.Address.t()], non_neg_integer()) :: :ok
   def consolidate_addresses(address_hashes, safe_block) do
@@ -173,18 +180,18 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
   end
 
   # returns the outcome of the cycle, see `combine/2`
-  defp consolidate_dirty(:"$end_of_table", _safe_block), do: :ok
+  defp consolidate_dirty(:"$end_of_table", _safe_block, _capped?), do: :ok
 
-  defp consolidate_dirty({entries, continuation}, safe_block) do
-    outcome = process_entries(entries, safe_block)
+  defp consolidate_dirty({entries, continuation}, safe_block, capped?) do
+    outcome = process_entries(entries, safe_block, capped?)
 
     continuation
     |> AddressCounters.select_dirty()
-    |> consolidate_dirty(safe_block)
+    |> consolidate_dirty(safe_block, capped?)
     |> combine(outcome)
   end
 
-  defp process_entries(entries, safe_block) do
+  defp process_entries(entries, safe_block, capped?) do
     entry_bytes = Enum.map(entries, fn {bytes, _marker_block} -> bytes end)
     addresses_by_bytes = Map.new(load_addresses(entry_bytes), &{&1.hash.bytes, &1})
 
@@ -195,11 +202,17 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
 
     found_bytes
     |> Enum.map(&Map.fetch!(addresses_by_bytes, &1))
-    |> Enum.reject(&(&1.counters_updated_at && &1.counters_updated_at >= safe_block))
+    |> Enum.reject(&waits?(&1, safe_block, capped?))
     |> Enum.chunk_every(batch_size())
     |> Task.async_stream(&consolidate_chunk(&1, safe_block, :cycle), max_concurrency: concurrency(), timeout: :infinity)
     |> Enum.reduce(:ok, fn {:ok, outcome}, acc -> combine(acc, outcome) end)
   end
+
+  # with its marker kept: an address consolidated at or above the safe block
+  # has nothing to add yet, one without a watermark waits for an uncapped safe
+  # block (see `Consolidation.capped?/1`)
+  defp waits?(%{counters_updated_at: nil}, _safe_block, capped?), do: capped?
+  defp waits?(%{counters_updated_at: watermark}, safe_block, _capped?), do: watermark >= safe_block
 
   # The cycles store every step, so that a heavy address progresses across
   # cycles; the backfill adds the steps of an address up and stores them at
@@ -290,6 +303,14 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
   # always takes a step, so every chunk makes progress. An address that is not
   # caught up keeps its dirty marker for the next cycle.
   defp consolidate_in_steps(stepped, safe_block, deadline) do
+    # a recalculation from scratch starts with a marker at this (uncapped) safe
+    # block: if the cycle crashes after a step, its marker from an old block
+    # would otherwise go once a later cap ends the address there
+    stepped
+    |> Enum.map(fn {address, _target} -> address end)
+    |> Enum.filter(&is_nil(&1.counters_updated_at))
+    |> keep_dirty(safe_block)
+
     statuses =
       stepped
       |> Enum.with_index()

@@ -114,4 +114,22 @@ defmodule Explorer.Migrator.BackfillAddressCountersTest do
 
     refute MigrationStatus.get_status("backfill_address_counters") == "completed"
   end
+
+  test "waits while the safe block is capped below the chain head instead of storing addresses at the cap" do
+    address = insert(:address, transactions_count: 1000)
+
+    insert(:block, number: 0)
+    :transaction |> insert(from_address: address) |> with_block(insert(:block, number: 20))
+    :transaction |> insert(from_address: address) |> with_block(insert(:block, number: 80))
+    insert(:block, number: 100)
+    # caps the safe block at 49
+    insert(:missing_block_range, from_number: 60, to_number: 50)
+
+    assert {:ok, _pid} = start_supervised(BackfillAddressCounters)
+
+    # time enough to store the address at the cap, had it not waited
+    Process.sleep(1_000)
+
+    assert %{transactions_count: 1000, counters_updated_at: nil} = Repo.get(Address, address.hash)
+  end
 end

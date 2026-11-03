@@ -100,16 +100,18 @@ defmodule Explorer.Migrator.BackfillTokenCounters do
 
   # Consolidation is not possible while the chain head is unknown or blocks
   # below it are still missing or pending a re-fetch counter correction. Wait
-  # instead of skipping: the cursor must not advance past unprocessed tokens.
+  # instead of skipping: the cursor must not advance past unprocessed tokens,
+  # and a token stored at a capped safe block would keep the count of the
+  # capped range (see `Consolidation.capped?/1`).
   defp await_safe_block do
-    case Consolidation.safe_block() do
-      nil ->
-        Logger.info("#{@migration_name} migration is waiting for a safe block to consolidate up to")
-        Process.sleep(:timer.seconds(30))
-        await_safe_block()
+    safe_block = Consolidation.safe_block()
 
-      safe_block ->
-        safe_block
+    if is_integer(safe_block) and not Consolidation.capped?(safe_block) do
+      safe_block
+    else
+      Logger.info("#{@migration_name} migration is waiting for a safe block to consolidate up to")
+      Process.sleep(:timer.seconds(30))
+      await_safe_block()
     end
   end
 end

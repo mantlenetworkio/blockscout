@@ -5,7 +5,7 @@ defmodule Explorer.Chain.Cache.Counters.TokenCountersConsolidatorTest do
   alias Explorer.Chain.Cache.Counters.{Consolidation, TokenCounters, TokenCountersConsolidator}
   alias Explorer.Chain.Token
   alias Explorer.Repo
-  alias Explorer.Utility.CountersRefetchBlock
+  alias Explorer.Utility.{CountersRefetchBlock, MissingBlockRange}
 
   describe "consolidate_tokens/2" do
     test "incrementally consolidates a token with a watermark" do
@@ -183,6 +183,36 @@ defmodule Explorer.Chain.Cache.Counters.TokenCountersConsolidatorTest do
 
       assert Repo.get_by(Token, contract_address_hash: token.contract_address_hash).counters_updated_at == 100
       refute TokenCounters.dirty_empty?()
+    end
+
+    test "leaves a token without a watermark dirty while the safe block is capped below the chain head" do
+      token = insert(:token, transfer_count: 1000)
+
+      insert(:block, number: 0)
+      insert_transfer(token, insert(:block, number: 20))
+      insert_transfer(token, insert(:block, number: 80))
+      insert(:block, number: 100)
+      # caps the safe block at 49
+      insert(:missing_block_range, from_number: 60, to_number: 50)
+
+      # an import of an old block marks the token at that block, below the cap
+      TokenCounters.mark_dirty([{token.contract_address_hash.bytes, 20}])
+      :sys.get_state(TokenCounters)
+
+      TokenCountersConsolidator.consolidate()
+
+      assert %{transfer_count: 1000, counters_updated_at: nil} =
+               Repo.get_by(Token, contract_address_hash: token.contract_address_hash)
+
+      refute TokenCounters.dirty_empty?()
+
+      Repo.delete_all(MissingBlockRange)
+      TokenCountersConsolidator.consolidate()
+
+      assert %{transfer_count: 2, counters_updated_at: 100} =
+               Repo.get_by(Token, contract_address_hash: token.contract_address_hash)
+
+      assert TokenCounters.dirty_empty?()
     end
 
     test "settles re-fetched blocks: adds the re-imported transfers below the watermark and drops the queue rows" do

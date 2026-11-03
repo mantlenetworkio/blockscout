@@ -123,4 +123,34 @@ defmodule Explorer.Migrator.BackfillTokenCountersTest do
 
     refute MigrationStatus.get_status("backfill_token_counters") == "completed"
   end
+
+  test "waits while the safe block is capped below the chain head instead of storing tokens at the cap" do
+    token = insert(:token, transfer_count: 1000, holder_count: 1)
+
+    insert(:block, number: 0)
+
+    for number <- [20, 80] do
+      block = insert(:block, number: number)
+      transaction = :transaction |> insert() |> with_block(block)
+
+      insert(:token_transfer,
+        transaction: transaction,
+        block: block,
+        block_number: number,
+        token_contract_address: token.contract_address
+      )
+    end
+
+    insert(:block, number: 100)
+    # caps the safe block at 49
+    insert(:missing_block_range, from_number: 60, to_number: 50)
+
+    assert {:ok, _pid} = start_supervised(BackfillTokenCounters)
+
+    # time enough to store the token at the cap, had it not waited
+    Process.sleep(1_000)
+
+    assert %{transfer_count: 1000, counters_updated_at: nil} =
+             Repo.get_by(Token, contract_address_hash: token.contract_address_hash)
+  end
 end

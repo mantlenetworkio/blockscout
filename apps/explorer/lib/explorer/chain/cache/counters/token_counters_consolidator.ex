@@ -13,7 +13,9 @@ defmodule Explorer.Chain.Cache.Counters.TokenCountersConsolidator do
     added to `transfer_count`;
   * a token without a watermark (`NULL` — not yet backfilled, or reset because
     covered content changed) gets a full transfer count bounded by
-    `safe_block`, and its `holder_count` re-established from a full recount.
+    `safe_block`, and its `holder_count` re-established from a full recount,
+    once the safe block is not capped below the chain head (see
+    `Consolidation.capped?/1`); it keeps its marker until then.
 
   `holder_count` is otherwise maintained live by the import-time deltas of the
   current token balances runner (state count — it cannot be recomputed from a
@@ -114,8 +116,15 @@ defmodule Explorer.Chain.Cache.Counters.TokenCountersConsolidator do
 
     unless TokenCounters.dirty_empty?() do
       case Consolidation.safe_block() do
-        nil -> :ok
-        safe_block -> consolidate_dirty(TokenCounters.select_dirty(batch_size() * concurrency()), safe_block)
+        nil ->
+          :ok
+
+        safe_block ->
+          consolidate_dirty(
+            TokenCounters.select_dirty(batch_size() * concurrency()),
+            safe_block,
+            Consolidation.capped?(safe_block)
+          )
       end
     end
 
@@ -127,7 +136,8 @@ defmodule Explorer.Chain.Cache.Counters.TokenCountersConsolidator do
   recalculation (transfer count and holder recount) for tokens without a
   `counters_updated_at` watermark, incremental transfer-count range aggregates
   for the rest. Used by `Explorer.Migrator.BackfillTokenCounters` and
-  available for on-demand recalculation.
+  available for on-demand recalculation. `safe_block` must not be capped below
+  the chain head (see `Consolidation.capped?/1`).
   """
   @spec consolidate_tokens([Hash.Address.t()], non_neg_integer()) :: :ok
   def consolidate_tokens(contract_address_hashes, safe_block) do
@@ -143,14 +153,14 @@ defmodule Explorer.Chain.Cache.Counters.TokenCountersConsolidator do
     :ok
   end
 
-  defp consolidate_dirty(:"$end_of_table", _safe_block), do: :ok
+  defp consolidate_dirty(:"$end_of_table", _safe_block, _capped?), do: :ok
 
-  defp consolidate_dirty({entries, continuation}, safe_block) do
-    process_entries(entries, safe_block)
-    consolidate_dirty(TokenCounters.select_dirty(continuation), safe_block)
+  defp consolidate_dirty({entries, continuation}, safe_block, capped?) do
+    process_entries(entries, safe_block, capped?)
+    consolidate_dirty(TokenCounters.select_dirty(continuation), safe_block, capped?)
   end
 
-  defp process_entries(entries, safe_block) do
+  defp process_entries(entries, safe_block, capped?) do
     entry_bytes = Enum.map(entries, fn {bytes, _marker_block} -> bytes end)
     tokens_by_bytes = Map.new(load_tokens(entry_bytes), &{&1.contract_address_hash.bytes, &1})
 
@@ -161,11 +171,17 @@ defmodule Explorer.Chain.Cache.Counters.TokenCountersConsolidator do
 
     found_bytes
     |> Enum.map(&Map.fetch!(tokens_by_bytes, &1))
-    |> Enum.reject(&(&1.counters_updated_at && &1.counters_updated_at >= safe_block))
+    |> Enum.reject(&waits?(&1, safe_block, capped?))
     |> Enum.chunk_every(batch_size())
     |> Task.async_stream(&consolidate_chunk(&1, safe_block), max_concurrency: concurrency(), timeout: :infinity)
     |> Stream.run()
   end
+
+  # with its marker kept: a token consolidated at or above the safe block has
+  # nothing to add yet, one without a watermark waits for an uncapped safe block
+  # (see `Consolidation.capped?/1`)
+  defp waits?(%{counters_updated_at: nil}, _safe_block, capped?), do: capped?
+  defp waits?(%{counters_updated_at: watermark}, safe_block, _capped?), do: watermark >= safe_block
 
   defp consolidate_chunk(tokens, safe_block) do
     {incremental_tokens, inits} = Enum.split_with(tokens, & &1.counters_updated_at)

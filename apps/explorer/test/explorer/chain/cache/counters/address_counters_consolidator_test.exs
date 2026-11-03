@@ -7,7 +7,7 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
   alias Explorer.Chain.Address
   alias Explorer.Chain.Cache.Counters.{AddressCounters, AddressCountersConsolidator, Consolidation}
   alias Explorer.Repo
-  alias Explorer.Utility.CountersRefetchBlock
+  alias Explorer.Utility.{CountersRefetchBlock, MissingBlockRange}
 
   describe "consolidate_addresses/2" do
     test "incrementally consolidates an address with a watermark" do
@@ -140,6 +140,22 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
 
       assert AddressCountersConsolidator.safe_block() == 29
     end
+
+    test "capped?/1 tells a safe block capped below the lagged chain head" do
+      insert(:block, number: 0)
+      insert(:block, number: 100)
+
+      refute Consolidation.capped?(100)
+
+      insert(:missing_block_range, from_number: 60, to_number: 50)
+
+      assert Consolidation.capped?(Consolidation.safe_block())
+
+      Repo.delete_all(MissingBlockRange)
+      Repo.insert!(%CountersRefetchBlock{block_number: 30})
+
+      assert Consolidation.capped?(Consolidation.safe_block())
+    end
   end
 
   describe "consolidation cycle process" do
@@ -209,6 +225,34 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
 
       assert Repo.get(Address, address.hash).counters_updated_at == 100
       refute AddressCounters.dirty_empty?()
+    end
+
+    test "leaves an address without a watermark dirty while the safe block is capped below the chain head" do
+      # rows on both sides of a missing range, which caps the safe block at 49
+      address = insert(:address, transactions_count: 1000, token_transfers_count: 0, gas_used: 0)
+
+      insert(:block, number: 0)
+      :transaction |> insert(from_address: address) |> with_block(insert(:block, number: 20))
+      :transaction |> insert(from_address: address) |> with_block(insert(:block, number: 80))
+      insert(:block, number: 100)
+      insert(:missing_block_range, from_number: 60, to_number: 50)
+
+      # an import of an old block marks the address at that block, below the cap
+      AddressCounters.mark_dirty([{address.hash.bytes, 20}])
+      :sys.get_state(AddressCounters)
+
+      AddressCountersConsolidator.consolidate()
+
+      # recalculated from scratch at the cap, the address would lose its marker
+      # with the row at 80 not counted
+      assert %{transactions_count: 1000, counters_updated_at: nil} = Repo.get(Address, address.hash)
+      refute AddressCounters.dirty_empty?()
+
+      Repo.delete_all(MissingBlockRange)
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 2, counters_updated_at: 100} = Repo.get(Address, address.hash)
+      assert AddressCounters.dirty_empty?()
     end
 
     test "settles re-fetched blocks: adds the re-imported content below the watermark and drops the queue rows" do
@@ -460,7 +504,8 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
     end
 
     test "keeps the regular interval after a failed settlement of re-fetched blocks" do
-      address = insert(:address)
+      # with a watermark: one without waits while the pending re-fetch caps the safe block
+      address = insert(:address, transactions_count: 0, token_transfers_count: 0, gas_used: 0, counters_updated_at: 5)
 
       insert(:block, number: 0)
 
@@ -788,6 +833,64 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
       AddressCountersConsolidator.consolidate()
 
       assert %{transactions_count: 3, counters_updated_at: 100} = Repo.get(Address, address.hash)
+    end
+
+    test "keeps an address whose recalculation crashed after its first step dirty when it reaches a cap" do
+      address = insert(:address, transactions_count: 1000)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30, 70, 80] do
+        :transaction |> insert(from_address: address) |> with_block(insert(:block, number: number))
+      end
+
+      insert(:block, number: 100)
+
+      # an import of an old block marks the address at that block
+      AddressCounters.mark_dirty([{address.hash.bytes, 10}])
+      :sys.get_state(AddressCounters)
+
+      cycle = spawn(fn -> receive do: (:go -> AddressCountersConsolidator.consolidate()) end)
+      ref = Process.monitor(cycle)
+
+      handler_id = {__MODULE__, :crash_after_first_step_below_a_cap}
+
+      # kills the task of the cycle right after its first counters write, before
+      # the address is left part-way with a marker at the safe block
+      :telemetry.attach(
+        handler_id,
+        [:explorer, :repo, :query],
+        fn _event, _measurements, %{query: query}, cycle ->
+          if cycle in Process.get(:"$callers", []) and String.starts_with?(query, ~s(UPDATE "addresses")) do
+            Process.exit(self(), :kill)
+          end
+        end,
+        cycle
+      )
+
+      on_exit(fn -> :telemetry.detach(handler_id) end)
+
+      send(cycle, :go)
+
+      assert_receive {:DOWN, ^ref, :process, ^cycle, :killed}, 10_000
+      :sys.get_state(AddressCounters)
+      assert %{transactions_count: 2, counters_updated_at: 20} = Repo.get(Address, address.hash)
+
+      # a missing range caps the safe block at 49, which the address reaches
+      insert(:missing_block_range, from_number: 60, to_number: 50)
+      AddressCountersConsolidator.consolidate()
+      :sys.get_state(AddressCounters)
+
+      assert %{transactions_count: 3, counters_updated_at: 49} = Repo.get(Address, address.hash)
+      refute AddressCounters.dirty_empty?()
+
+      Repo.delete_all(MissingBlockRange)
+      # the rows at 70 and 80 fill a step, the next one reaches the safe block
+      AddressCountersConsolidator.consolidate()
+      :sys.get_state(AddressCounters)
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 5, counters_updated_at: 100} = Repo.get(Address, address.hash)
     end
 
     test "does not fall back to whole-history aggregates when the step of an address cannot be found" do
