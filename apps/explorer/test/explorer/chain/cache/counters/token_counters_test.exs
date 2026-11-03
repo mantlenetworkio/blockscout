@@ -2,6 +2,7 @@
 defmodule Explorer.Chain.Cache.Counters.TokenCountersTest do
   use Explorer.DataCase, async: false
 
+  alias Explorer.Chain.Cache.BlockNumber
   alias Explorer.Chain.Cache.Counters.TokenCounters
 
   setup do
@@ -31,6 +32,27 @@ defmodule Explorer.Chain.Cache.Counters.TokenCountersTest do
 
       assert {[{bytes, _block_number}], _continuation} = TokenCounters.select_dirty(10)
       assert bytes == token.contract_address_hash.bytes
+    end
+
+    test "marks a token with a watermark dirty at the chain head when it seeds the cache" do
+      token = insert(:token, transfer_count: 5, counters_updated_at: 90)
+
+      insert(:block, number: 100)
+      head = BlockNumber.get_max()
+
+      TokenCounters.fetch(token)
+      :sys.get_state(TokenCounters)
+
+      assert {[{bytes, ^head}], _continuation} = TokenCounters.select_dirty(10)
+      assert bytes == token.contract_address_hash.bytes
+
+      TokenCounters.delete_dirty_markers([bytes], head)
+
+      # a read served from the cache marks nothing
+      TokenCounters.fetch(token)
+      :sys.get_state(TokenCounters)
+
+      assert TokenCounters.dirty_empty?()
     end
   end
 
@@ -145,7 +167,8 @@ defmodule Explorer.Chain.Cache.Counters.TokenCountersTest do
       TokenCounters.mark_dirty([{insert(:token).contract_address_hash.bytes, 10}])
       :sys.get_state(TokenCounters)
 
-      assert %{cached_tokens: 1, dirty_markers: 1, memory_bytes: memory_bytes} = TokenCounters.stats()
+      # the read marked the seeded token at the chain head too
+      assert %{cached_tokens: 1, dirty_markers: 2, memory_bytes: memory_bytes} = TokenCounters.stats()
       assert memory_bytes > 0
     end
   end

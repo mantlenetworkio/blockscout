@@ -5,6 +5,7 @@ defmodule Explorer.Migrator.BackfillAddressCountersTest do
   import Ecto.Query
 
   alias Explorer.Chain.Address
+  alias Explorer.Chain.Cache.BackgroundMigrations
   alias Explorer.Chain.Cache.Counters.{AddressCountersConsolidator, Consolidation}
   alias Explorer.Migrator.{BackfillAddressCounters, MigrationStatus}
   alias Explorer.Repo
@@ -29,6 +30,8 @@ defmodule Explorer.Migrator.BackfillAddressCountersTest do
     on_exit(fn ->
       Application.put_env(:explorer, Consolidation, initial_consolidation_env)
       Application.put_env(:explorer, BackfillAddressCounters, initial_migrator_env)
+      # a completed migration sets it, and fetches of other tests read it
+      BackgroundMigrations.set_backfill_address_counters_finished(false)
     end)
 
     :ok

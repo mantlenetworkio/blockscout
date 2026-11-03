@@ -25,8 +25,9 @@ defmodule Explorer.Chain.Cache.Counters.TokenCounters do
     address hash bytes mapped to the maximum block number seen for the token
     since its last consolidation. Markers are written on nodes where the
     consolidator runs (`:indexer`/`:all` modes) and are capped at a
-    configurable size — a dropped marker only delays consolidation until the
-    token's next activity.
+    configurable size. The table lives in memory: a dropped marker, or all of
+    them after a restart, only delays consolidation until the token's next
+    activity or the next read that seeds its display value (`fetch/1`).
 
   On pure API nodes of split deployments the display cache is kept warm by the
   realtime `:token_transfers` chain events (dirty markers are not written
@@ -78,7 +79,10 @@ defmodule Explorer.Chain.Cache.Counters.TokenCounters do
   (seeding the cache along the way). A token whose counter was never
   calculated (`NULL` column) is reported as zero and marked dirty so that the
   consolidator computes its value ahead of the background backfill (on nodes
-  with a local consolidator).
+  with a local consolidator). A token with a watermark is marked dirty at the
+  chain head when it seeds the cache: transfers above the watermark whose
+  markers a restart dropped are caught up as the safe block advances,
+  otherwise the next cycle only moves the watermark to the safe block.
   """
   @spec fetch(Explorer.Chain.Token.t()) :: non_neg_integer()
   def fetch(token) do
@@ -338,8 +342,9 @@ defmodule Explorer.Chain.Cache.Counters.TokenCounters do
 
       [] ->
         # cap the work list: a dropped marker only delays consolidation until
-        # the token's next activity (during initial sync all tokens are
-        # covered by the backfill migration anyway)
+        # the token's next activity or the next read that seeds its display
+        # value (during initial sync all tokens are covered by the backfill
+        # migration anyway)
         if :ets.info(@dirty_cache_name, :size) < max_dirty_markers() do
           :ets.insert(@dirty_cache_name, {bytes, block_number})
         end
@@ -370,6 +375,13 @@ defmodule Explorer.Chain.Cache.Counters.TokenCounters do
         {{bytes, :transfer_count}, token.transfer_count},
         {{bytes, :ts}, Helper.current_time()}
       ])
+
+      # a restart drops the markers of the transfers above the watermark: the
+      # consolidator catches up from here to the chain head (the marker keeps
+      # the maximum, so one set by an import stays)
+      if is_integer(token.counters_updated_at) do
+        mark_dirty([{bytes, BlockNumber.get_max()}])
+      end
 
       token.transfer_count
     end

@@ -255,6 +255,51 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
       assert AddressCounters.dirty_empty?()
     end
 
+    test "catches up an address whose marker a restart dropped once the address is read" do
+      address = insert(:address, transactions_count: 1, token_transfers_count: 0, gas_used: 0, counters_updated_at: 10)
+
+      insert(:block, number: 0)
+      block = insert(:block, number: 100)
+      # imported before the restart, which dropped its marker
+      :transaction |> insert(from_address: address) |> with_block(block)
+
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 1, counters_updated_at: 10} = Repo.get(Address, address.hash)
+
+      AddressCounters.fetch(address)
+      :sys.get_state(AddressCounters)
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 2, counters_updated_at: 100} = Repo.get(Address, address.hash)
+      assert AddressCounters.dirty_empty?()
+    end
+
+    test "keeps the marker of a read address through a capped safe block until it covers the chain head" do
+      address = insert(:address, transactions_count: 1, token_transfers_count: 0, gas_used: 0, counters_updated_at: 10)
+
+      insert(:block, number: 0)
+      # imported before the restart, which dropped their markers
+      :transaction |> insert(from_address: address) |> with_block(insert(:block, number: 20))
+      :transaction |> insert(from_address: address) |> with_block(insert(:block, number: 80))
+      insert(:block, number: 100)
+      # caps the safe block at 49
+      insert(:missing_block_range, from_number: 60, to_number: 50)
+
+      AddressCounters.fetch(address)
+      :sys.get_state(AddressCounters)
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 2, counters_updated_at: 49} = Repo.get(Address, address.hash)
+      refute AddressCounters.dirty_empty?()
+
+      Repo.delete_all(MissingBlockRange)
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 3, counters_updated_at: 100} = Repo.get(Address, address.hash)
+      assert AddressCounters.dirty_empty?()
+    end
+
     test "settles re-fetched blocks: adds the re-imported content below the watermark and drops the queue rows" do
       address = insert(:address, transactions_count: 5, token_transfers_count: 0, gas_used: 0, counters_updated_at: 100)
 
@@ -360,6 +405,34 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
       reloaded = Repo.get(Address, address.hash)
       assert %{transactions_count: 5, counters_updated_at: 100} = reloaded
       assert reloaded.gas_used == gas_of_first.(5)
+      assert AddressCounters.dirty_empty?()
+    end
+
+    test "resumes an address left part-way by a restart once the address is read" do
+      # two steps were stored (the rows at 10 and 20) before the restart dropped the marker
+      address = insert(:address, transactions_count: 2, token_transfers_count: 0, gas_used: 0, counters_updated_at: 20)
+
+      insert(:block, number: 0)
+
+      for number <- [10, 20, 30, 40, 50] do
+        :transaction |> insert(from_address: address) |> with_block(insert(:block, number: number))
+      end
+
+      insert(:block, number: 100)
+
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 2, counters_updated_at: 20} = Repo.get(Address, address.hash)
+
+      AddressCounters.fetch(address)
+      :sys.get_state(AddressCounters)
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 4, counters_updated_at: 40} = Repo.get(Address, address.hash)
+
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 5, counters_updated_at: 100} = Repo.get(Address, address.hash)
       assert AddressCounters.dirty_empty?()
     end
 

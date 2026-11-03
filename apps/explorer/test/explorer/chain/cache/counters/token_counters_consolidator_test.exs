@@ -185,6 +185,28 @@ defmodule Explorer.Chain.Cache.Counters.TokenCountersConsolidatorTest do
       refute TokenCounters.dirty_empty?()
     end
 
+    test "catches up a token whose marker a restart dropped once the token is read" do
+      token = insert(:token, transfer_count: 1, counters_updated_at: 10)
+
+      insert(:block, number: 0)
+      # imported before the restart, which dropped its marker
+      insert_transfer(token, insert(:block, number: 100))
+
+      TokenCountersConsolidator.consolidate()
+
+      assert %{transfer_count: 1, counters_updated_at: 10} =
+               Repo.get_by(Token, contract_address_hash: token.contract_address_hash)
+
+      TokenCounters.fetch(token)
+      :sys.get_state(TokenCounters)
+      TokenCountersConsolidator.consolidate()
+
+      assert %{transfer_count: 2, counters_updated_at: 100} =
+               Repo.get_by(Token, contract_address_hash: token.contract_address_hash)
+
+      assert TokenCounters.dirty_empty?()
+    end
+
     test "leaves a token without a watermark dirty while the safe block is capped below the chain head" do
       token = insert(:token, transfer_count: 1000)
 

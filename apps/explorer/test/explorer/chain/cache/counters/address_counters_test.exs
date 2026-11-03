@@ -2,9 +2,12 @@
 defmodule Explorer.Chain.Cache.Counters.AddressCountersTest do
   use Explorer.DataCase, async: false
 
+  alias Explorer.Chain.Cache.{BackgroundMigrations, BlockNumber}
   alias Explorer.Chain.Cache.Counters.AddressCounters
 
   setup do
+    # reads mark addresses without a watermark only once the backfill is over
+    BackgroundMigrations.set_backfill_address_counters_finished(false)
     start_supervised!(AddressCounters)
 
     :ok
@@ -30,6 +33,52 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersTest do
       :sys.get_state(AddressCounters)
 
       assert {[{bytes, _block_number}], _continuation} = AddressCounters.select_dirty(10)
+      assert bytes == address.hash.bytes
+    end
+
+    test "marks an address with a watermark dirty at the chain head when it seeds the cache" do
+      address =
+        insert(:address, transactions_count: 5, token_transfers_count: 3, gas_used: 100, counters_updated_at: 90)
+
+      insert(:block, number: 100)
+      head = BlockNumber.get_max()
+
+      AddressCounters.fetch(address)
+      :sys.get_state(AddressCounters)
+
+      assert {[{bytes, ^head}], _continuation} = AddressCounters.select_dirty(10)
+      assert bytes == address.hash.bytes
+
+      AddressCounters.delete_dirty_markers([bytes], head)
+
+      # a read served from the cache marks nothing
+      AddressCounters.fetch(address)
+      :sys.get_state(AddressCounters)
+
+      assert AddressCounters.dirty_empty?()
+    end
+
+    test "marks an address without a watermark dirty when it seeds the cache once the backfill is over" do
+      # a deep reorg reset the watermark, and a restart dropped the marker of the reset
+      address = insert(:address, transactions_count: 5, token_transfers_count: 3, gas_used: 100)
+
+      insert(:block, number: 100)
+      head = BlockNumber.get_max()
+
+      AddressCounters.fetch(address)
+      :sys.get_state(AddressCounters)
+
+      # the backfill still takes it
+      assert AddressCounters.dirty_empty?()
+
+      BackgroundMigrations.set_backfill_address_counters_finished(true)
+      on_exit(fn -> BackgroundMigrations.set_backfill_address_counters_finished(false) end)
+      AddressCounters.invalidate([address.hash.bytes])
+
+      AddressCounters.fetch(address)
+      :sys.get_state(AddressCounters)
+
+      assert {[{bytes, ^head}], _continuation} = AddressCounters.select_dirty(10)
       assert bytes == address.hash.bytes
     end
   end

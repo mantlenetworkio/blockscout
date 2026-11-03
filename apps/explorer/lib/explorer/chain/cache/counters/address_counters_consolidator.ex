@@ -56,8 +56,9 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
     until the address is recalculated (watermark reset) for another reason;
   * an address catching up in steps shows the counters of the blocks
     consolidated so far; as the dirty markers live in memory, one without
-    further activity stays there after a restart until its next activity
-    (like any address whose marker is lost).
+    further activity stays there after a restart until its next activity or
+    the next read that seeds its display values (like any address whose marker
+    is lost, see `Explorer.Chain.Cache.Counters.AddressCounters.fetch/1`).
   """
 
   use GenServer

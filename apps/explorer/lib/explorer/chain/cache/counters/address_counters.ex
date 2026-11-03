@@ -24,8 +24,10 @@ defmodule Explorer.Chain.Cache.Counters.AddressCounters do
     mapped to the maximum block number seen for the address since its last
     consolidation. Markers are written for every import (realtime and catchup)
     on nodes where the consolidator runs (`:indexer`/`:all` modes) and are
-    capped at a configurable size — a dropped marker only delays consolidation
-    until the address's next activity, it never corrupts the counters.
+    capped at a configurable size. The table lives in memory: a dropped
+    marker, or all of them after a restart, only delays consolidation until
+    the address's next activity or the next read that seeds its display values
+    (`fetch/1`), it never corrupts the counters.
 
   On pure API nodes of split deployments the display cache is kept warm by the
   realtime `:transactions`/`:token_transfers` chain events (dirty markers are
@@ -37,7 +39,7 @@ defmodule Explorer.Chain.Cache.Counters.AddressCounters do
   use GenServer
 
   alias Explorer.Chain.Address.Counters
-  alias Explorer.Chain.Cache.BlockNumber
+  alias Explorer.Chain.Cache.{BackgroundMigrations, BlockNumber}
   alias Explorer.Chain.Cache.Counters.Helper
   alias Explorer.Chain.Events.Subscriber
   alias Explorer.Chain.Hash
@@ -96,7 +98,12 @@ defmodule Explorer.Chain.Cache.Counters.AddressCounters do
   `NULL`) is reported as all-zero and marked dirty so that the consolidator
   computes its values ahead of the background backfill (on nodes with a local
   consolidator; on pure API nodes such addresses stay at zero until the
-  backfill reaches them).
+  backfill reaches them). An address with a watermark is marked dirty at the
+  chain head when it seeds the cache: rows above the watermark whose markers a
+  restart dropped (an address part-way through the consolidation steps
+  included) are caught up as the safe block advances, otherwise the next cycle
+  only moves the watermark to the safe block. Once the backfill is over, the
+  same holds for an address without a watermark (a deep reorg reset).
   """
   @spec fetch(Explorer.Chain.Address.t()) :: counters()
   def fetch(address) do
@@ -420,8 +427,9 @@ defmodule Explorer.Chain.Cache.Counters.AddressCounters do
 
       [] ->
         # cap the work list: a dropped marker only delays consolidation until
-        # the address's next activity (during initial sync all addresses are
-        # covered by the backfill migration anyway)
+        # the address's next activity or the next read that seeds its display
+        # values (during initial sync all addresses are covered by the
+        # backfill migration anyway)
         if :ets.info(@dirty_cache_name, :size) < max_dirty_markers() do
           :ets.insert(@dirty_cache_name, {bytes, block_number})
         end
@@ -462,6 +470,15 @@ defmodule Explorer.Chain.Cache.Counters.AddressCounters do
         {{bytes, :gas_direction}, Counters.gas_usage_direction_field(address)},
         {{bytes, :ts}, Helper.current_time()}
       ])
+
+      # a restart drops the markers of the rows above the watermark: the
+      # consolidator catches up from here to the chain head (the marker keeps
+      # the maximum, so one set by an import stays); once the backfill is over,
+      # a NULL watermark (a deep reorg reset whose marker a restart dropped) is
+      # recalculated the same way
+      if is_integer(address.counters_updated_at) or BackgroundMigrations.get_backfill_address_counters_finished() do
+        mark_dirty([{bytes, BlockNumber.get_max()}])
+      end
 
       counters
     end
