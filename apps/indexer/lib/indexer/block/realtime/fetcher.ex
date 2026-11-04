@@ -285,6 +285,8 @@ defmodule Indexer.Block.Realtime.Fetcher do
       |> put_in([:blocks, :params, Access.all(), :refetch_needed], false)
       |> put_in([:block_rewards], chain_import_block_rewards)
 
+    remove_assets_of_replaced_blocks(chain_import_options[:blocks][:params])
+
     with {:import, {:ok, imported} = ok} <- {:import, Chain.import(chain_import_options)} do
       last_block =
         chain_import_options[:blocks][:params]
@@ -357,7 +359,7 @@ defmodule Indexer.Block.Realtime.Fetcher do
     Indexer.Logger.metadata(
       fn ->
         if reorg? do
-          remove_assets_by_number(block_number_to_fetch)
+          remove_assets_on_reorg(block_number_to_fetch)
 
           # give previous fetch attempt (for same block number) a chance to finish
           # before fetching again, to reduce block consensus mistakes
@@ -369,6 +371,51 @@ defmodule Indexer.Block.Realtime.Fetcher do
       fetcher: :block_realtime,
       block_number: block_number_to_fetch
     )
+  end
+
+  # with the optimism chain type, the assets go when the block that replaces another one is imported
+  # (see `remove_assets_of_replaced_blocks/1`)
+  defp remove_assets_on_reorg(reorg_block) do
+    if Application.get_env(:explorer, :chain_type) != :optimism do
+      remove_assets_by_number(reorg_block)
+    end
+  end
+
+  @doc false
+  # With the optimism chain type, the assets of a reorg go when a block about to be imported replaces another consensus
+  # block: the one stored at its number, or the one stored below it when that is not its parent (the import takes the
+  # consensus from that block too, so the block replacing it later finds nothing to compare). They go from the lowest
+  # such number on. A head at or below the previous one is not enough: a node that restarted, or another node behind a
+  # load balancer, reports an older head while the chain did not change, and removing the assets then lost batches that
+  # nothing writes again. Nor is the hash of that head: a reorg can return to an unchanged block first and build new
+  # blocks on it, which then no longer come as older heads.
+  #
+  # As before, only the realtime import removes the assets, and outside the import transaction. Not covered: a reorg
+  # whose first replacing block comes through a catch-up import (an older head used to remove the assets regardless),
+  # and an import of another block running at the same time, which can lose the withdrawals it wrote above the removed
+  # number (the withdrawal fetcher writes them again at the next indexer start).
+  @spec remove_assets_of_replaced_blocks([
+          %{number: non_neg_integer(), hash: String.t(), parent_hash: String.t()}
+        ]) :: any()
+  def remove_assets_of_replaced_blocks(blocks_params) do
+    if Application.get_env(:explorer, :chain_type) == :optimism do
+      numbers = Enum.map(blocks_params, & &1.number)
+      stored_hashes = Chain.Block.block_hash_by_number(numbers ++ Enum.map(numbers, &(&1 - 1)))
+
+      blocks_params
+      |> Enum.flat_map(fn %{number: number, hash: hash, parent_hash: parent_hash} ->
+        [{number, hash}, {number - 1, parent_hash}]
+      end)
+      |> Enum.filter(fn {number, hash} ->
+        Map.has_key?(stored_hashes, number) and to_string(stored_hashes[number]) != String.downcase(hash)
+      end)
+      |> Enum.map(fn {number, _hash} -> number end)
+      |> Enum.min(fn -> nil end)
+      |> case do
+        nil -> :ok
+        number -> remove_assets_by_number(number)
+      end
+    end
   end
 
   @spec remove_assets_by_number(non_neg_integer()) :: any()

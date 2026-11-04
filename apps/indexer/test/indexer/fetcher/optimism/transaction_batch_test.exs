@@ -1245,5 +1245,36 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
         {:ok, [%{id: id, result: %{"number" => EthereumJSONRPC.integer_to_quantity(number), "hash" => hash}}]}
       end)
     end
+
+    describe "handle_l2_reorg/1" do
+      test "keeps a frame sequence that still has batches below the reorg block" do
+        insert_frame_sequence(1, 100..110)
+        insert_frame_sequence(2, 111..115)
+
+        TransactionBatch.handle_l2_reorg(105)
+
+        assert Repo.all(from(tb in Explorer.Chain.Optimism.TransactionBatch, select: tb.l2_block_number)) |> Enum.sort() ==
+                 Enum.to_list(100..104)
+
+        assert Repo.all(from(fs in Explorer.Chain.Optimism.FrameSequence, select: fs.id)) == [1]
+      end
+    end
+
+    defp insert_frame_sequence(id, l2_block_numbers) do
+      Repo.insert!(%Explorer.Chain.Optimism.FrameSequence{
+        id: id,
+        l1_transaction_hashes: [],
+        l1_timestamp: DateTime.utc_now(),
+        view_ready: true
+      })
+
+      Enum.each(l2_block_numbers, fn number ->
+        Repo.insert!(%Explorer.Chain.Optimism.TransactionBatch{
+          l2_block_number: number,
+          frame_sequence_id: id,
+          frame_sequence_id_prev: 0
+        })
+      end)
+    end
   end
 end

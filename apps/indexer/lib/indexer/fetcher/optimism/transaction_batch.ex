@@ -1629,23 +1629,42 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
 
   @doc """
     Removes rows from op_transaction_batches and op_frame_sequences tables written beginning from the L2 reorg block.
+
+    A frame sequence that also covers blocks below the reorg block keeps its row and those batches. Both deletions run
+    in one transaction, so if the second one fails, the batches stay as well (the batch fetcher would not write them
+    again).
   """
   @spec handle_l2_reorg(non_neg_integer()) :: any()
   def handle_l2_reorg(reorg_block) do
-    frame_sequence_ids =
-      Repo.all(
-        from(
-          tb in OptimismTransactionBatch,
-          select: tb.frame_sequence_id,
-          where: tb.l2_block_number >= ^reorg_block
-        ),
+    {:ok, deleted_count} =
+      Repo.transaction(
+        fn ->
+          {deleted_count, frame_sequence_ids} =
+            Repo.delete_all(
+              from(tb in OptimismTransactionBatch,
+                where: tb.l2_block_number >= ^reorg_block,
+                select: tb.frame_sequence_id
+              ),
+              timeout: :infinity
+            )
+
+          frame_sequence_ids = Enum.uniq(frame_sequence_ids)
+
+          still_referenced =
+            from(tb in OptimismTransactionBatch,
+              where: tb.frame_sequence_id in ^frame_sequence_ids,
+              select: tb.frame_sequence_id
+            )
+
+          Repo.delete_all(
+            from(fs in FrameSequence, where: fs.id in ^frame_sequence_ids and fs.id not in subquery(still_referenced)),
+            timeout: :infinity
+          )
+
+          deleted_count
+        end,
         timeout: :infinity
       )
-
-    {deleted_count, _} =
-      Repo.delete_all(from(tb in OptimismTransactionBatch, where: tb.l2_block_number >= ^reorg_block))
-
-    Repo.delete_all(from(fs in FrameSequence, where: fs.id in ^frame_sequence_ids))
 
     if deleted_count > 0 do
       Logger.warning(

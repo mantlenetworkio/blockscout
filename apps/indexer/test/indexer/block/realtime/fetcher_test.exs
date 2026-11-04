@@ -1292,6 +1292,22 @@ defmodule Indexer.Block.Realtime.FetcherTest do
           _ ->
             {:ok, [%{id: 0, jsonrpc: "2.0", result: "0x53507afe51f28000"}]}
         end)
+        # the node reports the stored block 1 again as an older head
+        |> expect(:json_rpc, 3, fn
+          [%{id: 0, jsonrpc: "2.0", method: "eth_getBlockByNumber", params: ["0x3C365F", true]}], _ ->
+            {:ok, [%{id: 0, jsonrpc: "2.0", result: block_1_data}]}
+
+          [
+            %{
+              id: 0,
+              jsonrpc: "2.0",
+              method: "eth_getBalance",
+              params: ["0x5ee341ac44d344ade1ca3a771c59b98eb2a77df2", "0x3C365F"]
+            }
+          ],
+          _ ->
+            {:ok, [%{id: 0, jsonrpc: "2.0", result: "0x53474fa377a46000"}]}
+        end)
         |> expect(:json_rpc, 3, fn
           [
             %{
@@ -1335,6 +1351,22 @@ defmodule Indexer.Block.Realtime.FetcherTest do
       assert to_string(block_1.hash) == block_1_data["hash"]
       assert to_string(block_2.hash) == block_2_data["hash"]
 
+      optimism? = Application.get_env(:explorer, :chain_type) == :optimism
+
+      if optimism? do
+        insert_optimism_assets()
+      end
+
+      # an older head with the stored block 1: nothing is replaced, so the optimism assets stay
+      Realtime.Fetcher.start_fetch_and_import(3_946_079, block_fetcher, 3_946_080)
+      Process.sleep(6000)
+
+      assert Enum.count(Explorer.Repo.all(Chain.Block)) == 2
+
+      if optimism? do
+        assert optimism_asset_blocks() == {[3_946_079, 3_946_080], [3_946_078, 3_946_079, 3_946_080], [1]}
+      end
+
       Realtime.Fetcher.start_fetch_and_import(3_946_079, block_fetcher, 3_946_080)
       Process.sleep(6000)
 
@@ -1347,6 +1379,45 @@ defmodule Indexer.Block.Realtime.FetcherTest do
       assert %{consensus: false} = block_1_old
       assert %{consensus: false} = block_2_old
       assert %{consensus: true} = block_1_new
+
+      if optimism? do
+        # the replacing block 1 removed them from its number on; the frame sequence keeps the batch below it
+        assert optimism_asset_blocks() == {[], [3_946_078], [1]}
+      end
     end
+  end
+
+  # a withdrawal in blocks 1 and 2, and a frame sequence with a batch in the block before them and in each of them
+  defp insert_optimism_assets do
+    Enum.each([3_946_079, 3_946_080], fn number ->
+      Repo.insert!(%Explorer.Chain.Optimism.Withdrawal{
+        msg_nonce: Decimal.new(number),
+        hash: Factory.transaction_hash(),
+        l2_transaction_hash: Factory.transaction_hash(),
+        l2_block_number: number
+      })
+    end)
+
+    Repo.insert!(%Explorer.Chain.Optimism.FrameSequence{
+      id: 1,
+      l1_transaction_hashes: [],
+      l1_timestamp: DateTime.utc_now(),
+      view_ready: true
+    })
+
+    Enum.each(3_946_078..3_946_080, fn number ->
+      Repo.insert!(%Explorer.Chain.Optimism.TransactionBatch{
+        l2_block_number: number,
+        frame_sequence_id: 1,
+        frame_sequence_id_prev: 0
+      })
+    end)
+  end
+
+  defp optimism_asset_blocks do
+    {Repo.all(from(w in Explorer.Chain.Optimism.Withdrawal, select: w.l2_block_number, order_by: w.l2_block_number)),
+     Repo.all(
+       from(tb in Explorer.Chain.Optimism.TransactionBatch, select: tb.l2_block_number, order_by: tb.l2_block_number)
+     ), Repo.all(from(fs in Explorer.Chain.Optimism.FrameSequence, select: fs.id))}
   end
 end
