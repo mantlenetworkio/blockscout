@@ -16,6 +16,9 @@ defmodule Explorer.Market.Fetcher.TokenTest do
     setup do
       bypass = Bypass.open()
 
+      # token icons are optional, so these tests serve no icons
+      Bypass.stub(bypass, "GET", "/coins/markets", fn conn -> Conn.resp(conn, 200, "[]") end)
+
       source_configuration = Application.get_env(:explorer, Explorer.Market.Source)
       fetcher_configuration = Application.get_env(:explorer, Explorer.Market.Fetcher.Token)
       coin_gecko_configuration = Application.get_env(:explorer, Explorer.Market.Source.CoinGecko)
@@ -224,6 +227,100 @@ defmodule Explorer.Market.Fetcher.TokenTest do
       Repo.all(Token)
       |> Enum.each(fn %{fiat_value: fiat_value} -> assert is_nil(fiat_value) end)
     end
+
+    test "imports token icons without replacing existing ones", %{bypass: bypass} do
+      token_without_icon = insert(:token, icon_url: nil)
+      token_with_icon = insert(:token, icon_url: "https://example.com/existing.png")
+      tokens = [token_without_icon, token_with_icon]
+
+      coins_list =
+        Enum.map(tokens, fn %{contract_address_hash: hash} ->
+          %{"id" => "#{hash}_id", "symbol" => "s", "name" => "n", "platforms" => %{"ethereum" => "#{hash}"}}
+        end)
+
+      Bypass.expect_once(bypass, "GET", "/coins/list", fn conn ->
+        Conn.resp(conn, 200, Jason.encode!(coins_list))
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/simple/price", fn conn ->
+        prices =
+          Map.new(
+            tokens,
+            &{"#{&1.contract_address_hash}_id", %{"usd" => 1.5, "usd_market_cap" => 100, "usd_24h_vol" => 10}}
+          )
+
+        Conn.resp(conn, 200, Jason.encode!(prices))
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/coins/markets", fn conn ->
+        coins =
+          Enum.map(tokens, fn %{contract_address_hash: hash} ->
+            %{"id" => "#{hash}_id", "image" => "https://coin-images.coingecko.com/coins/images/1/large/#{hash}.png"}
+          end)
+
+        Conn.resp(conn, 200, Jason.encode!(coins))
+      end)
+
+      GenServer.start_link(TokenFetcher, [])
+
+      assert wait_for_icon(token_without_icon) ==
+               "https://coin-images.coingecko.com/coins/images/1/small/#{token_without_icon.contract_address_hash}.png"
+
+      assert Repo.get_by(Token, contract_address_hash: token_with_icon.contract_address_hash).icon_url ==
+               "https://example.com/existing.png"
+    end
+
+    test "fills a missing icon even when the market data did not change", %{bypass: bypass} do
+      # the import pre-filter compares stored prices, which only load while the token fetcher is enabled
+      previous_fetcher_enabled = :persistent_term.get(:market_token_fetcher_enabled, false)
+      :persistent_term.put(:market_token_fetcher_enabled, true)
+      on_exit(fn -> :persistent_term.put(:market_token_fetcher_enabled, previous_fetcher_enabled) end)
+
+      token =
+        insert(:token,
+          name: "n",
+          symbol: "s",
+          fiat_value: Decimal.new("1.5"),
+          circulating_market_cap: Decimal.new("100"),
+          volume_24h: Decimal.new("10"),
+          icon_url: nil
+        )
+
+      id = "#{token.contract_address_hash}_id"
+
+      Bypass.expect_once(bypass, "GET", "/coins/list", fn conn ->
+        coins_list = [
+          %{
+            "id" => id,
+            "symbol" => "s",
+            "name" => "n",
+            "platforms" => %{"ethereum" => "#{token.contract_address_hash}"}
+          }
+        ]
+
+        Conn.resp(conn, 200, Jason.encode!(coins_list))
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/simple/price", fn conn ->
+        Conn.resp(conn, 200, Jason.encode!(%{id => %{"usd" => 1.5, "usd_market_cap" => 100, "usd_24h_vol" => 10}}))
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/coins/markets", fn conn ->
+        Conn.resp(conn, 200, Jason.encode!([%{"id" => id, "image" => "https://example.com/large/icon.png"}]))
+      end)
+
+      GenServer.start_link(TokenFetcher, [])
+
+      assert wait_for_icon(token) == "https://example.com/small/icon.png"
+    end
+  end
+
+  defp wait_for_icon(%Token{contract_address_hash: hash}) do
+    wait_for_results(fn ->
+      Repo.one!(
+        from(t in Token, where: t.contract_address_hash == ^hash and not is_nil(t.icon_url), select: t.icon_url)
+      )
+    end)
   end
 
   describe "stale market data cleanup" do
@@ -231,6 +328,9 @@ defmodule Explorer.Market.Fetcher.TokenTest do
 
     setup do
       bypass = Bypass.open()
+
+      # token icons are optional, so these tests serve no icons
+      Bypass.stub(bypass, "GET", "/coins/markets", fn conn -> Conn.resp(conn, 200, "[]") end)
 
       source_configuration = Application.get_env(:explorer, Explorer.Market.Source)
       fetcher_configuration = Application.get_env(:explorer, Explorer.Market.Fetcher.Token)
@@ -465,6 +565,47 @@ defmodule Explorer.Market.Fetcher.TokenTest do
       # Real-price token is in seen set → retains its data
       real = Repo.get_by(Token, contract_address_hash: token_real_price.contract_address_hash)
       assert real.fiat_value
+    end
+
+    test "keeps a contract that several coins list, priced or not", %{bypass: bypass} do
+      listed = insert(:token, fiat_value: Decimal.new("5"), circulating_market_cap: Decimal.new("50"))
+      other = insert(:token, fiat_value: Decimal.new("1"), circulating_market_cap: Decimal.new("10"))
+
+      # `/coins/list` order matters: deduping before the price filter would keep the zero-priced or
+      # the unpriced coin for `listed`, and not deduping would put both priced coins into one upsert
+      aliases = [
+        {"listed-zero", listed},
+        {"listed", listed},
+        {"listed-again", listed},
+        {"listed-unpriced", listed},
+        {"other", other}
+      ]
+
+      coins_list =
+        for {id, token} <- aliases do
+          %{"id" => id, "symbol" => id, "name" => id, "platforms" => %{"ethereum" => "#{token.contract_address_hash}"}}
+        end
+
+      Bypass.expect_once(bypass, "GET", "/coins/list", fn conn ->
+        Conn.resp(conn, 200, Jason.encode!(coins_list))
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/simple/price", fn conn ->
+        price = %{"usd" => 2, "usd_market_cap" => 20, "usd_24h_vol" => 200}
+        zero = %{"usd" => 0, "usd_market_cap" => 0, "usd_24h_vol" => 0}
+        prices = %{"listed-zero" => zero, "listed" => price, "listed-again" => price, "other" => price}
+        Conn.resp(conn, 200, Jason.encode!(prices))
+      end)
+
+      GenServer.start_link(TokenFetcher, [])
+
+      wait_for_results(fn ->
+        query = from(t in Token, where: t.contract_address_hash == ^other.contract_address_hash)
+        Repo.one!(from(t in query, where: t.fiat_value == ^Decimal.new(2)))
+      end)
+
+      listed_fiat_value = Repo.get_by(Token, contract_address_hash: listed.contract_address_hash).fiat_value
+      assert listed_fiat_value && Decimal.eq?(listed_fiat_value, 2)
     end
   end
 end

@@ -333,8 +333,8 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
 
   ## Returns
   - List of atoms representing the market data fields to update: `:name`,
-    `:symbol`, `:type`, `:fiat_value`, `:circulating_market_cap`, and
-    `:volume_24h`
+    `:symbol`, `:type`, `:fiat_value`, `:circulating_market_cap`,
+    `:volume_24h`, `:circulating_supply`, `:decimals` and `:icon_url`
   """
   @spec market_data_fields_to_update() :: [
           :name
@@ -345,9 +345,20 @@ defmodule Explorer.Chain.Import.Runner.Tokens do
           | :volume_24h
           | :circulating_supply
           | :decimals
+          | :icon_url
         ]
   def market_data_fields_to_update do
-    [:name, :symbol, :type, :fiat_value, :circulating_market_cap, :volume_24h, :circulating_supply, :decimals]
+    [
+      :name,
+      :symbol,
+      :type,
+      :fiat_value,
+      :circulating_market_cap,
+      :volume_24h,
+      :circulating_supply,
+      :decimals,
+      :icon_url
+    ]
   end
 
   @doc """

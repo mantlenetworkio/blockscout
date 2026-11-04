@@ -152,6 +152,11 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
         Conn.resp(conn, 200, json_simple_price())
       end)
 
+      Bypass.expect_once(bypass, "GET", "/coins/markets", fn conn ->
+        assert conn.query_string == "vs_currency=aed&ids=1,3,4&per_page=3&page=1"
+        Conn.resp(conn, 200, json_coins_markets())
+      end)
+
       assert {:ok, [], true,
               [
                 %{
@@ -165,7 +170,8 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   },
                   circulating_market_cap: Decimal.new("100"),
                   fiat_value: Decimal.new("1"),
-                  volume_24h: Decimal.new("10")
+                  volume_24h: Decimal.new("10"),
+                  icon_url: "https://coin-images.coingecko.com/coins/images/1/small/one.png?1700000000"
                 },
                 %{
                   id: "3",
@@ -178,7 +184,8 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   },
                   circulating_market_cap: Decimal.new("300.03"),
                   fiat_value: Decimal.new("3.3"),
-                  volume_24h: Decimal.new("33.333")
+                  volume_24h: Decimal.new("33.333"),
+                  icon_url: nil
                 },
                 %{
                   id: "4",
@@ -191,7 +198,8 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   },
                   circulating_market_cap: Decimal.new("4"),
                   fiat_value: Decimal.new("4"),
-                  volume_24h: Decimal.new("4")
+                  volume_24h: Decimal.new("4"),
+                  icon_url: nil
                 }
               ]} == CoinGecko.fetch_tokens(nil, 5)
     end
@@ -205,6 +213,11 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
       Bypass.expect_once(bypass, "GET", "/simple/price", fn conn ->
         assert conn.query_string == "vs_currencies=aed&include_market_cap=true&include_24hr_vol=true&ids=4,3"
         Conn.resp(conn, 200, json_simple_price())
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/coins/markets", fn conn ->
+        assert conn.query_string == "vs_currency=aed&ids=3,4&per_page=2&page=1"
+        Conn.resp(conn, 200, json_coins_markets())
       end)
 
       assert {:ok,
@@ -232,7 +245,8 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   },
                   circulating_market_cap: Decimal.new("300.03"),
                   fiat_value: Decimal.new("3.3"),
-                  volume_24h: Decimal.new("33.333")
+                  volume_24h: Decimal.new("33.333"),
+                  icon_url: nil
                 },
                 %{
                   id: "4",
@@ -245,9 +259,94 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
                   },
                   circulating_market_cap: Decimal.new("4"),
                   fiat_value: Decimal.new("4"),
-                  volume_24h: Decimal.new("4")
+                  volume_24h: Decimal.new("4"),
+                  icon_url: nil
                 }
               ]} == CoinGecko.fetch_tokens(nil, 2)
+    end
+
+    test "caps the batch at the /coins/markets limit of 250", %{bypass: bypass} do
+      coins_list =
+        for i <- 1..251 do
+          address = "0x" <> String.pad_leading(Integer.to_string(i, 16), 40, "0")
+          %{"id" => "coin-#{i}", "symbol" => "c#{i}", "name" => "Coin #{i}", "platforms" => %{"test" => address}}
+        end
+
+      Bypass.expect_once(bypass, "GET", "/coins/list", fn conn ->
+        Conn.resp(conn, 200, Jason.encode!(coins_list))
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/simple/price", fn conn ->
+        ids = conn.query_string |> URI.decode_query() |> Map.fetch!("ids") |> String.split(",")
+        assert length(ids) == 250
+        prices = Map.new(ids, &{&1, %{"aed" => 1, "aed_market_cap" => 1, "aed_24h_vol" => 1}})
+        Conn.resp(conn, 200, Jason.encode!(prices))
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/coins/markets", fn conn ->
+        query = URI.decode_query(conn.query_string)
+        assert query["per_page"] == "250"
+        assert query["ids"] |> String.split(",") |> length() == 250
+        Conn.resp(conn, 200, "[]")
+      end)
+
+      assert {:ok, [_], false, tokens} = CoinGecko.fetch_tokens(nil, 500)
+      assert length(tokens) == 250
+    end
+
+    test "requests icons only for the priced tokens of the batch", %{bypass: bypass} do
+      Bypass.expect_once(bypass, "GET", "/coins/list", fn conn ->
+        Conn.resp(conn, 200, json_coins_list())
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/simple/price", fn conn ->
+        unpriced = %{"aed" => 0, "aed_market_cap" => 0, "aed_24h_vol" => 0}
+        prices = %{"1" => unpriced, "3" => %{unpriced | "aed" => nil}, "4" => %{unpriced | "aed" => 4}}
+        Conn.resp(conn, 200, Jason.encode!(prices))
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/coins/markets", fn conn ->
+        assert conn.query_string == "vs_currency=aed&ids=4&per_page=1&page=1"
+        Conn.resp(conn, 200, "[]")
+      end)
+
+      assert {:ok, [], true, [_, _, _]} = CoinGecko.fetch_tokens(nil, 5)
+    end
+
+    test "skips the icons request when no token of the batch is priced", %{bypass: bypass} do
+      Bypass.expect_once(bypass, "GET", "/coins/list", fn conn ->
+        Conn.resp(conn, 200, json_coins_list())
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/simple/price", fn conn ->
+        unpriced = %{"aed" => 0, "aed_market_cap" => 0, "aed_24h_vol" => 0}
+        Conn.resp(conn, 200, Jason.encode!(%{"1" => unpriced, "3" => %{unpriced | "aed" => nil}, "4" => unpriced}))
+      end)
+
+      assert {:ok, [], true, [_, _, _]} = CoinGecko.fetch_tokens(nil, 5)
+    end
+
+    @tag :capture_log
+    test "keeps the market data when the icons request fails", %{bypass: bypass} do
+      Bypass.expect_once(bypass, "GET", "/coins/list", fn conn ->
+        Conn.resp(conn, 200, json_coins_list())
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/simple/price", fn conn ->
+        Conn.resp(conn, 200, json_simple_price())
+      end)
+
+      Bypass.expect_once(bypass, "GET", "/coins/markets", fn conn ->
+        Conn.resp(conn, 429, ~s({"status": {"error_code": 429, "error_message": "rate limited"}}))
+      end)
+
+      assert {:ok, [], true, tokens} = CoinGecko.fetch_tokens(nil, 5)
+
+      assert Enum.map(tokens, &{&1.id, &1.fiat_value, &1.icon_url}) == [
+               {"1", Decimal.new("1"), nil},
+               {"3", Decimal.new("3.3"), nil},
+               {"4", Decimal.new("4"), nil}
+             ]
     end
   end
 
@@ -723,6 +822,21 @@ defmodule Explorer.Market.Source.CoinGeckoTest do
         "aed_24h_vol": 4
       }
     }
+    """
+  end
+
+  # token "1" has an image, token "3" has CoinGecko's placeholder, token "4" has none
+  defp json_coins_markets do
+    """
+    [
+      {
+        "id": "1",
+        "current_price": 1,
+        "image": "https://coin-images.coingecko.com/coins/images/1/large/one.png?1700000000"
+      },
+      {"id": "3", "current_price": 3.3, "image": "missing_large.png"},
+      {"id": "4", "current_price": null}
+    ]
     """
   end
 

@@ -4,11 +4,18 @@ defmodule Explorer.Market.Source.CoinGecko do
   Adapter for fetching exchange rates from https://coingecko.com
   """
 
+  require Logger
+
   alias Explorer.Chain.Hash
   alias Explorer.Helper
   alias Explorer.Market.{Source, Token}
 
   @behaviour Source
+
+  # CoinGecko rejects `/coins/markets` requests with `per_page` above 250, so a larger configured
+  # batch size is capped here and processed across several requests. The cap also keeps the request
+  # URL short enough: CoinGecko already rejects a list of around 500 coin ids as too long.
+  @coins_markets_max_per_page 250
 
   @impl Source
   def native_coin_fetching_enabled?, do: not is_nil(config(:coin_id))
@@ -41,7 +48,8 @@ defmodule Explorer.Market.Source.CoinGecko do
 
   @impl Source
   def fetch_tokens(state, batch_size) do
-    {to_fetch, remaining} = Enum.split(state, batch_size)
+    capped_batch_size = min(batch_size, @coins_markets_max_per_page)
+    {to_fetch, remaining} = Enum.split(state, capped_batch_size)
 
     joined_token_ids = Enum.map_join(to_fetch, ",", & &1.id)
 
@@ -58,11 +66,53 @@ defmodule Explorer.Market.Source.CoinGecko do
            :simple_price
          ) do
       {:ok, data} ->
-        to_import = put_market_data_to_tokens(to_fetch, data)
+        to_import =
+          to_fetch
+          |> put_market_data_to_tokens(data)
+          |> put_icons_to_tokens()
+
         {:ok, remaining, Enum.empty?(remaining), to_import}
 
       {:error, _reason} = error ->
         error
+    end
+  end
+
+  # `/simple/price` returns no images, so the icons of the priced tokens are taken from `/coins/markets`.
+  # Its prices are not used: it has no price for some coins that `/simple/price` does price. Icons are
+  # optional, so a failed request only leaves them out of the batch.
+  defp put_icons_to_tokens(tokens) do
+    case tokens |> Enum.reject(&Source.zero_or_nil?(&1.fiat_value)) |> Enum.map(& &1.id) do
+      [] ->
+        tokens
+
+      token_ids ->
+        icons = fetch_token_icons(token_ids)
+        Enum.map(tokens, &Map.put(&1, :icon_url, icons[&1.id]))
+    end
+  end
+
+  defp fetch_token_icons(token_ids) do
+    case Source.http_request(
+           base_url()
+           |> URI.append_path("/coins/markets")
+           |> URI.append_query("vs_currency=#{config(:currency)}")
+           |> URI.append_query("ids=#{Enum.join(token_ids, ",")}")
+           |> URI.append_query("per_page=#{length(token_ids)}")
+           |> URI.append_query("page=1")
+           |> URI.to_string(),
+           headers(),
+           __MODULE__,
+           :coins_markets
+         ) do
+      {:ok, coins} when is_list(coins) ->
+        for %{"id" => id} = coin <- coins,
+            into: %{},
+            do: {id, coin["image"] |> small_image_url() |> Source.handle_image_url()}
+
+      other ->
+        Logger.warning("CoinGecko token icons were not fetched: #{inspect(other, printable_limit: 200)}")
+        %{}
     end
   end
 
@@ -244,6 +294,11 @@ defmodule Explorer.Market.Source.CoinGecko do
       end
     end)
   end
+
+  # `/coins/markets` returns the large variant of a coin image only. The small variant has the same
+  # file name under `/small/` and is enough for token icons, which are rendered at 20-30px.
+  defp small_image_url(url) when is_binary(url), do: String.replace(url, "/large/", "/small/", global: false)
+  defp small_image_url(_), do: nil
 
   defp do_fetch_coin_price_history(previous_days, secondary_coin?) do
     with coin_id when not is_nil(coin_id) <-

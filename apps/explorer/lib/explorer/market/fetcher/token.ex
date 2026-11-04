@@ -66,7 +66,12 @@ defmodule Explorer.Market.Fetcher.Token do
       ) do
     case source.fetch_tokens(source_state, max_batch_size) do
       {:ok, source_state, fetch_finished?, tokens_data} ->
-        filtered_tokens = Enum.reject(tokens_data, &Source.zero_or_nil?(&1[:fiat_value]))
+        filtered_tokens =
+          tokens_data
+          |> Enum.reject(&Source.zero_or_nil?(&1[:fiat_value]))
+          # a source may list one contract under several coins, while a single upsert must not touch a row
+          # twice; deduping after the price filter keeps a priced entry
+          |> Enum.uniq_by(& &1.contract_address_hash)
 
         case update_tokens(filtered_tokens) do
           {:ok, _imported} ->
