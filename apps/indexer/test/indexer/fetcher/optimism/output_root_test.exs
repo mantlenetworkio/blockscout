@@ -149,6 +149,64 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
       end
     end
 
+    describe "events_to_output_roots/1" do
+      # Mantle Sepolia deleted outputs at L1 5060650 and proposed indexes 2976..3001 again; 2996 at 5060617 and 5060716.
+      test "keeps only the latest proposal of an index proposed again in the same chunk, so that the chunk imports" do
+        events = [
+          output_proposed_event(2_996, 1_678_859, 5_060_617, 3, String.duplicate("aa", 32)),
+          output_proposed_event(2_997, 1_679_309, 5_060_620, 0, String.duplicate("cc", 32)),
+          output_proposed_event(2_996, 1_678_859, 5_060_716, 7, String.duplicate("bb", 32))
+        ]
+
+        roots = OutputRootFetcher.events_to_output_roots(events)
+
+        assert roots |> Enum.map(& &1.l2_output_index) |> Enum.sort() == [2_996, 2_997]
+
+        assert %{l1_block_number: 5_060_716, output_root: "0x" <> root} =
+                 Enum.find(roots, &(&1.l2_output_index == 2_996))
+
+        assert root == String.duplicate("bb", 32)
+
+        assert {:ok, _} = Explorer.Chain.import(%{optimism_output_roots: %{params: roots}, timeout: :infinity})
+        assert Repo.aggregate(OutputRoot, :count) == 2
+      end
+
+      test "orders by block and log index whatever the order of the logs" do
+        events = [
+          output_proposed_event(11, 150, 2_100, 0, String.duplicate("dd", 32)),
+          output_proposed_event(10, 100, 2_000, 1, String.duplicate("bb", 32)),
+          output_proposed_event(10, 100, 2_000, 0, String.duplicate("aa", 32)),
+          output_proposed_event(11, 150, 2_050, 4, String.duplicate("cc", 32))
+        ]
+
+        roots = OutputRootFetcher.events_to_output_roots(events)
+
+        assert Enum.map(roots, &{&1.l2_output_index, &1.output_root}) == [
+                 {10, "0x" <> String.duplicate("bb", 32)},
+                 {11, "0x" <> String.duplicate("dd", 32)}
+               ]
+      end
+    end
+
+    # OutputProposed(bytes32 indexed outputRoot, uint256 indexed l2OutputIndex, uint256 indexed l2BlockNumber,
+    # uint256 l1Timestamp) log as returned by eth_getLogs.
+    defp output_proposed_event(index, l2_block_number, l1_block_number, log_index, root_hex) do
+      %{
+        "address" => @oracle,
+        "blockNumber" => "0x" <> Integer.to_string(l1_block_number, 16),
+        "logIndex" => "0x" <> Integer.to_string(log_index, 16),
+        "transactionHash" =>
+          "0x" <> String.pad_leading(Integer.to_string(l1_block_number * 10 + log_index, 16), 64, "0"),
+        "data" => "0x" <> String.pad_leading(Integer.to_string(1_702_200_000, 16), 64, "0"),
+        "topics" => [
+          "0xa7aaf2512769da4e444e3de247be2564225c2e7a8f74cfe528e46e17d24868e2",
+          "0x" <> root_hex,
+          "0x" <> String.pad_leading(Integer.to_string(index, 16), 64, "0"),
+          "0x" <> String.pad_leading(Integer.to_string(l2_block_number, 16), 64, "0")
+        ]
+      }
+    end
+
     # Block object as returned by eth_getBlockByNumber with hydrated transactions off.
     defp block_response(number) do
       %{

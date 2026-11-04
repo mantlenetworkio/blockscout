@@ -127,7 +127,7 @@ defmodule Indexer.Fetcher.Optimism.OutputRoot do
             chunk_end,
             start_block,
             end_block,
-            "#{Enum.count(output_roots)} OutputProposed event(s)",
+            "#{Enum.count(result)} OutputProposed event(s)",
             :L1
           )
         end
@@ -324,8 +324,16 @@ defmodule Indexer.Fetcher.Optimism.OutputRoot do
     DisputeGame.get_last_known_index() >= 0
   end
 
-  defp events_to_output_roots(events) do
-    Enum.map(events, fn event ->
+  @doc false
+  # The oracle can delete outputs (OutputsDeleted) and propose the same indexes again. When both proposals fall into one
+  # chunk of logs, a single upsert would have to update a row twice (cardinality_violation, the fetcher crashes and
+  # retries the same chunk forever), so only the latest proposal of each index is kept: the one a later chunk's upsert
+  # would leave. Mantle Sepolia proposed indexes 2976..3001 again at L1 5060655..5060731, up to 856 blocks later.
+  @spec events_to_output_roots([map()]) :: [map()]
+  def events_to_output_roots(events) do
+    events
+    |> Enum.sort_by(&{quantity_to_integer(&1["blockNumber"]), quantity_to_integer(&1["logIndex"] || "0x0")})
+    |> Enum.map(fn event ->
       [l1_timestamp] = Helper.decode_data(event["data"], [{:uint, 256}])
       {:ok, l1_timestamp} = DateTime.from_unix(l1_timestamp)
 
@@ -338,6 +346,9 @@ defmodule Indexer.Fetcher.Optimism.OutputRoot do
         output_root: Enum.at(event["topics"], 1)
       }
     end)
+    |> Enum.reverse()
+    |> Enum.uniq_by(& &1.l2_output_index)
+    |> Enum.reverse()
   end
 
   defp log_deleted_rows_count(reorg_block, count) do
