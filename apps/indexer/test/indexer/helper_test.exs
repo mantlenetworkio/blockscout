@@ -2,6 +2,8 @@
 defmodule Indexer.HelperTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog, only: [capture_log: 1]
+
   alias Indexer.Helper
 
   describe "l1_json_rpc_named_arguments/1" do
@@ -54,6 +56,37 @@ defmodule Indexer.HelperTest do
                    ]
                  ]
                ]
+    end
+  end
+
+  describe "http_get_request/5" do
+    setup do
+      %{bypass: Bypass.open(), calls: :counters.new(1, [])}
+    end
+
+    test "gives up after max_attempts attempts", %{bypass: bypass, calls: calls} do
+      Bypass.expect(bypass, fn conn ->
+        :counters.add(calls, 1, 1)
+        Plug.Conn.resp(conn, 503, "")
+      end)
+
+      capture_log(fn ->
+        assert {:error, _} = Helper.http_get_request("http://localhost:#{bypass.port}/", :json, 0, [404], 2)
+      end)
+
+      assert :counters.get(calls, 1) == 2
+    end
+
+    test "makes one attempt when the status is one not to retry", %{bypass: bypass, calls: calls} do
+      Bypass.expect(bypass, fn conn ->
+        :counters.add(calls, 1, 1)
+        Plug.Conn.resp(conn, 400, "")
+      end)
+
+      assert {:error, {:http_status, 400, _}} =
+               Helper.http_get_request("http://localhost:#{bypass.port}/", :json, 0, [400, 404])
+
+      assert :counters.get(calls, 1) == 1
     end
   end
 end

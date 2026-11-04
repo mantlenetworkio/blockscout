@@ -1623,9 +1623,9 @@ config :indexer, Indexer.Fetcher.Optimism,
   l2_standard_bridge: System.get_env("INDEXER_OPTIMISM_L2_STANDARD_BRIDGE_CONTRACT"),
   l1_wst_bridge: System.get_env("INDEXER_OPTIMISM_L1_WST_BRIDGE_CONTRACT"),
   l2_wst_bridge: System.get_env("INDEXER_OPTIMISM_L2_WST_BRIDGE_CONTRACT"),
-  # Skip the Layer-3 Beacon Node sidecars fallback when the configured
-  # `INDEXER_BEACON_RPC_URL` doesn't expose `/eth/v1/beacon/blob_sidecars/`
-  # (e.g. when it points at a Mantle DA Indexer). Avoids noisy retry+error logs.
+  # Skip the Layer-3 Beacon Node fallback (its `/eth/v1/beacon/blobs/` endpoint and its sidecars) when there is no
+  # Beacon Node to ask, e.g. when `INDEXER_BEACON_RPC_URL` points at a Mantle DA Indexer, which does not expose
+  # `/eth/v1/beacon/blob_sidecars/`. Avoids noisy retry+error logs.
   beacon_blob_sidecars_disabled: ConfigHelper.parse_bool_env_var("INDEXER_BEACON_BLOB_SIDECARS_DISABLED")
 
 config :indexer, Indexer.Fetcher.Optimism.Deposit,

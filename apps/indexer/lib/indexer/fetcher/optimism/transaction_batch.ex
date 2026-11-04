@@ -36,6 +36,7 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   alias Explorer.Chain.Events.Publisher
   alias Explorer.Chain.Optimism.{FrameSequence, FrameSequenceBlob}
   alias Explorer.Chain.Optimism.TransactionBatch, as: OptimismTransactionBatch
+  alias Indexer.Fetcher.Beacon.Client, as: BeaconClient
   alias Indexer.Fetcher.{Optimism, RollupL1ReorgMonitor}
   alias Indexer.Fetcher.Optimism.{BatcherTimeline, BlobRetryQueue}
   alias Indexer.Helper
@@ -54,6 +55,22 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   @parent_check_interval 5_000
   # how many milliseconds apart, at least, a stalled wait for the L2 node is reported as an error
   @stall_report_interval :timer.minutes(1)
+  # A request to an EIP-4844 blob source gets three attempts, about nine seconds apart in all (a source that does not
+  # answer adds up to 60 seconds per attempt), not the ten over about 25 minutes `Helper.http_get_request/5` makes by
+  # default: the whole fetcher waits for them, while the next source can serve the blob. A 400 is as final as a 404:
+  # Lighthouse answers it when it cannot rebuild the blobs of a slot (pruned, or `/blob_sidecars/` since Fusaka), and so
+  # is a 405 from a node without an endpoint.
+  @blob_source_request_options [max_attempts: 3, avoid_retry_for_statuses: [400, 404, 405, 501]]
+  # The Beacon Node's blobs endpoint takes a 401 or 403 as final too, from a gateway that lets only the sidecars through,
+  # which are asked next. A Blobs API's 403 is retried and waited for: a WAF answers it while it throttles.
+  @beacon_blobs_request_options [max_attempts: 3, avoid_retry_for_statuses: [400, 401, 403, 404, 405, 501]]
+  # While no source has a blob and a Blobs API failed (rather than answered it does not have it), all of them are tried
+  # again after each of these delays (milliseconds, about 25 minutes in all, as long as one source used to be waited
+  # for) before its L1 block goes to `BlobRetryQueue`. The queue is only read between two runs of the main loop, and the
+  # first run of a new instance spans its whole catch-up: a block queued then is rescanned, with every block after it,
+  # only when the catch-up is over. So the blob is not waited for when a block below its own is queued already, or an
+  # earlier blob of its transaction is missing.
+  @blob_chain_retry_delays [30_000, 60_000, 120_000, 240_000, 480_000, 600_000]
   @counter_type "optimism_batches_fetcher_last_l1_block_hash"
   @empty_hash "0x0000000000000000000000000000000000000000000000000000000000000000"
 
@@ -148,6 +165,9 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
 
             nil
         end
+
+      # the blocks whose blobs were missing before a restart are behind the checkpoint: only the queue brings them back
+      BlobRetryQueue.restore()
 
       Process.send(self(), :continue, [])
 
@@ -422,6 +442,10 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
               BatcherTimeline.truncate(new_batcher_timeline, last_kept_block)}}
           else
             Optimism.set_last_block_hash(last_block_hash, @counter_type)
+            # The batches of the blocks queued only to be rescanned are imported now, but for the frames of the
+            # channels still incomplete. After the checkpoint: the rescan from such a block may be the only thing that
+            # brings back the queued blocks above it, so the checkpoint must keep its position before the block goes.
+            BlobRetryQueue.mark_range_imported(start_block, last_scanned_block, frame_blocks(new_incomplete_channels))
 
             {:cont,
              {last_scanned_block, new_incomplete_channels, last_block_hash || prev_chunk_last_hash,
@@ -754,7 +778,10 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   # Tries to resolve each blob through a three-layer chain:
   #   1. Primary URL (`INDEXER_OPTIMISM_L1_BATCH_BLOCKSCOUT_BLOBS_API_URL`)
   #   2. Fallback URL (`INDEXER_OPTIMISM_L1_BATCH_BLOBS_API_FALLBACK_URL`), optional
-  #   3. Beacon Node `/blob_sidecars/` endpoint (`INDEXER_BEACON_RPC_URL`)
+  #   3. Beacon Node (`INDEXER_BEACON_RPC_URL`): its `/eth/v1/beacon/blobs/{slot}` endpoint, then its `/blob_sidecars/`
+  #
+  # Each layer gets a few quick attempts (`@blob_source_request_options`) before the next one is tried, and the whole
+  # chain is tried again while no layer has the blob and a Blobs API failed (`@blob_chain_retry_delays`).
   #
   # Both Primary and Fallback URLs accept either the Blockscout Blobs API format
   # (`{url}/{hash}` returning `{"blob_data": "0x..."}`) or the Mantle DA Indexer
@@ -769,8 +796,11 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
          fallback_api_url,
          chain_id_l1
        ) do
+    # the batch fetcher is to rescan from a block queued below this one anyway: waiting would save no rescan
+    delays = if BlobRetryQueue.missing_below?(l1_block_number), do: [], else: @blob_chain_retry_delays
+
     blob_versioned_hashes
-    |> Enum.reduce([], fn blob_hash, inputs_acc ->
+    |> Enum.reduce({[], delays}, fn blob_hash, acc ->
       resolve_eip4844_blob(
         transaction_hash,
         l1_block_number,
@@ -779,9 +809,10 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
         primary_api_url,
         fallback_api_url,
         chain_id_l1,
-        inputs_acc
+        acc
       )
     end)
+    |> elem(0)
     |> Enum.reverse()
   end
 
@@ -845,7 +876,9 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     )
   end
 
-  # Walks the Primary → Fallback (Blockscout API) → Beacon Sidecar chain for a single blob hash.
+  # Walks the Primary → Fallback (Blockscout API) → Beacon Node chain for a single blob hash, again after each of
+  # the `delays` while no source has the blob and a Blobs API failed, and queues the L1 block in `BlobRetryQueue` after
+  # the last try. Returns the inputs with the blob's, and the delays for the next blob of the transaction.
   @spec resolve_eip4844_blob(
           String.t(),
           non_neg_integer(),
@@ -854,8 +887,8 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
           String.t(),
           String.t(),
           non_neg_integer() | nil,
-          [map()]
-        ) :: [map()]
+          {[map()], [non_neg_integer()]}
+        ) :: {[map()], [non_neg_integer()]}
   defp resolve_eip4844_blob(
          transaction_hash,
          l1_block_number,
@@ -864,51 +897,157 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
          primary_api_url,
          fallback_api_url,
          chain_id_l1,
-         inputs_acc
+         {inputs_acc, delays}
        ) do
-    sources = eip4844_blob_api_sources(primary_api_url, fallback_api_url)
+    blob = %{
+      hash: blob_hash,
+      transaction_hash: transaction_hash,
+      block_timestamp: block_timestamp,
+      chain_id_l1: chain_id_l1
+    }
 
-    decoded =
-      Enum.reduce_while(sources, nil, fn {source_label, url}, _acc ->
-        case fetch_blob_from_blobs_api(blob_hash, block_timestamp, url, chain_id_l1) do
-          {:ok, raw_blob} ->
-            case OptimismTransactionBatch.decode_eip4844_blob(raw_blob) do
-              nil ->
-                Logger.warning("Cannot decode the blob #{blob_hash} taken from the #{source_label}.")
-                {:cont, nil}
+    case fetch_eip4844_blob(blob, eip4844_blob_api_sources(primary_api_url, fallback_api_url), delays) do
+      {:ok, decoded_blob} ->
+        BlobRetryQueue.mark_blob_succeeded(l1_block_number, blob_hash)
+        {[%{bytes: decoded_blob, eip4844_blob_hash: blob_hash} | inputs_acc], delays}
 
-              decoded_blob ->
-                Logger.info(
-                  "The input for transaction #{transaction_hash} is taken from the #{source_label}. Blob hash: #{blob_hash}"
-                )
+      :invalid ->
+        {inputs_acc, delays}
 
-                BlobRetryQueue.mark_blob_succeeded(l1_block_number, blob_hash)
-                {:halt, decoded_blob}
-            end
+      :missing ->
+        # All 3 layers exhausted. Most common cause on Mantle Hoodi: da-indexer
+        # hasn't yet ingested this brand-new blob. Enqueue for later retry —
+        # the main loop will rewind start_block to re-scan this L1 block once
+        # the backoff window elapses.
+        BlobRetryQueue.enqueue(l1_block_number, blob_hash, transaction_hash)
 
-          {:error, reason} ->
-            log_eip4844_blob_source_failure(source_label, blob_hash, reason)
-            {:cont, nil}
-        end
-      end)
-
-    case decoded do
-      nil ->
-        # All blobs APIs exhausted — final fallback is Beacon Node `/blob_sidecars/`.
-        eip4844_blobs_to_inputs_from_sidecars(
-          transaction_hash,
-          l1_block_number,
-          blob_hash,
-          block_timestamp,
-          inputs_acc,
-          chain_id_l1
+        Logger.warning(
+          "BLOB ALL-SOURCES EXHAUSTED — L1 block #{l1_block_number}, tx #{transaction_hash}, " <>
+            "blob hash #{blob_hash}. Enqueued for retry."
         )
 
-      bytes ->
-        [%{bytes: bytes, eip4844_blob_hash: blob_hash} | inputs_acc]
+        # the block is rescanned for this blob anyway, so the other blobs of the transaction are not waited for
+        {inputs_acc, []}
     end
   end
 
+  @doc false
+  # Tries every source of a blob (`blob` holds its `hash`, `transaction_hash`, `block_timestamp` and `chain_id_l1`), and
+  # all of them again after each of the `delays` (milliseconds) while none has the blob and a Blobs API failed (a status
+  # retried in vain, such as a 503 or a 429, a timeout or a refused connection, which may soon be over) rather than
+  # answered it does not have it (a status of `@blob_source_request_options` not to retry, or no data). Returns
+  # `{:ok, decoded_blob}`, `:invalid` (the blob of the Beacon Node's sidecars, checked against its KZG commitment, does
+  # not decode) or `:missing`.
+  @spec fetch_eip4844_blob(map(), [{String.t(), String.t()}], [non_neg_integer()]) ::
+          {:ok, binary()} | :invalid | :missing
+  def fetch_eip4844_blob(blob, sources, delays) do
+    case {fetch_eip4844_blob_once(blob, sources), delays} do
+      {{:missing, :failed}, [delay | next_delays]} ->
+        Logger.warning(
+          "No EIP-4844 blob source gave the blob #{blob.hash} of transaction #{blob.transaction_hash}, and one failed. " <>
+            "Trying them again in #{div(delay, 1000)} second(s)."
+        )
+
+        :timer.sleep(delay)
+        fetch_eip4844_blob(blob, sources, next_delays)
+
+      {{:missing, _}, _delays} ->
+        :missing
+
+      {result, _delays} ->
+        result
+    end
+  end
+
+  # Returns `{:ok, decoded_blob}`, `:invalid` or `{:missing, :failed | :answered}`: whether a Blobs API failed, or all
+  # of them answered they do not have the blob.
+  defp fetch_eip4844_blob_once(blob, sources) do
+    sources
+    |> Enum.reduce_while(:answered, fn {source_label, url}, outcome ->
+      case fetch_blob_from_blobs_api(blob.hash, blob.block_timestamp, url, blob.chain_id_l1) do
+        {:ok, raw_blob} ->
+          decode_api_blob(raw_blob, blob, source_label, outcome)
+
+        {:error, reason} ->
+          log_eip4844_blob_source_failure(source_label, blob.hash, reason)
+          # `Helper.http_get_request/5` gives up with a message on a status it retries, a timeout or a connection error
+          {:cont, if(is_binary(reason), do: :failed, else: outcome)}
+      end
+    end)
+    |> case do
+      {:ok, decoded_blob} ->
+        {:ok, decoded_blob}
+
+      # All blobs APIs exhausted — final fallback is the Beacon Node.
+      outcome ->
+        with :missing <- fetch_eip4844_blob_from_beacon_node(blob), do: {:missing, outcome}
+    end
+  end
+
+  # The final fallback, the Beacon Node (`INDEXER_BEACON_RPC_URL`): since Fusaka its `/eth/v1/beacon/blobs/{slot}`
+  # endpoint serves blobs, while its `/blob_sidecars/` can fail for every block (Lighthouse 8 answers 400), so the
+  # sidecars are only asked after it, unless the node failed there. Its failures never make the chain wait
+  # (`fetch_eip4844_blob/3`), unlike a Blobs API's: a node without the endpoint, or the default URL of an unset
+  # `INDEXER_BEACON_RPC_URL`, fails every time.
+  defp fetch_eip4844_blob_from_beacon_node(blob) do
+    url = beacon_node_url()
+    # without the URL, which often holds a provider's key
+    source_label = "Beacon Node blobs API"
+
+    with false <- url == "",
+         {:ok, raw_blob} <-
+           Helper.get_eip4844_blob_from_indexer_result(
+             url,
+             blob.hash,
+             blob.block_timestamp,
+             blob.chain_id_l1,
+             @beacon_blobs_request_options
+           ),
+         {:halt, {:ok, decoded_blob}} <- decode_api_blob(raw_blob, blob, source_label, :answered) do
+      {:ok, decoded_blob}
+    else
+      # no Beacon Node to ask
+      true ->
+        :missing
+
+      {:error, reason} ->
+        log_eip4844_blob_source_failure(source_label, blob.hash, reason)
+        # a node that failed (5xx, timeout, refused connection) would only make the sidecars wait as long again
+        if is_binary(reason), do: :missing, else: fetch_eip4844_blob_from_sidecars(blob)
+
+      _ ->
+        fetch_eip4844_blob_from_sidecars(blob)
+    end
+  end
+
+  # The URL of the Beacon Node, or "" when there is none or the operator turned the Beacon Node off
+  # (`INDEXER_BEACON_BLOB_SIDECARS_DISABLED`).
+  defp beacon_node_url do
+    case BeaconClient.base_url() do
+      url when is_binary(url) and url != "" ->
+        if Helper.beacon_sidecars_disabled?(), do: "", else: url
+
+      _ ->
+        ""
+    end
+  end
+
+  defp decode_api_blob(raw_blob, blob, source_label, outcome) do
+    case OptimismTransactionBatch.decode_eip4844_blob(raw_blob) do
+      nil ->
+        Logger.warning("Cannot decode the blob #{blob.hash} taken from the #{source_label}.")
+        {:cont, outcome}
+
+      decoded_blob ->
+        Logger.info(
+          "The input for transaction #{blob.transaction_hash} is taken from the #{source_label}. Blob hash: #{blob.hash}"
+        )
+
+        {:halt, {:ok, decoded_blob}}
+    end
+  end
+
+  @doc false
   # Fetches a raw EIP-4844 blob from a Blobs API URL.
   # Supports two URL formats (auto-detected by path):
   #   1. Blockscout Blobs API — `{url}/{blob_hash}` → `{"blob_data": "0x..."}`
@@ -918,15 +1057,28 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   # Returns `{:ok, raw_blob_bytes}` on success or `{:error, reason}` on failure (including empty URL).
   @spec fetch_blob_from_blobs_api(String.t(), DateTime.t(), String.t(), non_neg_integer() | nil) ::
           {:ok, binary()} | {:error, any()}
-  defp fetch_blob_from_blobs_api(_blob_hash, _block_timestamp, "", _chain_id_l1), do: {:error, :empty_url}
+  def fetch_blob_from_blobs_api(_blob_hash, _block_timestamp, "", _chain_id_l1), do: {:error, :empty_url}
 
-  defp fetch_blob_from_blobs_api(blob_hash, block_timestamp, blobs_api_url, chain_id_l1) do
+  def fetch_blob_from_blobs_api(blob_hash, block_timestamp, blobs_api_url, chain_id_l1) do
     if da_indexer_blobs_url?(blobs_api_url) do
       base_url = String.replace_suffix(blobs_api_url, "/eth/v1/beacon/blobs", "")
 
-      Helper.get_eip4844_blob_from_indexer_result(base_url, blob_hash, block_timestamp, chain_id_l1)
+      Helper.get_eip4844_blob_from_indexer_result(
+        base_url,
+        blob_hash,
+        block_timestamp,
+        chain_id_l1,
+        @blob_source_request_options
+      )
     else
-      with {:ok, response} <- Helper.http_get_request(blobs_api_url <> "/" <> blob_hash),
+      with {:ok, response} <-
+             Helper.http_get_request(
+               blobs_api_url <> "/" <> blob_hash,
+               :json,
+               0,
+               @blob_source_request_options[:avoid_retry_for_statuses],
+               @blob_source_request_options[:max_attempts]
+             ),
            blob_data when not is_nil(blob_data) <- Map.get(response, "blob_data") do
         {:ok, hash_to_binary(blob_data)}
       else
@@ -941,48 +1093,32 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
   @spec da_indexer_blobs_url?(String.t()) :: boolean()
   defp da_indexer_blobs_url?(url), do: String.contains?(url, "/eth/v1/beacon/blobs")
 
+  @doc false
+  # Fetches a raw EIP-4844 blob from the Beacon Node `/blob_sidecars/` endpoint (`INDEXER_BEACON_RPC_URL`).
+  @spec fetch_blob_from_beacon_node(String.t(), DateTime.t(), non_neg_integer() | nil) :: binary() | nil
+  def fetch_blob_from_beacon_node(blob_hash, block_timestamp, chain_id_l1) do
+    Helper.get_eip4844_blob_from_beacon_node(blob_hash, block_timestamp, chain_id_l1, @blob_source_request_options)
+  end
+
   # Final fallback — fetches the blob via the standard Beacon Node `/blob_sidecars/` endpoint.
-  defp eip4844_blobs_to_inputs_from_sidecars(
-         transaction_hash,
-         l1_block_number,
-         blob_hash,
-         block_timestamp,
-         inputs_acc,
-         chain_id_l1
-       ) do
-    blob = Helper.get_eip4844_blob_from_beacon_node(blob_hash, block_timestamp, chain_id_l1)
+  defp fetch_eip4844_blob_from_sidecars(blob) do
+    case fetch_blob_from_beacon_node(blob.hash, blob.block_timestamp, blob.chain_id_l1) do
+      nil ->
+        :missing
 
-    with false <- is_nil(blob),
-         decoded_blob_data = OptimismTransactionBatch.decode_eip4844_blob(blob),
-         {:blob_data_invalid, false} <- {:blob_data_invalid, is_nil(decoded_blob_data)} do
-      Logger.info(
-        "The input for transaction #{transaction_hash} is taken from the Beacon Node blob_sidecars. Blob hash: #{blob_hash}"
-      )
+      raw_blob ->
+        case OptimismTransactionBatch.decode_eip4844_blob(raw_blob) do
+          nil ->
+            Logger.warning("Cannot decode invalid blob #{blob.hash} taken from the Beacon Node.")
+            :invalid
 
-      input = %{
-        bytes: decoded_blob_data,
-        eip4844_blob_hash: blob_hash
-      }
+          decoded_blob ->
+            Logger.info(
+              "The input for transaction #{blob.transaction_hash} is taken from the Beacon Node blob_sidecars. Blob hash: #{blob.hash}"
+            )
 
-      BlobRetryQueue.mark_blob_succeeded(l1_block_number, blob_hash)
-      [input | inputs_acc]
-    else
-      true ->
-        # All 3 layers exhausted. Most common cause on Mantle Hoodi: da-indexer
-        # hasn't yet ingested this brand-new blob. Enqueue for later retry —
-        # the main loop will rewind start_block to re-scan this L1 block once
-        # the backoff window elapses.
-        Logger.warning(
-          "BLOB ALL-SOURCES EXHAUSTED — L1 block #{l1_block_number}, tx #{transaction_hash}, " <>
-            "blob hash #{blob_hash}. Enqueued for retry."
-        )
-
-        BlobRetryQueue.enqueue(l1_block_number, blob_hash, transaction_hash)
-        inputs_acc
-
-      {:blob_data_invalid, true} ->
-        Logger.warning("Cannot decode invalid blob #{blob_hash} taken from the Beacon Node.")
-        inputs_acc
+            {:ok, decoded_blob}
+        end
     end
   end
 
@@ -1463,6 +1599,14 @@ defmodule Indexer.Fetcher.Optimism.TransactionBatch do
     else
       {:ok, new_incomplete_channels_acc, batches_acc ++ batches_parsed, [sequence | sequences_acc], new_blobs_acc}
     end
+  end
+
+  # The L1 blocks carrying frames of the incomplete channels, which are kept in memory only
+  defp frame_blocks(incomplete_channels) do
+    for {_channel_id, %{frames: frames}} <- incomplete_channels,
+        {_frame_number, %{block_number: block_number}} <- frames,
+        into: MapSet.new(),
+        do: block_number
   end
 
   defp handle_l1_reorg(reorg_block, incomplete_channels) do

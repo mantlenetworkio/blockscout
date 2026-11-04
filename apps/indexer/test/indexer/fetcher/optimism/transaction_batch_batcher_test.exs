@@ -6,6 +6,7 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
     import ExUnit.CaptureLog
     import Mox
 
+    alias Explorer.Chain.Cache.Counters.LastFetchedCounter
     alias Explorer.Chain.Optimism.TransactionBatch, as: OptimismTransactionBatch
     alias Indexer.Fetcher.Optimism
     alias Indexer.Fetcher.Optimism.{BatcherTimeline, BlobRetryQueue, TransactionBatch}
@@ -205,6 +206,123 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
         # the frame of the replaced block 105 is dropped
         assert channels(state) == [1, 3, 4]
       end
+
+      test "a block the blob retry queue kept before a restart is rescanned once due, then no longer kept", ctx do
+        span_batch_state = state(ctx, 103, 106, [], genesis_block_l2: 10, genesis_time_offset: 1803)
+        assert {:noreply, processed} = TransactionBatch.handle_info(:continue, span_batch_state)
+
+        # the blob of a transaction of block 104 was missing then, and the queue kept the block before the restart
+        input = span_batch_frame(1803 + 2 * (50 - 10), canonical_hash(Agent.get(ctx.chain, & &1), 49), 3)
+        add_transactions(ctx, [transaction(104, 1, @a, input: input)])
+        LastFetchedCounter.upsert(%{counter_type: "optimism_blob_retry_queue_min_l1_block", value: 104})
+        start_supervised!(BlobRetryQueue)
+        # as the fetcher does when it starts
+        BlobRetryQueue.restore()
+
+        # not due at once, so the run goes on from where the fetcher restarted
+        assert {:noreply, resumed} = TransactionBatch.handle_info(:continue, processed)
+        assert imported_l2_blocks() == []
+
+        # its first backoff has passed
+        Agent.update(BlobRetryQueue, &put_in(&1, [104, :last_attempt_at], 0))
+
+        assert {:noreply, _rescanned} = TransactionBatch.handle_info(:continue, resumed)
+        assert imported_l2_blocks() == [50, 51, 52]
+        assert BlobRetryQueue.size() == 0
+        assert is_nil(LastFetchedCounter.get("optimism_blob_retry_queue_min_l1_block", nullable: true))
+      end
+
+      # The fetcher restarts from the last block it processed, and a block queued in a chunk it did not finish lies above
+      # that: the scan from the restart block covers it.
+      test "a block the blob retry queue kept at the block the fetcher restarts from leaves it once its chunk is imported",
+           ctx do
+        add_transactions(ctx, [transaction(105, 1, @a)])
+        LastFetchedCounter.upsert(%{counter_type: "optimism_blob_retry_queue_min_l1_block", value: 104})
+        start_supervised!(BlobRetryQueue)
+        BlobRetryQueue.restore()
+
+        assert {:noreply, processed} = TransactionBatch.handle_info(:continue, state(ctx, 104, 106))
+        assert channels(processed) == [1]
+        assert BlobRetryQueue.size() == 0
+        assert is_nil(LastFetchedCounter.get("optimism_blob_retry_queue_min_l1_block", nullable: true))
+      end
+
+      # the frames of an incomplete channel are kept in memory only, so a restart would lose them
+      test "a block the blob retry queue kept stays queued while it carries frames of an incomplete channel", ctx do
+        Agent.update(ctx.chain, &%{&1 | head: 111})
+        add_transactions(ctx, [transaction(104, 1, @a)])
+        LastFetchedCounter.upsert(%{counter_type: "optimism_blob_retry_queue_min_l1_block", value: 104})
+        start_supervised!(BlobRetryQueue)
+        BlobRetryQueue.restore()
+
+        # the channel is still incomplete after the chunks 104..107 and 108..111
+        assert {:noreply, processed} = TransactionBatch.handle_info(:continue, state(ctx, 104, 111))
+        assert channels(processed) == [1]
+        assert Map.keys(BlobRetryQueue.snapshot()) == [104]
+        assert Decimal.to_integer(LastFetchedCounter.get("optimism_blob_retry_queue_min_l1_block")) == 104
+      end
+
+      test "a block the blob retry queue kept leaves it once the channel it carries frames of is imported", ctx do
+        Agent.update(ctx.chain, &%{&1 | head: 111})
+        {first, last} = span_batch_frames(1803 + 2 * (50 - 10), canonical_hash(Agent.get(ctx.chain, & &1), 49), 3)
+        # the channel's frames are in the chunks 104..107 and 108..111
+        add_transactions(ctx, [transaction(104, 1, @a, input: first), transaction(108, 2, @a, input: last)])
+        LastFetchedCounter.upsert(%{counter_type: "optimism_blob_retry_queue_min_l1_block", value: 104})
+        start_supervised!(BlobRetryQueue)
+        BlobRetryQueue.restore()
+
+        assert {:noreply, _processed} =
+                 TransactionBatch.handle_info(
+                   :continue,
+                   state(ctx, 104, 111, [], genesis_block_l2: 10, genesis_time_offset: 1803)
+                 )
+
+        assert imported_l2_blocks() == [50, 51, 52]
+        assert BlobRetryQueue.size() == 0
+        assert is_nil(LastFetchedCounter.get("optimism_blob_retry_queue_min_l1_block", nullable: true))
+      end
+
+      # an L1 reorg can halt the rescan of the block before its chunk is imported
+      test "a block the blob retry queue kept stays queued when an L1 reorg halts its rescan", ctx do
+        rotate(ctx, 105, @b)
+        add_transactions(ctx, [transaction(104, 1, @a), transaction(105, 2, @b)])
+
+        # the restart resumed at the finalized block 102
+        assert {:noreply, processed} = TransactionBatch.handle_info(:continue, state(ctx, 103, 106, from: 102))
+
+        # nobody reports the fork from block 104, in the chunk 101..104 of the rescan
+        Agent.update(ctx.chain, fn chain ->
+          %{chain | fork_from: 104, fork: 1, updates: [{106, 1, @b}], batcher: [{0, @a}, {106, @b}]}
+        end)
+
+        LastFetchedCounter.upsert(%{counter_type: "optimism_blob_retry_queue_min_l1_block", value: 101})
+        start_supervised!(BlobRetryQueue)
+        BlobRetryQueue.restore()
+        Agent.update(BlobRetryQueue, &put_in(&1, [101, :last_attempt_at], 0))
+
+        capture_log(fn ->
+          assert {:noreply, halted} = TransactionBatch.handle_info(:continue, processed)
+          assert halted.start_block == 103
+        end)
+
+        assert %{101 => %{attempts: 1}} = BlobRetryQueue.snapshot()
+      end
+
+      # A block kept below the block the fetcher restarts from is not due at once: the run from there is checked against
+      # the stored hash, rather than rewound with the check skipped.
+      test "a block the blob retry queue kept before a restart leaves the L1 continuity check of the restart in place",
+           ctx do
+        LastFetchedCounter.upsert(%{counter_type: "optimism_blob_retry_queue_min_l1_block", value: 103})
+        start_supervised!(BlobRetryQueue)
+        BlobRetryQueue.restore()
+        # block 104 was processed on a fork that the reorg monitor missed
+        Optimism.set_last_block_hash(block_hash(104, 1), @counter_type)
+
+        capture_log(fn ->
+          assert {:noreply, processed} = TransactionBatch.handle_info(:continue, state(ctx, 104, 106))
+          assert processed.start_block == 103
+        end)
+      end
     end
 
     describe "handle_info(:continue, state) with a span batch" do
@@ -349,6 +467,9 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
       |> Enum.sort()
     end
 
+    defp imported_l2_blocks,
+      do: Repo.all(from(b in OptimismTransactionBatch, select: b.l2_block_number, order_by: b.l2_block_number))
+
     defp rotate(ctx, block, batcher) do
       Agent.update(ctx.chain, fn chain ->
         %{chain | updates: chain.updates ++ [{block, 0, batcher}], batcher: chain.batcher ++ [{block, batcher}]}
@@ -383,6 +504,17 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
 
       channel = :zlib.compress(ExRLP.encode(batch))
       encode(<<0::8, 0xC0FFEE::128, 0::16, byte_size(channel)::32>> <> channel <> <<1::8>>)
+    end
+
+    # The channel of `span_batch_frame/3` in two frames, the last one second
+    defp span_batch_frames(rel_timestamp, parent_hash, block_count) do
+      <<0::8, id::binary-size(16), 0::16, size::32, channel::binary-size(size), 1::8>> =
+        rel_timestamp |> span_batch_frame(parent_hash, block_count) |> decode()
+
+      <<head::binary-size(div(size, 2)), tail::binary>> = channel
+
+      {encode(<<0::8>> <> id <> <<0::16, byte_size(head)::32>> <> head <> <<0::8>>),
+       encode(<<0::8>> <> id <> <<1::16, byte_size(tail)::32>> <> tail <> <<1::8>>)}
     end
 
     # `options` holds the submitter, and other settings of the fetcher to override

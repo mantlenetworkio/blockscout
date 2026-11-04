@@ -8,6 +8,7 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
     import ExUnit.CaptureLog, only: [capture_log: 1]
     import Mox
 
+    alias Explorer.Chain.Beacon.Blob, as: BeaconBlob
     alias Indexer.Fetcher.Optimism.TransactionBatch
     alias Varint.LEB128
 
@@ -90,6 +91,314 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
         inputs = [%{bytes: ExRLP.encode([<<0>> <> :crypto.strong_rand_bytes(40)]), eip4844_blob_hash: @blob_a}]
 
         assert inputs == TransactionBatch.unwrap_mantle_blob_inputs(inputs, [@blob_a], 999)
+      end
+    end
+
+    # the whole fetcher waits for a blob source, while the next one can serve the blob
+    describe "EIP-4844 blob sources" do
+      @blob_hash "0x01" <> String.duplicate("cc", 31)
+      @sepolia_chain_id 11_155_111
+      # an empty blob in the EIP-4844 encoding: it decodes to no data
+      @empty_blob "0x" <> String.duplicate("00", 131_072)
+      # its encoding version (the second byte) is not 0
+      @undecodable_blob "0x" <> String.duplicate("ff", 131_072)
+
+      setup do
+        %{bypass: Bypass.open(), calls: :counters.new(1, []), timestamp: DateTime.from_unix!(1_793_678_712)}
+      end
+
+      test "a 400 of a Blockscout Blobs API is not asked again", ctx do
+        count_calls(ctx, 400, ~s({"message":"Bad request"}))
+
+        assert {:error, {:http_status, 400, _}} =
+                 TransactionBatch.fetch_blob_from_blobs_api(
+                   @blob_hash,
+                   ctx.timestamp,
+                   "http://localhost:#{ctx.bypass.port}",
+                   @sepolia_chain_id
+                 )
+
+        assert :counters.get(ctx.calls, 1) == 1
+      end
+
+      # Lighthouse no longer keeps the blobs of a slot older than its retention window
+      test "a 400 of a Beacon Node is not asked again", ctx do
+        use_beacon_node(ctx)
+
+        count_calls(
+          ctx,
+          400,
+          ~s({"code":400,"message":"BAD_REQUEST: Insufficient data columns to reconstruct blobs"})
+        )
+
+        capture_log(fn ->
+          assert is_nil(TransactionBatch.fetch_blob_from_beacon_node(@blob_hash, ctx.timestamp, @sepolia_chain_id))
+        end)
+
+        assert :counters.get(ctx.calls, 1) == 1
+      end
+
+      # a short outage of the only source holding a blob is waited out, rather than queuing the blob's L1 block
+      test "a blob is asked for again after a delay while a Blobs API fails", ctx do
+        use_beacon_node(ctx)
+
+        requests =
+          serve_blob_sources(ctx, %{
+            da_indexer: fn
+              n when n <= 3 -> {503, ""}
+              _ -> {200, Jason.encode!(%{"data" => [@empty_blob]})}
+            end,
+            beacon: fn _ -> {400, ~s({"code":400})} end
+          })
+
+        capture_log(fn ->
+          assert {:ok, ""} = TransactionBatch.fetch_eip4844_blob(blob(ctx), da_indexer_source(ctx), [10])
+        end)
+
+        # three attempts, the Beacon Node's blobs endpoint and sidecars, and the DA indexer again after the delay
+        assert requests.(:da_indexer) == 4
+        assert requests.(:beacon_blobs) == 1
+        assert requests.(:beacon) == 1
+      end
+
+      # a WAF in front of a Blobs API answers 403 while it throttles, while a gateway in front of a Beacon Node that does
+      # not let its blobs endpoint through may let its sidecars through
+      test "a 403 of a Blobs API is waited out, while a Beacon Node's is final", ctx do
+        use_beacon_node(ctx)
+
+        requests =
+          serve_blob_sources(ctx, %{
+            da_indexer: fn
+              n when n <= 3 -> {403, ""}
+              _ -> {200, Jason.encode!(%{"data" => [@empty_blob]})}
+            end,
+            beacon_blobs: fn _ -> {403, ""} end,
+            beacon: fn _ -> {400, ~s({"code":400})} end
+          })
+
+        capture_log(fn ->
+          assert {:ok, ""} = TransactionBatch.fetch_eip4844_blob(blob(ctx), da_indexer_source(ctx), [10])
+        end)
+
+        assert requests.(:da_indexer) == 4
+        assert requests.(:beacon_blobs) == 1
+        assert requests.(:beacon) == 1
+      end
+
+      test "a blob a failing Blobs API does not give is missing once no delay is left", ctx do
+        use_beacon_node(ctx)
+
+        requests =
+          serve_blob_sources(ctx, %{
+            da_indexer: fn _ -> {503, ""} end,
+            beacon: fn _ -> {400, ~s({"code":400})} end
+          })
+
+        capture_log(fn ->
+          assert :missing = TransactionBatch.fetch_eip4844_blob(blob(ctx), da_indexer_source(ctx), [])
+        end)
+
+        assert requests.(:da_indexer) == 3
+        assert requests.(:beacon_blobs) == 1
+        assert requests.(:beacon) == 1
+      end
+
+      # left to `BlobRetryQueue` at once, as before: waiting would not help a blob older than every source keeps, and a
+      # DA indexer behind the L1 head answers the same for a new one
+      test "a blob every source answered it does not have is not waited for", ctx do
+        use_beacon_node(ctx)
+
+        requests =
+          serve_blob_sources(ctx, %{
+            da_indexer: fn _ -> {200, ~s({"data":[]})} end,
+            beacon: fn _ -> {400, ~s({"code":400})} end
+          })
+
+        capture_log(fn ->
+          assert :missing = TransactionBatch.fetch_eip4844_blob(blob(ctx), da_indexer_source(ctx), [10])
+        end)
+
+        assert requests.(:da_indexer) == 1
+        assert requests.(:beacon_blobs) == 1
+        assert requests.(:beacon) == 1
+      end
+
+      # since Fusaka, Lighthouse answers 400 to the sidecars of any block, while its blobs endpoint serves the blob
+      test "a blob is taken from the Beacon Node blobs endpoint before its sidecars", ctx do
+        use_beacon_node(ctx)
+        test_process = self()
+
+        requests =
+          serve_blob_sources(ctx, %{
+            da_indexer: fn _ -> {200, ~s({"data":[]})} end,
+            beacon_blobs: fn _, conn ->
+              send(test_process, {:beacon_blobs, conn.request_path, conn.query_string})
+              {200, Jason.encode!(%{"data" => [@empty_blob]})}
+            end,
+            beacon: fn _ -> {400, ~s({"code":400})} end
+          })
+
+        capture_log(fn ->
+          assert {:ok, ""} = TransactionBatch.fetch_eip4844_blob(blob(ctx), da_indexer_source(ctx), [10])
+        end)
+
+        # the slot of the block's timestamp on Sepolia, and only the blob asked for
+        slot = div(DateTime.to_unix(ctx.timestamp) - 1_655_733_600, 12)
+        assert_received {:beacon_blobs, path, "versioned_hashes=" <> @blob_hash}
+        assert path == "/eth/v1/beacon/blobs/#{slot}"
+        assert requests.(:beacon_blobs) == 1
+        assert requests.(:beacon) == 0
+      end
+
+      # Unlike a Blobs API's: a node without the endpoint, or the default URL of an unset INDEXER_BEACON_RPC_URL, fails
+      # every time. Its sidecars would only make the fetcher wait as long again.
+      test "a failing Beacon Node does not make the chain wait, nor is asked for its sidecars", ctx do
+        use_beacon_node(ctx)
+
+        requests =
+          serve_blob_sources(ctx, %{
+            da_indexer: fn _ -> {200, ~s({"data":[]})} end,
+            beacon_blobs: fn _ -> {503, ""} end,
+            beacon: fn _ -> {400, ~s({"code":400})} end
+          })
+
+        capture_log(fn ->
+          assert :missing = TransactionBatch.fetch_eip4844_blob(blob(ctx), da_indexer_source(ctx), [10])
+        end)
+
+        assert requests.(:da_indexer) == 1
+        assert requests.(:beacon_blobs) == 3
+        assert requests.(:beacon) == 0
+      end
+
+      test "a blob is taken from the Beacon Node sidecars when its blobs endpoint does not give it", ctx do
+        use_beacon_node(ctx)
+        {blob, sidecars} = blob_with_sidecar(ctx, @empty_blob)
+
+        requests =
+          serve_blob_sources(ctx, %{
+            da_indexer: fn _ -> {200, ~s({"data":[]})} end,
+            beacon_blobs: fn
+              # a node from before Fusaka
+              1 -> {404, ""}
+              # a gateway that lets only the sidecars through
+              2 -> {403, ""}
+              # unlike the sidecars, the endpoint gives no KZG commitment to check its blob against
+              _ -> {200, Jason.encode!(%{"data" => [@undecodable_blob]})}
+            end,
+            beacon: fn _ -> {200, sidecars} end
+          })
+
+        capture_log(fn ->
+          for _ <- 1..3,
+              do: assert({:ok, ""} = TransactionBatch.fetch_eip4844_blob(blob, da_indexer_source(ctx), [10]))
+        end)
+
+        assert requests.(:beacon_blobs) == 3
+        assert requests.(:beacon) == 3
+      end
+
+      test "a blob whose sidecar does not decode is invalid", ctx do
+        use_beacon_node(ctx)
+        {blob, sidecars} = blob_with_sidecar(ctx, @undecodable_blob)
+
+        serve_blob_sources(ctx, %{
+          da_indexer: fn _ -> {200, ~s({"data":[]})} end,
+          beacon: fn _ -> {200, sidecars} end
+        })
+
+        capture_log(fn ->
+          assert :invalid = TransactionBatch.fetch_eip4844_blob(blob, da_indexer_source(ctx), [10])
+        end)
+      end
+
+      # a source that ignored `versioned_hashes` would give any blob of the slot first
+      test "a source that gives other blobs than the one asked for does not have it", ctx do
+        other_blob = "0x" <> String.duplicate("00", 131_071) <> "01"
+
+        requests =
+          serve_blob_sources(ctx, %{
+            da_indexer: fn
+              1 -> {200, Jason.encode!(%{"data" => [@empty_blob, other_blob]})}
+              _ -> {200, Jason.encode!(%{"data" => [@empty_blob, @empty_blob]})}
+            end
+          })
+
+        capture_log(fn ->
+          assert {:error, {:unfiltered_blobs, %{count: 2}}} = fetch_from_da_indexer(ctx)
+          # the same blob can appear twice in a slot
+          assert {:ok, <<0, _::binary>>} = fetch_from_da_indexer(ctx)
+        end)
+
+        assert requests.(:da_indexer) == 2
+      end
+
+      test "a 405 of a source is not asked again", ctx do
+        count_calls(ctx, 405, "")
+
+        assert {:error, {:http_status, 405, _}} = fetch_from_da_indexer(ctx)
+        assert :counters.get(ctx.calls, 1) == 1
+      end
+
+      test "the Beacon Node is not asked when its layer is turned off", ctx do
+        use_beacon_node(ctx)
+        initial = Application.get_env(:indexer, Indexer.Fetcher.Optimism)
+
+        Application.put_env(
+          :indexer,
+          Indexer.Fetcher.Optimism,
+          Keyword.merge(initial || [], beacon_blob_sidecars_disabled: true)
+        )
+
+        on_exit(fn -> Application.put_env(:indexer, Indexer.Fetcher.Optimism, initial || []) end)
+        requests = serve_blob_sources(ctx, %{da_indexer: fn _ -> {200, ~s({"data":[]})} end})
+
+        capture_log(fn ->
+          assert :missing = TransactionBatch.fetch_eip4844_blob(blob(ctx), da_indexer_source(ctx), [10])
+        end)
+
+        assert requests.(:beacon_blobs) == 0
+        assert requests.(:beacon) == 0
+      end
+
+      # INDEXER_BEACON_RPC_URL set to an empty string
+      test "the Beacon Node is not asked without a URL", ctx do
+        initial = Application.get_env(:indexer, Indexer.Fetcher.Beacon)
+        on_exit(fn -> Application.put_env(:indexer, Indexer.Fetcher.Beacon, initial || []) end)
+        serve_blob_sources(ctx, %{da_indexer: fn _ -> {200, ~s({"data":[]})} end})
+
+        for url <- ["", nil] do
+          Application.put_env(:indexer, Indexer.Fetcher.Beacon, Keyword.put(initial || [], :beacon_rpc, url))
+
+          log =
+            capture_log(fn ->
+              assert :missing = TransactionBatch.fetch_eip4844_blob(blob(ctx), da_indexer_source(ctx), [10])
+            end)
+
+          # neither endpoint asked at the bare path
+          refute log =~ "request to /eth/v1/beacon/"
+        end
+      end
+
+      test "a blob is taken from the next source once one has answered it does not have it", ctx do
+        requests =
+          serve_blob_sources(ctx, %{
+            da_indexer: fn _ -> {404, ""} end,
+            blockscout: fn _ -> {200, Jason.encode!(%{"blob_data" => @empty_blob})} end
+          })
+
+        sources =
+          TransactionBatch.eip4844_blob_api_sources(
+            "http://localhost:#{ctx.bypass.port}/da/eth/v1/beacon/blobs",
+            "http://localhost:#{ctx.bypass.port}/blobs"
+          )
+
+        capture_log(fn ->
+          assert {:ok, ""} = TransactionBatch.fetch_eip4844_blob(blob(ctx), sources, [10])
+        end)
+
+        assert requests.(:da_indexer) == 1
+        assert requests.(:blockscout) == 1
       end
     end
 
@@ -747,6 +1056,86 @@ if Application.get_env(:explorer, :chain_type) == :optimism do
 
         assert_received {:blocks, [36_438_664, 36_438_665, 36_438_666]}
       end
+    end
+
+    # Answers every request to the Bypass server of the test with the given status and body, and counts the requests
+    defp count_calls(%{bypass: bypass, calls: calls}, status, body) do
+      Bypass.expect(bypass, fn conn ->
+        :counters.add(calls, 1, 1)
+        Plug.Conn.resp(conn, status, body)
+      end)
+    end
+
+    # Serves the Bypass server of the test as a DA indexer (under `/da`), a Blockscout Blobs API and a Beacon Node (blobs
+    # endpoint and sidecars): `answers` maps `:da_indexer`, `:blockscout`, `:beacon_blobs` and `:beacon` (the sidecars) to
+    # a function of the number of the request (from 1), and of the request itself if it takes two arguments, returning
+    # `{status, body}`, 404 by default. Returns a function giving the number of requests each one has received.
+    defp serve_blob_sources(%{bypass: bypass}, answers) do
+      requests = :counters.new(4, [])
+      indexes = %{da_indexer: 1, blockscout: 2, beacon: 3, beacon_blobs: 4}
+
+      Bypass.expect(bypass, fn conn ->
+        source =
+          cond do
+            String.starts_with?(conn.request_path, "/da/eth/v1/beacon/blobs/") -> :da_indexer
+            String.starts_with?(conn.request_path, "/eth/v1/beacon/blobs/") -> :beacon_blobs
+            String.starts_with?(conn.request_path, "/eth/v1/beacon/blob_sidecars/") -> :beacon
+            true -> :blockscout
+          end
+
+        :counters.add(requests, indexes[source], 1)
+        answer = Map.get(answers, source, fn _ -> {404, ""} end)
+        number = :counters.get(requests, indexes[source])
+        {status, body} = if is_function(answer, 2), do: answer.(number, conn), else: answer.(number)
+        Plug.Conn.resp(conn, status, body)
+      end)
+
+      &:counters.get(requests, indexes[&1])
+    end
+
+    # Points INDEXER_BEACON_RPC_URL to the Bypass server of the test
+    defp use_beacon_node(%{bypass: bypass}) do
+      previous = Application.get_env(:indexer, Indexer.Fetcher.Beacon)
+
+      Application.put_env(
+        :indexer,
+        Indexer.Fetcher.Beacon,
+        Keyword.put(previous || [], :beacon_rpc, "http://localhost:#{bypass.port}")
+      )
+
+      on_exit(fn -> Application.put_env(:indexer, Indexer.Fetcher.Beacon, previous || []) end)
+    end
+
+    defp blob(ctx) do
+      %{
+        hash: @blob_hash,
+        transaction_hash: "0x" <> String.duplicate("dd", 32),
+        block_timestamp: ctx.timestamp,
+        chain_id_l1: @sepolia_chain_id
+      }
+    end
+
+    # A blob of the test whose hash is that of a KZG commitment, and the Beacon Node's sidecars of its slot, giving
+    # `blob_data` for the commitment
+    defp blob_with_sidecar(ctx, blob_data) do
+      commitment = :binary.copy(<<0xAB>>, 48)
+      hash = commitment |> BeaconBlob.hash() |> to_string()
+      sidecar = %{"kzg_commitment" => "0x" <> Base.encode16(commitment, case: :lower), "blob" => blob_data}
+
+      {%{blob(ctx) | hash: hash}, Jason.encode!(%{"data" => [sidecar]})}
+    end
+
+    defp da_indexer_source(ctx) do
+      TransactionBatch.eip4844_blob_api_sources("http://localhost:#{ctx.bypass.port}/da/eth/v1/beacon/blobs", "")
+    end
+
+    defp fetch_from_da_indexer(ctx) do
+      TransactionBatch.fetch_blob_from_blobs_api(
+        @blob_hash,
+        ctx.timestamp,
+        "http://localhost:#{ctx.bypass.port}/da/eth/v1/beacon/blobs",
+        @sepolia_chain_id
+      )
     end
 
     # Parses a channel of the Mantle Sepolia span batch of L2 blocks 36438664..36438666 and returns the L2 block numbers

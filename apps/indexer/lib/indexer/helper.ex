@@ -802,7 +802,8 @@ defmodule Indexer.Helper do
   end
 
   @doc """
-    Sends HTTP GET request to the given URL and returns a response. Makes max 10 attempts and then returns an error in case of failure.
+    Sends HTTP GET request to the given URL and returns a response. Makes max `max_attempts` attempts (10 by default)
+    and then returns an error in case of failure.
     There is a timeout between attempts (increasing from 3 seconds to 20 minutes max as the number of attempts increases).
 
     ## Parameters
@@ -811,14 +812,21 @@ defmodule Indexer.Helper do
     - `attempts_done`: The number of attempts done. Incremented by the function itself.
     - `avoid_retry_for_statuses`: The list of http error codes we don't need to re-send the request for.
                                   E.g. for 404 error we don't try to re-send the request.
+    - `max_attempts`: The number of attempts after which the function gives up.
 
     ## Returns
     - `{:ok, response}` where `response` is a map decoded from a JSON object, or the raw bytes (depending on the `response_format` parameter).
     - `{:error, reason}` in case of failure (after all unsuccessful attempts).
   """
-  @spec http_get_request(String.t(), :json | :raw, non_neg_integer(), [non_neg_integer()]) ::
+  @spec http_get_request(String.t(), :json | :raw, non_neg_integer(), [non_neg_integer()], pos_integer()) ::
           {:ok, map() | binary()} | {:error, any()}
-  def http_get_request(url, response_format \\ :json, attempts_done \\ 0, avoid_retry_for_statuses \\ [404]) do
+  def http_get_request(
+        url,
+        response_format \\ :json,
+        attempts_done \\ 0,
+        avoid_retry_for_statuses \\ [404],
+        max_attempts \\ @http_get_request_max_attempts
+      ) do
     recv_timeout = 60_000
     connect_timeout = 8_000
     client = Tesla.client([{Tesla.Middleware.Timeout, timeout: recv_timeout}], Tesla.Adapter.Mint)
@@ -835,11 +843,11 @@ defmodule Indexer.Helper do
         if status in avoid_retry_for_statuses do
           http_get_request_avoided_status(url, status, body)
         else
-          http_get_request_error(url, response_format, body, attempts_done, avoid_retry_for_statuses)
+          http_get_request_error(url, response_format, body, attempts_done, avoid_retry_for_statuses, max_attempts)
         end
 
       {:error, error} ->
-        http_get_request_error(url, response_format, error, attempts_done, avoid_retry_for_statuses)
+        http_get_request_error(url, response_format, error, attempts_done, avoid_retry_for_statuses, max_attempts)
     end
   end
 
@@ -863,13 +871,14 @@ defmodule Indexer.Helper do
   # - `attempts_done`: The number of attempts done. Incremented by the function itself.
   # - `avoid_retry_for_statuses`: The list of http error codes we don't need to re-send the request for.
   #                               E.g. for 404 error we don't try to re-send the request.
+  # - `max_attempts`: The number of attempts after which the function gives up.
   #
   # ## Returns
   # - `{:ok, response}` tuple if the re-call was successful.
   # - `{:error, reason}` if all attempts were failed.
-  @spec http_get_request_error(String.t(), :json | :raw, any(), non_neg_integer(), [non_neg_integer()]) ::
+  @spec http_get_request_error(String.t(), :json | :raw, any(), non_neg_integer(), [non_neg_integer()], pos_integer()) ::
           {:ok, map()} | {:error, any()}
-  defp http_get_request_error(url, response_format, error, attempts_done, avoid_retry_for_statuses) do
+  defp http_get_request_error(url, response_format, error, attempts_done, avoid_retry_for_statuses, max_attempts) do
     Logger.error(fn ->
       [
         "Error while sending request to #{url}: ",
@@ -880,11 +889,11 @@ defmodule Indexer.Helper do
     # retry to send the request
     attempts_done = attempts_done + 1
 
-    if attempts_done < @http_get_request_max_attempts do
+    if attempts_done < max_attempts do
       # wait up to 20 minutes and then retry
       :timer.sleep(min(3000 * Integer.pow(2, attempts_done - 1), 1_200_000))
       Logger.info("Retry to send the request to #{url} ...")
-      http_get_request(url, response_format, attempts_done, avoid_retry_for_statuses)
+      http_get_request(url, response_format, attempts_done, avoid_retry_for_statuses, max_attempts)
     else
       {:error, "Error while sending request to #{url}"}
     end
@@ -899,13 +908,16 @@ defmodule Indexer.Helper do
     - `l1_chain_id`: ID of L1 chain to automatically define parameters for calculating beacon slot.
       If ID is `nil` or unknown, the parameters are taken from the fallback INDEXER_BEACON_BLOB_FETCHER_REFERENCE_SLOT,
       INDEXER_BEACON_BLOB_FETCHER_REFERENCE_TIMESTAMP, INDEXER_BEACON_BLOB_FETCHER_SLOT_DURATION env variables.
+    - `request_options`: `:max_attempts` and `:avoid_retry_for_statuses` of the request (see `http_get_request/5`),
+      10 attempts and `[404]` by default.
 
     ## Returns
     - A binary with the blob data in case of success.
     - `nil` in case of failure.
   """
-  @spec get_eip4844_blob_from_beacon_node(String.t(), DateTime.t(), non_neg_integer() | nil) :: binary() | nil
-  def get_eip4844_blob_from_beacon_node(blob_hash, l1_block_timestamp, l1_chain_id) do
+  @spec get_eip4844_blob_from_beacon_node(String.t(), DateTime.t(), non_neg_integer() | nil, Keyword.t()) ::
+          binary() | nil
+  def get_eip4844_blob_from_beacon_node(blob_hash, l1_block_timestamp, l1_chain_id, request_options \\ []) do
     if beacon_sidecars_disabled?() do
       # Operator explicitly opted out (no real Beacon Node available, e.g. when
       # `INDEXER_BEACON_RPC_URL` points to a Mantle DA Indexer which doesn't
@@ -913,7 +925,7 @@ defmodule Indexer.Helper do
       nil
     else
       slot = compute_beacon_slot(l1_block_timestamp, l1_chain_id)
-      get_blob_via_sidecars_endpoint(slot, blob_hash)
+      get_blob_via_sidecars_endpoint(slot, blob_hash, request_options)
     end
   rescue
     reason ->
@@ -922,7 +934,7 @@ defmodule Indexer.Helper do
       # when not running a real Beacon Node.
       Logger.info(
         "Beacon-Node sidecar fallback unavailable for blob #{blob_hash} (slot derived from L1 timestamp). " <>
-          "Reason: #{inspect(reason)}. The previous two blob sources were also unable to serve this blob."
+          "Reason: #{inspect(reason)}. The other blob sources were also unable to serve this blob."
       )
 
       nil
@@ -930,10 +942,13 @@ defmodule Indexer.Helper do
 
   # Reads `:beacon_blob_sidecars_disabled` from the centralized Optimism indexer
   # config (set in `config/runtime.exs` via `INDEXER_BEACON_BLOB_SIDECARS_DISABLED`).
-  # Set to `true` when `INDEXER_BEACON_RPC_URL` intentionally points at a DA
-  # indexer that doesn't expose `/eth/v1/beacon/blob_sidecars/`, to avoid noisy
-  # retries+errors when Layer 1 + Layer 2 both miss a blob.
-  defp beacon_sidecars_disabled? do
+  # Set to `true` when there is no Beacon Node to ask, e.g. when `INDEXER_BEACON_RPC_URL`
+  # intentionally points at a DA indexer that doesn't expose `/eth/v1/beacon/blob_sidecars/`,
+  # to avoid noisy retries+errors when Layer 1 + Layer 2 both miss a blob. The Optimism
+  # batch fetcher then skips the Beacon Node's `/eth/v1/beacon/blobs/` endpoint as well.
+  @doc false
+  @spec beacon_sidecars_disabled?() :: boolean()
+  def beacon_sidecars_disabled? do
     :indexer
     |> Application.get_env(Indexer.Fetcher.Optimism, [])
     |> Keyword.get(:beacon_blob_sidecars_disabled, false) == true
@@ -965,12 +980,12 @@ defmodule Indexer.Helper do
   end
 
   @doc false
-  @spec get_eip4844_blob_from_indexer_result(String.t(), String.t(), DateTime.t(), non_neg_integer() | nil) ::
+  @spec get_eip4844_blob_from_indexer_result(String.t(), String.t(), DateTime.t(), non_neg_integer() | nil, Keyword.t()) ::
           {:ok, binary()} | {:error, any()}
-  def get_eip4844_blob_from_indexer_result(base_url, blob_hash, l1_block_timestamp, l1_chain_id) do
+  def get_eip4844_blob_from_indexer_result(base_url, blob_hash, l1_block_timestamp, l1_chain_id, request_options \\ []) do
     slot = compute_beacon_slot(l1_block_timestamp, l1_chain_id)
 
-    get_blob_via_blobs_endpoint(trim_url(base_url), slot, blob_hash)
+    get_blob_via_blobs_endpoint(trim_url(base_url), slot, blob_hash, request_options)
   rescue
     reason ->
       {:error, {:exception, reason}}
@@ -1026,39 +1041,42 @@ defmodule Indexer.Helper do
   # Beacon API returning raw blob hex strings filtered by versioned hash.
   # Returns {:ok, binary} on success, or {:error, reason} if the endpoint is unavailable or returns unusable data.
   # Logging is intentionally left to callers that know which source (primary/fallback) is being tried.
-  @spec get_blob_via_blobs_endpoint(String.t(), non_neg_integer(), String.t()) :: {:ok, binary()} | {:error, any()}
-  defp get_blob_via_blobs_endpoint(base_url, slot, blob_hash) do
+  @spec get_blob_via_blobs_endpoint(String.t(), non_neg_integer(), String.t(), Keyword.t()) ::
+          {:ok, binary()} | {:error, any()}
+  defp get_blob_via_blobs_endpoint(base_url, slot, blob_hash, request_options) do
     blobs_url = "#{base_url}/eth/v1/beacon/blobs/#{slot}?versioned_hashes=#{blob_hash}"
+    {avoid_retry_for_statuses, max_attempts} = blob_request_retry(request_options, [404, 501])
 
-    case http_get_request(blobs_url, :json, 0, [404, 501]) do
+    case http_get_request(blobs_url, :json, 0, avoid_retry_for_statuses, max_attempts) do
       {:ok, response} ->
-        case Map.get(response, "data", []) do
-          [first_blob | _] when is_binary(first_blob) ->
-            {:ok, hash_to_binary(first_blob)}
-
-          [] ->
-            {:error, {:empty_data, %{slot: slot}}}
-
-          other ->
-            {:error, {:unexpected_data_shape, %{slot: slot, data: other}}}
-        end
-
-      {:error, {:http_status, status, reason}} when status in [404, 501] ->
-        {:error, {:http_status, status, reason}}
+        blob_asked_for(Map.get(response, "data", []), slot)
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
+  # The blob of the one versioned hash asked for (the same blob can appear twice in a slot). Different blobs mean the
+  # endpoint ignored `versioned_hashes`, and the first of them would be any blob of the slot.
+  defp blob_asked_for([first_blob | rest], slot) when is_binary(first_blob) do
+    if Enum.all?(rest, &(&1 == first_blob)),
+      do: {:ok, hash_to_binary(first_blob)},
+      else: {:error, {:unfiltered_blobs, %{slot: slot, count: length(rest) + 1}}}
+  end
+
+  defp blob_asked_for([], slot), do: {:error, {:empty_data, %{slot: slot}}}
+
+  defp blob_asked_for(other, slot), do: {:error, {:unexpected_data_shape, %{slot: slot, data: other}}}
+
   # Fetches a blob via the standard /eth/v1/beacon/blob_sidecars/{slot} endpoint.
   # Matches the target blob by computing versioned hash from each sidecar's kzg_commitment.
-  @spec get_blob_via_sidecars_endpoint(non_neg_integer(), String.t()) :: binary()
-  defp get_blob_via_sidecars_endpoint(slot, blob_hash) do
+  @spec get_blob_via_sidecars_endpoint(non_neg_integer(), String.t(), Keyword.t()) :: binary()
+  defp get_blob_via_sidecars_endpoint(slot, blob_hash, request_options) do
     sidecars_url = BeaconClient.blob_sidecars_url(slot)
+    {avoid_retry_for_statuses, max_attempts} = blob_request_retry(request_options, [404])
 
     fetched_blobs =
-      case http_get_request(sidecars_url) do
+      case http_get_request(sidecars_url, :json, 0, avoid_retry_for_statuses, max_attempts) do
         {:ok, response} ->
           response
 
@@ -1085,6 +1103,12 @@ defmodule Indexer.Helper do
     end)
     |> Map.get("blob")
     |> hash_to_binary()
+  end
+
+  # The statuses not to retry and the attempts of a blob request, from its `request_options` or by default.
+  defp blob_request_retry(request_options, default_avoid_retry_for_statuses) do
+    {Keyword.get(request_options, :avoid_retry_for_statuses, default_avoid_retry_for_statuses),
+     Keyword.get(request_options, :max_attempts, @http_get_request_max_attempts)}
   end
 
   @doc """
