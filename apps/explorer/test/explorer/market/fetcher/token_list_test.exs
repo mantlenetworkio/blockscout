@@ -255,5 +255,46 @@ defmodule Explorer.Market.Fetcher.TokenListTest do
       updated_token = Repo.get_by(Token, contract_address_hash: token.contract_address_hash)
       assert updated_token.icon_url == "https://example.com/any.png"
     end
+
+    test "imports a list that repeats a contract address", %{bypass: bypass} do
+      token = insert(:token, icon_url: nil)
+      "0x" <> hex = to_string(token.contract_address_hash)
+
+      body =
+        token_list_json([
+          token_entry(token.contract_address_hash, symbol: "ETH", logo_uri: "https://example.com/eth.svg"),
+          token_entry("0x" <> String.upcase(hex), symbol: "WETH", logo_uri: "https://example.com/weth.svg")
+        ])
+
+      Bypass.expect_once(bypass, "GET", "/tokens.json", fn conn ->
+        Plug.Conn.resp(conn, 200, body)
+      end)
+
+      {:ok, pid} = GenServer.start(TokenList, :ok)
+      # init/1 queues the fetch first, so this returns once it is handled and exits if the process died
+      :sys.get_state(pid)
+      GenServer.stop(pid)
+
+      updated_token = Repo.get_by(Token, contract_address_hash: token.contract_address_hash)
+      assert updated_token.icon_url == "https://example.com/eth.svg"
+    end
+
+    test "keeps running when the import raises", %{bypass: bypass} do
+      token = insert(:token, icon_url: nil)
+
+      # Postgres rejects NUL bytes in text columns, so this import raises
+      body = token_list_json([token_entry(token.contract_address_hash, logo_uri: "https://example.com/bad\u0000.png")])
+
+      Bypass.expect_once(bypass, "GET", "/tokens.json", fn conn ->
+        Plug.Conn.resp(conn, 200, body)
+      end)
+
+      {:ok, pid} = GenServer.start(TokenList, :ok)
+      # init/1 queues the fetch first, so this returns once it is handled and exits if the process died
+      :sys.get_state(pid)
+      GenServer.stop(pid)
+
+      assert is_nil(Repo.get_by(Token, contract_address_hash: token.contract_address_hash).icon_url)
+    end
   end
 end

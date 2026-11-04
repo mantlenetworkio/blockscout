@@ -45,7 +45,7 @@ defmodule Explorer.Market.Fetcher.TokenList do
 
   @impl GenServer
   def handle_info(:fetch, %__MODULE__{url: url, refetch_interval: refetch_interval} = state) do
-    case fetch_and_import(url) do
+    case safe_fetch_and_import(url) do
       {:ok, count} ->
         Logger.info("Token list: imported #{count} tokens from #{url}")
 
@@ -60,6 +60,15 @@ defmodule Explorer.Market.Fetcher.TokenList do
   @impl GenServer
   def handle_info(_msg, state), do: {:noreply, state}
 
+  # The import raises on database errors. Crashing would make the supervisor restart the process
+  # at once and `init/1` fetch again right away, retrying the same list in a tight loop instead of
+  # after the refetch interval.
+  defp safe_fetch_and_import(url) do
+    fetch_and_import(url)
+  rescue
+    exception -> {:error, Exception.message(exception)}
+  end
+
   defp fetch_and_import(url) do
     with {:ok, %{body: body, status_code: 200}} <- HttpClient.get(url),
          {:ok, %{"tokens" => tokens}} when is_list(tokens) <- Jason.decode(body) do
@@ -68,6 +77,9 @@ defmodule Explorer.Market.Fetcher.TokenList do
         |> filter_by_chain_id()
         |> Enum.map(&to_token_params/1)
         |> Enum.reject(&is_nil/1)
+        # a list may repeat a contract (e.g. the same address listed as both ETH and WETH), while a
+        # single upsert must not touch a row twice; the first entry wins
+        |> Enum.uniq_by(&String.downcase(&1.contract_address_hash))
 
       case import_tokens(token_params) do
         {:ok, _} -> {:ok, length(token_params)}
