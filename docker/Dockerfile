@@ -80,7 +80,7 @@ ARG MUD_INDEXER_ENABLED
 ENV MUD_INDEXER_ENABLED=${MUD_INDEXER_ENABLED}
 
 ENV RELEASE_VERSION=11.3.3
-ENV BLOCKSCOUT_VERSION=v11.3.3-mantle-arsia.1
+ENV BLOCKSCOUT_VERSION=v11.3.3-mantle-elysium.1
 
 COPY --from=builder --chown=${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} /opt/release/blockscout .
 COPY --from=builder --chown=${BLOCKSCOUT_USER}:${BLOCKSCOUT_GROUP} /app/config/config_helper.exs ./config/config_helper.exs
