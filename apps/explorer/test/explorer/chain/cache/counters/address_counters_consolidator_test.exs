@@ -4,10 +4,10 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
 
   import ExUnit.CaptureLog
 
-  alias Explorer.Chain.Address
+  alias Explorer.Chain.{Address, Block}
   alias Explorer.Chain.Cache.Counters.{AddressCounters, AddressCountersConsolidator, Consolidation}
   alias Explorer.Repo
-  alias Explorer.Utility.{CountersRefetchBlock, MissingBlockRange}
+  alias Explorer.Utility.{CountersRefetchBlock, MassiveBlock, MissingBlockRange}
 
   describe "consolidate_addresses/2" do
     test "incrementally consolidates an address with a watermark" do
@@ -156,6 +156,124 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
 
       assert Consolidation.capped?(Consolidation.safe_block())
     end
+
+    test "stops below a block missing above the last checked block before catchup registers it" do
+      Enum.each(0..60, &insert(:block, number: &1))
+
+      assert AddressCountersConsolidator.safe_block() == 60
+
+      # after a restart the realtime fetcher imports the new head first: the
+      # downtime gap is neither indexed nor registered as a missing range yet
+      # (a block that lost consensus does not fill it)
+      insert(:block, number: 61, consensus: false)
+      insert(:block, number: 100)
+
+      assert AddressCountersConsolidator.safe_block() == 60
+      assert Consolidation.capped?(Consolidation.safe_block())
+
+      Enum.each(61..99, &insert(:block, number: &1))
+
+      assert AddressCountersConsolidator.safe_block() == 100
+    end
+
+    test "is capped below the lowest massive block" do
+      Enum.each(0..100, &insert(:block, number: &1))
+
+      assert AddressCountersConsolidator.safe_block() == 100
+
+      # a catchup import that timed out moves its blocks from the missing ranges
+      # to the massive blocks, which the massive blocks fetcher imports later
+      Repo.delete_all(from(block in Block, where: block.number == 40))
+      insert(:massive_block, number: 40)
+
+      assert AddressCountersConsolidator.safe_block() == 39
+
+      # an import commits the block before its transactions: the row is deleted
+      # only once the massive blocks fetcher imported the block in full
+      insert(:block, number: 40)
+
+      assert AddressCountersConsolidator.safe_block() == 39
+
+      Repo.delete_all(MassiveBlock)
+
+      assert AddressCountersConsolidator.safe_block() == 100
+    end
+
+    test "stores the lagged chain head on the first call, not a safe block capped by a registered gap" do
+      env = Application.get_env(:explorer, Consolidation)
+      Application.put_env(:explorer, Consolidation, Keyword.merge(env, contiguity_window: 10))
+
+      Enum.each(0..100, &insert(:block, number: &1))
+      insert(:missing_block_range, from_number: 30, to_number: 20)
+
+      assert AddressCountersConsolidator.safe_block() == 19
+
+      Repo.delete_all(MissingBlockRange)
+
+      # not one window at a time from the capped safe block
+      assert AddressCountersConsolidator.safe_block() == 100
+    end
+
+    test "checks the blocks above the last completed scan of the missing ranges collector on the first call" do
+      # the collector scanned up to block 60 after its previous start; a later
+      # restart, which it has not scanned past yet, left the gap 61..99
+      Enum.each(0..60, &insert(:block, number: &1))
+      insert(:block, number: 100)
+      MissingBlockRange.set_initial_scan_target(60)
+      MissingBlockRange.set_initial_scan_boundary(60)
+
+      assert AddressCountersConsolidator.safe_block() == 60
+
+      Enum.each(61..99, &insert(:block, number: &1))
+
+      assert AddressCountersConsolidator.safe_block() == 100
+    end
+
+    test "checks at most the configured window of blocks per call" do
+      env = Application.get_env(:explorer, Consolidation)
+      Application.put_env(:explorer, Consolidation, Keyword.merge(env, contiguity_window: 20))
+
+      Enum.each(0..10, &insert(:block, number: &1))
+
+      assert AddressCountersConsolidator.safe_block() == 10
+
+      Enum.each(11..100, &insert(:block, number: &1))
+
+      assert AddressCountersConsolidator.safe_block() == 30
+      assert AddressCountersConsolidator.safe_block() == 50
+    end
+
+    # catchup fills gaps only inside the configured ranges, while the realtime
+    # fetcher imports the chain head
+    for block_ranges <- ["0..10,90..latest", "0..10"] do
+      test "does not check the blocks of a chain indexed in block ranges #{block_ranges}" do
+        initial_block_ranges = Application.get_env(:indexer, :block_ranges)
+        Application.put_env(:indexer, :block_ranges, unquote(block_ranges))
+        on_exit(fn -> Application.put_env(:indexer, :block_ranges, initial_block_ranges) end)
+
+        Enum.each(0..10, &insert(:block, number: &1))
+
+        assert AddressCountersConsolidator.safe_block() == 10
+
+        Enum.each(90..100, &insert(:block, number: &1))
+
+        assert AddressCountersConsolidator.safe_block() == 100
+      end
+    end
+
+    test "does not check the blocks of a Filecoin chain, whose null rounds have no block" do
+      initial_chain_type = Application.get_env(:explorer, :chain_type)
+      Application.put_env(:explorer, :chain_type, :filecoin)
+      on_exit(fn -> Application.put_env(:explorer, :chain_type, initial_chain_type) end)
+
+      Enum.each(0..10, &insert(:block, number: &1))
+
+      assert AddressCountersConsolidator.safe_block() == 10
+
+      insert(:block, number: 100)
+
+      assert AddressCountersConsolidator.safe_block() == 100
+    end
   end
 
   describe "consolidation cycle process" do
@@ -209,6 +327,36 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
 
       assert reloaded.transactions_count == 2
       assert reloaded.counters_updated_at == 100
+      assert AddressCounters.dirty_empty?()
+    end
+
+    test "counts the transactions of a downtime gap that catchup indexes after the new chain head" do
+      address = insert(:address, transactions_count: 0, token_transfers_count: 0, gas_used: 0, counters_updated_at: 0)
+
+      insert_blocks(0..60, address, [30])
+
+      AddressCounters.mark_dirty([{address.hash.bytes, 30}])
+      :sys.get_state(AddressCounters)
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 1, counters_updated_at: 60} = Repo.get(Address, address.hash)
+
+      # after a restart the realtime fetcher imports the new head before
+      # catchup registers the downtime gap 61..99 as a missing range
+      insert_blocks([100], address, [100])
+      AddressCounters.mark_dirty([{address.hash.bytes, 100}])
+      :sys.get_state(AddressCounters)
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 1, counters_updated_at: 60} = Repo.get(Address, address.hash)
+
+      insert_blocks(61..99, address, [80])
+
+      AddressCounters.mark_dirty([{address.hash.bytes, 80}])
+      :sys.get_state(AddressCounters)
+      AddressCountersConsolidator.consolidate()
+
+      assert %{transactions_count: 3, counters_updated_at: 100} = Repo.get(Address, address.hash)
       assert AddressCounters.dirty_empty?()
     end
 
@@ -337,6 +485,19 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
       insert(:block, number: 50, refetch_needed: false)
       insert(:block, number: 100)
       insert(:missing_block_range, from_number: 60, to_number: 40)
+      Repo.insert!(%CountersRefetchBlock{block_number: 50})
+
+      AddressCountersConsolidator.consolidate()
+
+      assert Repo.aggregate(CountersRefetchBlock, :count) == 1
+    end
+
+    test "does not settle blocks still in the massive blocks" do
+      # the massive blocks fetcher re-imports the block: its block stage already
+      # cleared refetch_needed, its transactions may not be committed yet
+      insert(:block, number: 50, refetch_needed: false)
+      insert(:block, number: 100)
+      insert(:massive_block, number: 50)
       Repo.insert!(%CountersRefetchBlock{block_number: 50})
 
       AddressCountersConsolidator.consolidate()
@@ -1060,5 +1221,15 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidatorTest do
     after
       0 -> Enum.reverse(aggregates)
     end
+  end
+
+  # a consensus block at every number, as on a real chain (the safe block stops
+  # below a number without one), with a transaction from the address in each
+  # block of `transaction_numbers`
+  defp insert_blocks(numbers, address, transaction_numbers) do
+    Enum.each(numbers, fn number ->
+      block = insert(:block, number: number)
+      if number in transaction_numbers, do: :transaction |> insert(from_address: address) |> with_block(block)
+    end)
   end
 end

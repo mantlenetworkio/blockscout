@@ -19,14 +19,19 @@ defmodule Explorer.Chain.Cache.Counters.Consolidation do
 
   require Logger
 
+  alias EthereumJSONRPC.Utility.RangesHelper
   alias Explorer.Chain.{Block, TokenTransfer, Transaction}
   alias Explorer.Chain.Cache.BlockNumber
-  alias Explorer.Chain.Cache.Counters.{AddressCounters, AddressCountersConsolidator, TokenCounters}
+  alias Explorer.Chain.Cache.Counters.{AddressCounters, AddressCountersConsolidator, LastFetchedCounter, TokenCounters}
   alias Explorer.Chain.Cache.Counters.TokenCountersConsolidator
   alias Explorer.Repo
-  alias Explorer.Utility.{CountersRefetchBlock, MissingBlockRange}
+  alias Explorer.Utility.{CountersRefetchBlock, MassiveBlock, MissingBlockRange}
 
   @refetch_blocks_chunk_size 100
+
+  # the highest block up to which `safe_block/0` found a consensus block at
+  # every number
+  @contiguous_block_counter_type "counters_consolidation_contiguous_block"
 
   # arbitrary constant identifying the settle critical section among
   # `pg_advisory_xact_lock` users
@@ -36,20 +41,38 @@ defmodule Explorer.Chain.Cache.Counters.Consolidation do
   Returns the highest block number consolidated ranges may currently cover or
   `nil` when consolidation is not possible yet: the chain head minus the
   configured safety lag, additionally capped below the lowest missing block
-  range and the lowest block pending a re-fetch counter correction.
+  range, the lowest massive block, the lowest block pending a re-fetch counter
+  correction and the first block number without a consensus block in the
+  database.
 
   While the chain is not yet indexed down to the configured first block —
   initial backward sync, before the missing ranges collector has recorded the
   unindexed tail — no safe block exists at all: consolidating past blocks that
   are absent but not yet registered in `missing_block_ranges` would lose their
   contributions forever.
+
+  Blocks below the chain head also go missing unregistered for a while later
+  on: after a restart the realtime fetcher imports the new chain head before
+  the missing ranges collector registers the downtime gap, and a block the
+  realtime fetcher fails to import waits for the next scan of the collector.
+  So the safe block also stays below the first block number above the last
+  checked one that has no consensus block. The checked number is stored, so a
+  call checks only the blocks added since, at most `contiguity_window` of them.
+  The first call trusts the chain up to the last completed scan of the missing
+  ranges collector (up to the lagged chain head before any), as the gaps
+  registered below keep their own caps. Chains indexed in block ranges other
+  than a single one open to the latest block, and Filecoin chains, whose null
+  rounds have no block, are not checked.
   """
   @spec safe_block() :: non_neg_integer() | nil
   def safe_block do
     if lower_chain_indexed?() do
-      [lagged_head(), min_missing_block_cap(), min_pending_refetch_cap()]
+      lagged_head = lagged_head()
+
+      [lagged_head, min_missing_block_cap(), min_massive_block_cap(), min_pending_refetch_cap()]
       |> Enum.reject(&is_nil/1)
       |> Enum.min(fn -> nil end)
+      |> contiguous_cap(lagged_head)
       |> case do
         safe_block when is_integer(safe_block) and safe_block > 0 -> safe_block
         _ -> nil
@@ -59,7 +82,8 @@ defmodule Explorer.Chain.Cache.Counters.Consolidation do
 
   @doc """
   Returns `true` when `safe_block` is below the lagged chain head, capped by a
-  missing block range or a block pending a re-fetch counter correction.
+  missing block range, a massive block, a block pending a re-fetch counter
+  correction or a block number without a consensus block.
 
   A recalculation from scratch (a `NULL` watermark) stored at a capped safe
   block would leave the rows above the cap to no dirty marker (an import marks
@@ -92,7 +116,7 @@ defmodule Explorer.Chain.Cache.Counters.Consolidation do
   content back to the addresses and tokens whose watermarks already cover the
   block, then drops the queue rows. Blocks whose re-import is still in flight
   (the consensus block still requires a re-fetch, or the block is still
-  covered by a missing range) are left queued. Returns `:failed` when the
+  covered by a missing range or a massive block) are left queued. Returns `:failed` when the
   settlement failed (it is retried by a later cycle).
   """
   @spec settle_pending_refetch_blocks() :: :ok | :failed
@@ -121,7 +145,9 @@ defmodule Explorer.Chain.Cache.Counters.Consolidation do
   # a block is ready to settle once its re-fetch completed: the consensus
   # block no longer requires a re-fetch AND the block is no longer covered
   # by a missing range (the range row survives until the whole re-import —
-  # all its stages — succeeded, so old content can no longer be observed)
+  # all its stages — succeeded, so old content can no longer be observed) and
+  # no longer a massive block (a re-import that timed out moves the range
+  # there, and the row survives in the same way, see `min_massive_block_cap/0`)
   defp ready_to_settle_query do
     from(refetch_block in CountersRefetchBlock,
       as: :refetch_block,
@@ -140,6 +166,13 @@ defmodule Explorer.Chain.Cache.Counters.Consolidation do
             where:
               range.from_number >= parent_as(:refetch_block).block_number and
                 range.to_number <= parent_as(:refetch_block).block_number,
+            select: 1
+          )
+        ),
+      where:
+        not exists(
+          from(massive_block in MassiveBlock,
+            where: massive_block.number == parent_as(:refetch_block).block_number,
             select: 1
           )
         ),
@@ -232,11 +265,123 @@ defmodule Explorer.Chain.Cache.Counters.Consolidation do
     end
   end
 
+  # A catchup import that timed out moves its range from the missing block
+  # ranges to the massive blocks, and the block fetchers defer a block with more
+  # transactions than `massive_block_threshold` there too.
+  # `Indexer.Block.Catchup.MassiveBlocksFetcher` deletes a row only once it
+  # imported the block in full: an import commits the block before its
+  # transactions, so a present block is not enough.
+  defp min_massive_block_cap do
+    case Repo.aggregate(MassiveBlock, :min, :number, timeout: query_timeout()) do
+      number when is_integer(number) -> number - 1
+      _ -> nil
+    end
+  end
+
   defp min_pending_refetch_cap do
     case CountersRefetchBlock.min_block_number() do
       block_number when is_integer(block_number) -> block_number - 1
       _ -> nil
     end
+  end
+
+  # see `safe_block/0`
+  defp contiguous_cap(safe_block, lagged_head) when is_integer(safe_block) and safe_block > 0 do
+    if contiguity_checked?(), do: cap_at_contiguous_block(safe_block, lagged_head), else: safe_block
+  end
+
+  defp contiguous_cap(safe_block, _lagged_head), do: safe_block
+
+  defp cap_at_contiguous_block(safe_block, lagged_head) do
+    case contiguous_block() do
+      nil ->
+        trusted = first_trusted_block(lagged_head || safe_block)
+        store_contiguous_block(trusted)
+        if trusted >= safe_block, do: safe_block, else: check_contiguity(trusted, safe_block)
+
+      checked when checked >= safe_block ->
+        safe_block
+
+      checked ->
+        check_contiguity(checked, safe_block)
+    end
+  end
+
+  # The first call trusts the chain up to the boundary of the last completed
+  # scan of the missing ranges collector, which registered every gap below it,
+  # or up to the lagged chain head while no scan has completed. The gaps
+  # registered below keep their own caps.
+  defp first_trusted_block(lagged_head) do
+    case MissingBlockRange.initial_scan_boundary() do
+      boundary when is_integer(boundary) -> min(boundary, lagged_head)
+      nil -> lagged_head
+    end
+  end
+
+  defp contiguity_checked? do
+    Application.get_env(:explorer, :chain_type) != :filecoin and open_block_range?()
+  end
+
+  # catchup fills the gaps up to the chain head only for a single block range
+  # open to the latest block, the default ("<FIRST_BLOCK>..latest")
+  defp open_block_range? do
+    case Application.get_env(:indexer, :block_ranges) do
+      block_ranges when is_binary(block_ranges) ->
+        match?([first_block] when is_integer(first_block), RangesHelper.parse_block_ranges(block_ranges))
+
+      _ ->
+        true
+    end
+  end
+
+  defp check_contiguity(checked, safe_block) do
+    to = min(safe_block, checked + contiguity_window())
+
+    contiguous =
+      case first_number_without_consensus_block(checked + 1, to) do
+        nil -> to
+        number -> number - 1
+      end
+
+    if contiguous > checked, do: store_contiguous_block(contiguous)
+
+    contiguous
+  end
+
+  # An anti join against the range of the `one_consensus_block_at_height` index.
+  # The bound on `blocks.number` repeats what the join implies: without it the
+  # planner may hash every consensus block of the chain.
+  defp first_number_without_consensus_block(from, to) do
+    %{rows: [[number]]} =
+      Repo.query!(
+        """
+        SELECT min(series.number)
+        FROM generate_series($1::bigint, $2::bigint) AS series(number)
+        WHERE NOT EXISTS (
+          SELECT 1 FROM blocks
+          WHERE blocks.number = series.number AND blocks.number BETWEEN $1 AND $2 AND blocks.consensus
+        )
+        """,
+        [from, to],
+        timeout: query_timeout()
+      )
+
+    number
+  end
+
+  defp store_contiguous_block(block_number) do
+    LastFetchedCounter.upsert_max(%{counter_type: @contiguous_block_counter_type, value: block_number})
+  end
+
+  defp contiguous_block do
+    case LastFetchedCounter.get(@contiguous_block_counter_type, nullable: true) do
+      nil -> nil
+      value -> Decimal.to_integer(value)
+    end
+  end
+
+  defp contiguity_window do
+    Application.get_env(:explorer, __MODULE__)[:contiguity_window] || 100_000
   end
 
   defp query_timeout do

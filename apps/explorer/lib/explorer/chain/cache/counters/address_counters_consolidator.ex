@@ -34,9 +34,10 @@ defmodule Explorer.Chain.Cache.Counters.AddressCountersConsolidator do
 
   `safe_block` stays a configurable lag behind the chain head so that shallow
   reorgs never invalidate consolidated ranges, and never advances past the
-  lowest missing block range or block pending re-fetch counter correction, so
-  that catchup and block re-fetch cannot make consolidated ranges lose or
-  double-count rows.
+  lowest missing block range, massive block, block pending re-fetch counter
+  correction or block number without a consensus block, so that catchup and
+  block re-fetch cannot make consolidated ranges lose or double-count rows (see
+  `Explorer.Chain.Cache.Counters.Consolidation.safe_block/0`).
 
   Each cycle starts by settling pending block re-fetch corrections via
   `Explorer.Chain.Cache.Counters.Consolidation.settle_pending_refetch_blocks/0`:
