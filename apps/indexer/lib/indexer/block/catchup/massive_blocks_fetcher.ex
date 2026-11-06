@@ -52,14 +52,7 @@ defmodule Indexer.Block.Catchup.MassiveBlocksFetcher do
     {result, new_low_priority_blocks} =
       case MassiveBlock.get_last_block_number(low_priority_blocks) do
         nil ->
-          case low_priority_blocks do
-            [number | rest] ->
-              failed_blocks = process_block(state.block_fetcher, number)
-              {:processed, rest ++ failed_blocks}
-
-            [] ->
-              {:empty, []}
-          end
+          retry_low_priority_block(state.block_fetcher, low_priority_blocks)
 
         number ->
           failed_blocks = process_block(state.block_fetcher, number)
@@ -68,7 +61,7 @@ defmodule Indexer.Block.Catchup.MassiveBlocksFetcher do
 
     case result do
       :processed -> send_new_task()
-      :empty -> send_new_task(@increased_interval)
+      _empty_or_failed_again -> send_new_task(@increased_interval)
     end
 
     {:noreply, %{state | low_priority_blocks: new_low_priority_blocks}}
@@ -78,6 +71,17 @@ defmodule Indexer.Block.Catchup.MassiveBlocksFetcher do
     {:noreply, state}
   end
 
+  # Only blocks that failed before are left: one that fails again waits for the
+  # next round instead of being retried at once.
+  defp retry_low_priority_block(_block_fetcher, []), do: {:empty, []}
+
+  defp retry_low_priority_block(block_fetcher, [number | rest]) do
+    case process_block(block_fetcher, number) do
+      [] -> {:processed, rest}
+      failed_blocks -> {:failed_again, rest ++ failed_blocks}
+    end
+  end
+
   @impl Fetcher
   def import(block_fetcher, options) do
     CatchupFetcher.import(block_fetcher, options)
@@ -85,10 +89,20 @@ defmodule Indexer.Block.Catchup.MassiveBlocksFetcher do
 
   defp process_block(block_fetcher, number) do
     case Fetcher.fetch_and_import_range(block_fetcher, number..number, %{timeout: :infinity}) do
-      {:ok, _result} ->
-        Logger.info("MassiveBlockFetcher successfully processed block #{inspect(number)}")
-        MassiveBlock.delete_block_number(number)
-        []
+      {:ok, %{errors: errors}} ->
+        case Enum.reject(errors, &null_round?/1) do
+          [] ->
+            Logger.info("MassiveBlockFetcher successfully processed block #{inspect(number)}")
+            MassiveBlock.delete_block_number(number)
+            []
+
+          # The node returned no block, so nothing was imported. The row stays for
+          # a retry: once deleted, the block would be neither indexed nor
+          # registered as missing until the missing ranges collector scans it again.
+          fetch_errors ->
+            Logger.error("MassiveBlockFetcher failed to fetch block #{inspect(number)}: #{inspect(fetch_errors)}")
+            [number]
+        end
 
       {:error, error} ->
         Logger.error("MassiveBlockFetcher failed: #{inspect(error)}")
@@ -99,6 +113,10 @@ defmodule Indexer.Block.Catchup.MassiveBlocksFetcher do
       Logger.error("MassiveBlockFetcher failed: #{inspect(error)}")
       [number]
   end
+
+  # a Filecoin null round has no block, as `Indexer.Block.Catchup.Fetcher` handles it
+  defp null_round?(%{message: "requested epoch was a null round" <> _}), do: true
+  defp null_round?(_error), do: false
 
   defp generate_block_fetcher(opts) do
     receipts_batch_size = Application.get_env(:indexer, :receipts_batch_size)

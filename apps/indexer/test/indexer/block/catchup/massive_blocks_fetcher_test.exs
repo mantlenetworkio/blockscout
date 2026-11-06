@@ -257,6 +257,125 @@ defmodule Indexer.Block.Catchup.MassiveBlocksFetcherTest do
     assert [] = Repo.all(MissingBlockRange)
   end
 
+  describe "a block the node does not return" do
+    test "stays in the massive blocks and is retried at the increased interval", %{
+      json_rpc_named_arguments: json_rpc_named_arguments
+    } do
+      %{number: block_number} = insert(:massive_block)
+      stub_block_response(block_number, %{code: -32000, message: "header not found"})
+
+      start_fetcher(json_rpc_named_arguments)
+
+      # the first try and an immediate retry of the failed block
+      assert_receive :block_requested, 5_000
+      assert_receive :block_requested, 5_000
+      # the fetcher has finished handling the retry
+      :sys.get_state(MassiveBlocksFetcher)
+
+      assert [%{number: ^block_number}] = Repo.all(MassiveBlock)
+      assert [] = Repo.all(Block)
+
+      # then it waits for the increased interval instead of retrying at once
+      refute_receive :block_requested, 1_000
+    end
+
+    test "is done when it is a null round", %{json_rpc_named_arguments: json_rpc_named_arguments} do
+      %{number: block_number} = insert(:massive_block)
+      stub_block_response(block_number, %{code: 1, message: "requested epoch was a null round"})
+
+      start_fetcher(json_rpc_named_arguments)
+
+      wait_until(:timer.seconds(10), fn -> Repo.all(MassiveBlock) == [] end)
+
+      assert [] = Repo.all(Block)
+    end
+
+    test "is imported by the immediate first retry once the node returns it", %{
+      json_rpc_named_arguments: json_rpc_named_arguments
+    } do
+      %{number: block_number} = insert(:massive_block)
+      block_quantity = integer_to_quantity(block_number)
+      test_pid = self()
+      attempts = :counters.new(1, [])
+
+      stub(EthereumJSONRPC.Mox, :json_rpc, fn
+        [%{id: id, method: "eth_getBlockByNumber", params: [^block_quantity, true]}], _options ->
+          send(test_pid, :block_requested)
+          :counters.add(attempts, 1, 1)
+
+          if :counters.get(attempts, 1) == 1 do
+            {:ok, [%{id: id, jsonrpc: "2.0", error: %{code: -32000, message: "header not found"}}]}
+          else
+            {:ok, [%{id: id, jsonrpc: "2.0", result: block_result(block_quantity)}]}
+          end
+
+        # the coin balance of the imported block's miner
+        [%{method: "eth_getBalance"} | _] = requests, _options ->
+          {:ok, Enum.map(requests, &%{id: &1.id, jsonrpc: "2.0", result: "0x0"})}
+      end)
+
+      start_fetcher(json_rpc_named_arguments)
+
+      assert_receive :block_requested, 5_000
+      assert_receive :block_requested, 5_000
+
+      wait_until(:timer.seconds(5), fn -> Repo.all(MassiveBlock) == [] end)
+
+      assert [%{number: ^block_number}] = Repo.all(Block)
+    end
+  end
+
+  # a Nethermind block without transactions, the variant of the default test case
+  defp block_result(block_quantity) do
+    %{
+      "author" => "0xe2ac1c6843a33f81ae4935e5ef1277a392990381",
+      "difficulty" => "0xfffffffffffffffffffffffffffffffe",
+      "extraData" => "0xd583010a068650617269747986312e32362e32826c69",
+      "gasLimit" => "0x7a1200",
+      "gasUsed" => "0x0",
+      "hash" => "0xf6b4b8c88df3ebd252ec476328334dc026cf66606a84fb769b3d3cbccc8471bd",
+      "logsBloom" => "0x" <> String.duplicate("0", 512),
+      "miner" => "0xe2ac1c6843a33f81ae4935e5ef1277a392990381",
+      "number" => block_quantity,
+      "parentHash" => "0x006edcaa1e6fde822908783bc4ef1ad3675532d542fce53537557391cfe34c3c",
+      "receiptsRoot" => "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+      "sha3Uncles" => "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+      "size" => "0x243",
+      "stateRoot" => "0x9a8111062667f7b162851a1cbbe8aece5ff12e761b3dcee93b787fcc12548cf7",
+      "timestamp" => "0x5b437f41",
+      "totalDifficulty" => "0x342337ffffffffffffffffffffffffed8d29bb",
+      "transactions" => [],
+      "transactionsRoot" => "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+      "uncles" => []
+    }
+  end
+
+  defp stub_block_response(block_number, error) do
+    block_quantity = integer_to_quantity(block_number)
+    test_pid = self()
+
+    stub(EthereumJSONRPC.Mox, :json_rpc, fn
+      [%{id: id, method: "eth_getBlockByNumber", params: [^block_quantity, true]}], _options ->
+        send(test_pid, :block_requested)
+        {:ok, [%{id: id, jsonrpc: "2.0", error: error}]}
+    end)
+  end
+
+  defp start_fetcher(json_rpc_named_arguments) do
+    start_supervised!({Task.Supervisor, name: Indexer.Block.Catchup.TaskSupervisor})
+    ContractCreatorOnDemand.start_link([[], []])
+    CoinBalanceCatchup.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+    InternalTransaction.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+    ContractCode.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+    Token.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+    TokenBalanceHistorical.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+    ReplacedTransaction.Supervisor.Case.start_supervised!()
+
+    start_supervised!(
+      {MassiveBlocksFetcher, [%{task_supervisor: Indexer.Block.Catchup.TaskSupervisor}, [name: MassiveBlocksFetcher]]}
+    )
+  end
+
   defp wait_until(timeout, producer) do
     parent = self()
     ref = make_ref()
