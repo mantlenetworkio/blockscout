@@ -665,16 +665,17 @@ defmodule Indexer.Helper do
 
   @doc """
     Fetches blocks info from the given list of events (logs).
-    Performs a specified number of retries (up to) if the first attempt returns error.
+    The blocks are requested in batches. The blocks fetched are kept, and the requests the node answers without a
+    block are sent again (see `get_blocks_batch/5`). Every attempt that fetches no block uses up one of the retries.
 
     ## Parameters
     - `events`: The list of events to retrieve block numbers from.
     - `json_rpc_named_arguments`: Configuration parameters for the JSON RPC connection.
-    - `retries`: Number of retry attempts if the request fails.
+    - `retries`: Number of attempts that may fetch no block before giving up.
     - `transaction_details`: Whether to include transaction details into the resulting list of blocks.
 
     ## Returns
-    - The list of blocks. The list is empty if the HTTP response returns error.
+    - The list of blocks. The blocks still not fetched once the retries are used up are left out.
   """
   @spec get_blocks_by_events(list(), EthereumJSONRPC.json_rpc_named_arguments(), non_neg_integer(), boolean()) :: [
           %{String.t() => any()}
@@ -690,18 +691,74 @@ defmodule Indexer.Helper do
     |> Blocks.requests(&ByNumber.request(&1, transaction_details, false))
     |> Enum.chunk_every(@block_by_number_chunk_size)
     |> Enum.reduce([], fn current_requests, results_acc ->
-      error_message =
-        &"Cannot fetch blocks with batch request. Error: #{inspect(&1)}. Request: #{inspect(current_requests)}"
-
-      # credo:disable-for-lines:3 Credo.Check.Refactor.Nesting
-      results =
-        case repeated_call(&json_rpc/2, [current_requests, json_rpc_named_arguments], error_message, retries) do
-          {:ok, results} -> Enum.map(results, fn %{result: result} -> result end)
-          {:error, _} -> []
-        end
-
-      results_acc ++ results
+      results_acc ++ get_blocks_batch(current_requests, json_rpc_named_arguments, retries)
     end)
+  end
+
+  # Fetches the blocks of `eth_getBlockByNumber` requests. A node can answer a part of a batch without a block: geth
+  # answers `response too large` to the requests left once the responses exceed its `--rpc.batch-response-max-size`
+  # (25 MB by default), which 50 blocks with their transactions can reach; behind a gateway, a lagging node can answer
+  # `null` and a rate limit can fail a part of a batch or all of it. So the blocks fetched are kept and only the other
+  # requests are sent again: at once when the attempt fetched a block, otherwise after a pause and in batches half as
+  # large as the largest one sent, which uses up one of the `retries_left`. The pause grows with every such attempt in a
+  # row.
+  @spec get_blocks_batch(
+          [Transport.request()],
+          EthereumJSONRPC.json_rpc_named_arguments(),
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: [%{String.t() => any()}]
+  defp get_blocks_batch(
+         requests,
+         json_rpc_named_arguments,
+         retries_left,
+         batch_size \\ @block_by_number_chunk_size,
+         retries_done \\ 0
+       ) do
+    {blocks, failed_requests, error} =
+      requests
+      |> Enum.chunk_every(batch_size)
+      |> Enum.reduce({[], [], nil}, fn batch, {blocks_acc, failed_acc, error_acc} ->
+        {blocks, failed, error} = send_blocks_batch(batch, json_rpc_named_arguments)
+        {blocks ++ blocks_acc, failed_acc ++ failed, error || error_acc}
+      end)
+
+    error_message = fn ->
+      "Cannot fetch blocks with batch request. Error: #{inspect(error)}. Request: #{inspect(requests)}"
+    end
+
+    cond do
+      failed_requests == [] ->
+        blocks
+
+      length(failed_requests) < length(requests) ->
+        blocks ++ get_blocks_batch(failed_requests, json_rpc_named_arguments, retries_left, batch_size)
+
+      retries_left <= 1 ->
+        Logger.error(error_message.())
+        []
+
+      true ->
+        Logger.error("#{error_message.()} Retrying...")
+        pause_before_retry(retries_done)
+        new_batch_size = max(div(min(batch_size, length(requests)), 2), 1)
+        get_blocks_batch(requests, json_rpc_named_arguments, retries_left - 1, new_batch_size, retries_done + 1)
+    end
+  end
+
+  # Sends a batch of `eth_getBlockByNumber` requests. Gives the blocks fetched, the requests answered without a block,
+  # and one of these answers (or the error of the whole request).
+  defp send_blocks_batch(batch, json_rpc_named_arguments) do
+    case json_rpc(batch, json_rpc_named_arguments) do
+      {:ok, responses} ->
+        fetched = for %{id: id, result: block} when not is_nil(block) <- responses, into: %{}, do: {id, block}
+        {answered, failed} = Enum.split_with(batch, &Map.has_key?(fetched, &1.id))
+        {Enum.map(answered, &Map.fetch!(fetched, &1.id)), failed, Enum.find(responses, &is_nil(Map.get(&1, :result)))}
+
+      {:error, reason} ->
+        {[], batch, reason}
+    end
   end
 
   @doc """
