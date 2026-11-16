@@ -95,6 +95,8 @@ defmodule BlockScoutWeb.Mixfile do
       # Need until https://github.com/absinthe-graphql/absinthe_relay/pull/125 is released, then can be removed
       # The current `absinthe_relay` is compatible though as shown from that PR
       {:ecto, "~> 3.3", override: true},
+      # Decodes brotli-compressed subblock frames (the ws-proxy compresses with --enable-compression)
+      {:ex_brotli, "~> 0.5.0"},
       {:ex_cldr, "~> 2.38"},
       {:ex_cldr_numbers, "~> 2.33"},
       {:ex_cldr_units, "~> 3.17"},
@@ -154,6 +156,8 @@ defmodule BlockScoutWeb.Mixfile do
       {:spandex_phoenix, "~> 1.0"},
       {:timex, "~> 3.7.1"},
       {:wallaby, "~> 0.30", only: :test, runtime: false},
+      # WebSocket client of the subblocks relay (BlockScoutWeb.Subblocks.Relay)
+      {:websockex, "~> 0.5.0"},
       # `:cowboy` `~> 2.0` and Phoenix 1.4 compatibility
       {:ex_json_schema, "~> 0.11.0"},
       {:ueberauth, "~> 0.7"},

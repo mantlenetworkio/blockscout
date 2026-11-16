@@ -5,7 +5,12 @@ defmodule BlockScoutWeb.Application do
   """
 
   use Application
-  use Utils.CompileTimeEnvHelper, disable_api?: [:block_scout_web, :disable_api?]
+
+  require Logger
+
+  use Utils.CompileTimeEnvHelper,
+    disable_api?: [:block_scout_web, :disable_api?],
+    chain_type: [:explorer, :chain_type]
 
   alias BlockScoutWeb.{Endpoint, HealthEndpoint, RateLimit.Hammer}
   alias BlockScoutWeb.Utility.RateLimitConfigHelper
@@ -65,6 +70,33 @@ defmodule BlockScoutWeb.Application do
   alias Indexer.Prometheus.Metrics, as: IndexerMetrics
   alias Indexer.Prometheus.RealtimeMetrics, as: IndexerRealtimeMetrics
 
+  @doc """
+  The subblocks relay and its buffer: started on API nodes of OP Stack chains when `SUBBLOCKS_WS_URL` is set.
+
+  They go after the endpoint, because the relay broadcasts through it.
+  """
+  @spec subblocks_children() :: [module()]
+  if @chain_type == :optimism do
+    def subblocks_children do
+      url = Application.get_env(:block_scout_web, BlockScoutWeb.Subblocks)[:ws_url]
+
+      cond do
+        url in [nil, ""] or Explorer.mode() not in [:api, :all] ->
+          []
+
+        # the relay is optional: a child that fails to start, or crashes on connecting, would stop the whole application
+        not match?({:ok, %URI{port: port}} when port in 1..65_535, WebSockex.Conn.parse_url(url)) ->
+          Logger.error("SUBBLOCKS_WS_URL is not a valid WebSocket URL, the subblocks relay is not started")
+          []
+
+        true ->
+          [BlockScoutWeb.Subblocks.Supervisor]
+      end
+    end
+  else
+    def subblocks_children, do: []
+  end
+
   defp indexer_metric_worker do
     if Explorer.mode() in [:indexer, :all] do
       [{IndexerMetrics, []}, {IndexerRealtimeMetrics, []}]
@@ -123,7 +155,7 @@ defmodule BlockScoutWeb.Application do
         base_workers ++ indexer_metric_worker(),
         [
           {Absinthe.Subscription, Endpoint}
-        ]
+        ] ++ subblocks_children()
       }
     end
   end

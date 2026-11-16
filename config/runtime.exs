@@ -133,6 +133,8 @@ config :block_scout_web, BlockScoutWeb.Notifier,
   block_broadcast_type:
     ConfigHelper.parse_catalog_value("BLOCK_BROADCAST_TYPE", ["block", "count"], true, "block") || :block
 
+config :block_scout_web, BlockScoutWeb.Subblocks, ws_url: ConfigHelper.safe_get_env("SUBBLOCKS_WS_URL", nil)
+
 config :block_scout_web, BlockScoutWeb.RealtimeEventHandler,
   max_batch_size: ConfigHelper.parse_integer_env_var("REALTIME_EVENT_HANDLERS_BATCH_SIZE", 100, min: 1)
 

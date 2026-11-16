@@ -15,9 +15,15 @@ defmodule BlockScoutWeb.V2.UserSocket do
   channel("token_instances:*", BlockScoutWeb.TokenInstanceChannel)
 
   case @chain_type do
-    :arbitrum -> channel("arbitrum:*", BlockScoutWeb.ArbitrumChannel)
-    :optimism -> channel("optimism:*", BlockScoutWeb.OptimismChannel)
-    _ -> nil
+    :arbitrum ->
+      channel("arbitrum:*", BlockScoutWeb.ArbitrumChannel)
+
+    :optimism ->
+      channel("optimism:*", BlockScoutWeb.OptimismChannel)
+      channel("subblocks:*", BlockScoutWeb.V2.SubblockChannel)
+
+    _ ->
+      nil
   end
 
   def connect(_params, socket) do
