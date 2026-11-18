@@ -517,7 +517,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
     failed_parent_paths =
       internal_transactions_params
       |> Enum.filter(& &1[:error])
-      |> Enum.map(&Enum.reverse([&1.transaction_hash | &1.trace_address]))
+      |> Enum.map(&Enum.reverse([transaction_key(&1) | &1.trace_address]))
       |> MapSet.new()
 
     internal_transactions_params
@@ -525,7 +525,7 @@ defmodule Indexer.Fetcher.InternalTransaction do
       if has_failed_parent?(
            failed_parent_paths,
            internal_transaction_param.trace_address,
-           [internal_transaction_param.transaction_hash]
+           [transaction_key(internal_transaction_param)]
          ) do
         # TODO: consider keeping these deleted fields in the reverted transactions
         internal_transaction_param
@@ -539,6 +539,12 @@ defmodule Indexer.Fetcher.InternalTransaction do
       end
     end)
   end
+
+  # Identifies the transaction of a trace by its position, as the import does: a node can return a placeholder
+  # transaction hash, e.g. op-geth returns the zero hash for every pre-Bedrock transaction of
+  # `debug_traceBlockByNumber`.
+  defp transaction_key(internal_transaction_param),
+    do: {internal_transaction_param.block_number, internal_transaction_param.transaction_index}
 
   defp has_failed_parent?(failed_parent_paths, [head | tail], reverse_path_acc) do
     MapSet.member?(failed_parent_paths, reverse_path_acc) or

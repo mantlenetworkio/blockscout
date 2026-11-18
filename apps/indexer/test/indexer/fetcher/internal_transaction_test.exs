@@ -705,6 +705,119 @@ defmodule Indexer.Fetcher.InternalTransactionTest do
              )
     end
 
+    test "a failed call reverts only the calls of its own transaction when the traces carry the zero transaction hash",
+         %{json_rpc_named_arguments: json_rpc_named_arguments} do
+      # A pre-Bedrock node answers `debug_traceBlockByNumber` without transaction hashes, and op-geth forwards
+      # that answer with the zero hash in every `txHash`.
+      zero_hash = "0x" <> String.duplicate("0", 64)
+
+      geth_config = Application.get_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth)
+
+      Application.put_env(
+        :ethereum_jsonrpc,
+        EthereumJSONRPC.Geth,
+        Keyword.merge(geth_config, block_traceable?: true, tracer: "call_tracer")
+      )
+
+      on_exit(fn -> Application.put_env(:ethereum_jsonrpc, EthereumJSONRPC.Geth, geth_config) end)
+
+      json_rpc_named_arguments =
+        Keyword.merge(json_rpc_named_arguments, variant: EthereumJSONRPC.Geth, transport: EthereumJSONRPC.Mox)
+
+      block_1 = insert(:block, number: 1)
+      :transaction |> insert() |> with_block(block_1, status: :ok)
+      block_1_transaction_1 = :transaction |> insert() |> with_block(block_1, status: :ok)
+      block_2 = insert(:block, number: 2)
+      block_2_transaction_0 = :transaction |> insert() |> with_block(block_2, status: :ok)
+
+      insert(:pending_block_operation, block_hash: block_1.hash, block_number: block_1.number)
+      insert(:pending_block_operation, block_hash: block_2.hash, block_number: block_2.number)
+
+      # a call frame as a callTracer returns it: a reverted frame has an error and no output
+      frame = fn from, to, fields ->
+        Map.merge(
+          %{
+            "type" => "CALL",
+            "from" => from,
+            "to" => to,
+            "value" => "0x0",
+            "gas" => "0x4e20",
+            "gasUsed" => "0x2710",
+            "input" => "0x01"
+          },
+          fields
+        )
+      end
+
+      a = "0x00000000000000000000000000000000000000a1"
+      b = "0x00000000000000000000000000000000000000b1"
+      c = "0x00000000000000000000000000000000000000c1"
+      d = "0x00000000000000000000000000000000000000d1"
+
+      # the top call [] succeeds, its subcall [0] reverts, which undoes the value transfer [0, 0] made before
+      reverting_trace =
+        frame.(a, b, %{
+          "output" => "0x",
+          "calls" => [
+            frame.(b, c, %{
+              "error" => "execution reverted",
+              "calls" => [frame.(c, d, %{"value" => "0x1", "input" => "0x", "output" => "0x"})]
+            })
+          ]
+        })
+
+      # the same calls without a revert
+      trace =
+        frame.(a, b, %{
+          "output" => "0x",
+          "calls" => [
+            frame.(b, c, %{
+              "output" => "0x",
+              "calls" => [frame.(c, d, %{"value" => "0x1", "input" => "0x", "output" => "0x"})]
+            })
+          ]
+        })
+
+      expect(EthereumJSONRPC.Mox, :json_rpc, fn requests, _options ->
+        {:ok,
+         Enum.map(requests, fn %{id: id, method: "debug_traceBlockByNumber", params: [quantity, _config]} ->
+           traces =
+             case quantity do
+               "0x1" -> [reverting_trace, trace]
+               "0x2" -> [trace]
+             end
+
+           %{id: id, result: Enum.map(traces, &%{"txHash" => zero_hash, "result" => &1})}
+         end)}
+      end)
+
+      CoinBalanceCatchup.Supervisor.Case.start_supervised!(json_rpc_named_arguments: json_rpc_named_arguments)
+      start_token_balance_fetcher(json_rpc_named_arguments)
+
+      assert :ok == InternalTransaction.run([1, 2], json_rpc_named_arguments)
+
+      errored_indexes = fn block_number, transaction_index ->
+        Repo.all(
+          from(it in Chain.InternalTransaction,
+            where:
+              it.block_number == ^block_number and it.transaction_index == ^transaction_index and
+                not is_nil(it.error_id),
+            order_by: it.index,
+            select: it.index
+          )
+        )
+      end
+
+      # the reverted call [0] and the call [0, 0] it undid
+      assert [1, 2] == errored_indexes.(1, 0)
+      assert [] == errored_indexes.(1, 1)
+      assert [] == errored_indexes.(2, 0)
+
+      for %Chain.Transaction{hash: hash} <- [block_1_transaction_1, block_2_transaction_0] do
+        assert %Chain.Transaction{has_error_in_internal_transactions: false} = Repo.get(Chain.Transaction, hash)
+      end
+    end
+
     test "handles failure by retrying only unique numbers", %{
       json_rpc_named_arguments: json_rpc_named_arguments
     } do
