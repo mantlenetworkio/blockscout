@@ -908,6 +908,26 @@ config :explorer, Explorer.Migrator.ReindexBlocksWithStaleInternalTransactions,
     ConfigHelper.parse_integer_env_var("MIGRATION_REINDEX_BLOCKS_WITH_STALE_INTERNAL_TRANSACTIONS_CONCURRENCY", 1),
   timeout: ConfigHelper.parse_time_env_var("MIGRATION_REINDEX_BLOCKS_WITH_STALE_INTERNAL_TRANSACTIONS_TIMEOUT", "0s")
 
+enqueue_blocks_for_internal_transactions_first_block =
+  ConfigHelper.parse_integer_or_nil_env_var("MIGRATION_ENQUEUE_BLOCKS_FOR_INTERNAL_TRANSACTIONS_FIRST_BLOCK")
+
+enqueue_blocks_for_internal_transactions_last_block =
+  ConfigHelper.parse_integer_or_nil_env_var("MIGRATION_ENQUEUE_BLOCKS_FOR_INTERNAL_TRANSACTIONS_LAST_BLOCK")
+
+# The migration runs only for a complete range: both bounds set, the first one not above the last one.
+config :explorer, Explorer.Migrator.EnqueueBlocksForInternalTransactions,
+  first_block: enqueue_blocks_for_internal_transactions_first_block,
+  last_block: enqueue_blocks_for_internal_transactions_last_block,
+  batch_size:
+    ConfigHelper.parse_integer_env_var("MIGRATION_ENQUEUE_BLOCKS_FOR_INTERNAL_TRANSACTIONS_BATCH_SIZE", 1000, min: 1),
+  concurrency:
+    ConfigHelper.parse_integer_env_var("MIGRATION_ENQUEUE_BLOCKS_FOR_INTERNAL_TRANSACTIONS_CONCURRENCY", 1, min: 1),
+  timeout: ConfigHelper.parse_time_env_var("MIGRATION_ENQUEUE_BLOCKS_FOR_INTERNAL_TRANSACTIONS_TIMEOUT", "0s", min: 0),
+  enabled:
+    is_integer(enqueue_blocks_for_internal_transactions_first_block) and
+      is_integer(enqueue_blocks_for_internal_transactions_last_block) and
+      enqueue_blocks_for_internal_transactions_first_block <= enqueue_blocks_for_internal_transactions_last_block
+
 config :explorer, Explorer.Migrator.RestoreOmittedWETHTransfers,
   concurrency: ConfigHelper.parse_integer_env_var("MIGRATION_RESTORE_OMITTED_WETH_TOKEN_TRANSFERS_CONCURRENCY", 5),
   batch_size: ConfigHelper.parse_integer_env_var("MIGRATION_RESTORE_OMITTED_WETH_TOKEN_TRANSFERS_BATCH_SIZE", 50),
