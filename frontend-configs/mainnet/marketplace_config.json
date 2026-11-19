@@ -295,8 +295,8 @@
   },
   {
     "id": "3janexyz",
-    "title": "3Janexyz",
-    "author": "3Janexyz",
+    "title": "3Jane",
+    "author": "3Jane",
     "shortDescription": "3Jane is a peer-to-pool, credit-based money market on Ethereum.",
     "description": "3Jane is a peer-to-pool, credit-based money market on Ethereum.",
     "categories": [
@@ -386,8 +386,8 @@
   },
   {
     "id": "kucoin",
-    "title": "Kucoin",
-    "author": "Kucoin",
+    "title": "KuCoin",
+    "author": "KuCoin",
     "shortDescription": "Leading global crypto platform built on trust | 40M+ users worldwide",
     "description": "Leading global crypto platform built on trust | 40M+ users worldwide",
     "categories": [
@@ -401,10 +401,10 @@
   },
   {
     "id": "gate-io",
-    "title": "Gate.io",
-    "author": "Gate.io",
-    "shortDescription": "Gateway to Crypto. Trade over cryptocurrencies safely, quickly, and easily.",
-    "description": "Gateway to Crypto. Trade over cryptocurrencies safely, quickly, and easily.",
+    "title": "Gate",
+    "author": "Gate",
+    "shortDescription": "Gateway to Crypto. Trade cryptocurrencies safely, quickly, and easily.",
+    "description": "Gateway to Crypto. Trade cryptocurrencies safely, quickly, and easily.",
     "categories": [
       "Exchanges"
     ],
@@ -463,8 +463,8 @@
     "id": "mexc",
     "title": "MEXC",
     "author": "MEXC",
-    "shortDescription": "Your 0-Fee Gateway to Infinite Opportunities Trade Crypto, Stocks, Gold, Silver, Oil and Prediction Markets in One Place.",
-    "description": "Your 0-Fee Gateway to Infinite Opportunities Trade Crypto, Stocks, Gold, Silver, Oil and Prediction Markets in One Place.",
+    "shortDescription": "Your 0-Fee Gateway to Infinite Opportunities. Trade Crypto, Stocks, Gold, Silver, Oil and Prediction Markets in One Place.",
+    "description": "Your 0-Fee Gateway to Infinite Opportunities. Trade Crypto, Stocks, Gold, Silver, Oil and Prediction Markets in One Place.",
     "categories": [
       "Exchanges"
     ],
@@ -560,6 +560,7 @@
       "Exchanges"
     ],
     "logo": "https://raw.githubusercontent.com/mantlenetworkio/blockscout/mantle-elysium/frontend-configs/assets/ecosystem/coinw.png",
+    "logoDarkMode": "https://raw.githubusercontent.com/mantlenetworkio/blockscout/mantle-elysium/frontend-configs/assets/ecosystem/coinw-dark.png",
     "url": "https://www.coinw.com/",
     "site": "https://www.coinw.com/",
     "external": true,
@@ -582,16 +583,16 @@
   },
   {
     "id": "korbit",
-    "title": "Korbit",
-    "author": "Korbit",
-    "shortDescription": "Korbit, South Korea's first digital asset exchange.",
-    "description": "Korbit, South Korea's first digital asset exchange.",
+    "title": "Digital X",
+    "author": "Digital X",
+    "shortDescription": "Digital X by Mirae Asset (formerly Korbit), South Korea's first digital asset exchange.",
+    "description": "Digital X by Mirae Asset (formerly Korbit), South Korea's first digital asset exchange.",
     "categories": [
       "Exchanges"
     ],
     "logo": "https://raw.githubusercontent.com/mantlenetworkio/blockscout/mantle-elysium/frontend-configs/assets/ecosystem/korbit.png",
-    "url": "https://www.korbit.co.kr/",
-    "site": "https://www.korbit.co.kr/",
+    "url": "https://digitalx.miraeasset.com/",
+    "site": "https://digitalx.miraeasset.com/",
     "external": true,
     "internalWallet": false
   },
@@ -644,8 +645,8 @@
     "id": "biconomy",
     "title": "Biconomy",
     "author": "Biconomy",
-    "shortDescription": "Global Leading CryptoExchange",
-    "description": "Global Leading CryptoExchange",
+    "shortDescription": "Global Leading Crypto Exchange",
+    "description": "Global Leading Crypto Exchange",
     "categories": [
       "Exchanges"
     ],
@@ -657,8 +658,8 @@
   },
   {
     "id": "coindcx",
-    "title": "Coindcx",
-    "author": "Coindcx",
+    "title": "CoinDCX",
+    "author": "CoinDCX",
     "shortDescription": "Your premier platform for crypto",
     "description": "Your premier platform for crypto",
     "categories": [
@@ -864,8 +865,8 @@
       "DeFi"
     ],
     "logo": "https://raw.githubusercontent.com/mantlenetworkio/blockscout/mantle-elysium/frontend-configs/assets/ecosystem/compound.png",
-    "url": "https://compound.finance/",
-    "site": "https://compound.finance/",
+    "url": "https://www.compound.xyz/",
+    "site": "https://www.compound.xyz/",
     "external": true,
     "internalWallet": false
   },
@@ -886,8 +887,8 @@
   },
   {
     "id": "meth-protocol",
-    "title": "mETH protocol",
-    "author": "mETH protocol",
+    "title": "mETH Protocol",
+    "author": "mETH Protocol",
     "shortDescription": "Liquid staking on Ethereum, built for institutional scale.",
     "description": "Liquid staking on Ethereum, built for institutional scale.",
     "categories": [
@@ -904,8 +905,8 @@
     "id": "function-fbtc",
     "title": "Function (FBTC)",
     "author": "Function (FBTC)",
-    "shortDescription": "Bitcoin,Financialized. With FBTC, Function transforms Bitcoin into a liquid, composable, and productive reserve asset for DeFi.",
-    "description": "Bitcoin,Financialized. With FBTC, Function transforms Bitcoin into a liquid, composable, and productive reserve asset for DeFi.",
+    "shortDescription": "Bitcoin, Financialized. With FBTC, Function transforms Bitcoin into a liquid, composable, and productive reserve asset for DeFi.",
+    "description": "Bitcoin, Financialized. With FBTC, Function transforms Bitcoin into a liquid, composable, and productive reserve asset for DeFi.",
     "categories": [
       "DeFi"
     ],
@@ -988,21 +989,6 @@
     "logo": "https://raw.githubusercontent.com/mantlenetworkio/blockscout/mantle-elysium/frontend-configs/assets/ecosystem/banxa.png",
     "url": "https://banxa.com/id/",
     "site": "https://banxa.com/id/",
-    "external": true,
-    "internalWallet": false
-  },
-  {
-    "id": "printr",
-    "title": "PRINTR",
-    "author": "PRINTR",
-    "shortDescription": "The most configurable launchpad. Deploy on any chain in one click.",
-    "description": "The most configurable launchpad. Deploy on any chain in one click.",
-    "categories": [
-      "DeFi"
-    ],
-    "logo": "https://raw.githubusercontent.com/mantlenetworkio/blockscout/mantle-elysium/frontend-configs/assets/ecosystem/printr.png",
-    "url": "https://www.printr.money/",
-    "site": "https://www.printr.money/",
     "external": true,
     "internalWallet": false
   },
@@ -1098,8 +1084,8 @@
   },
   {
     "id": "beefy-finance",
-    "title": "Beefy finance",
-    "author": "Beefy finance",
+    "title": "Beefy",
+    "author": "Beefy",
     "shortDescription": "The Yield Optimizer. The easiest way to earn more crypto. Autocompound tokens on Beefy",
     "description": "The Yield Optimizer. The easiest way to earn more crypto. Autocompound tokens on Beefy",
     "categories": [
@@ -1249,8 +1235,8 @@
   },
   {
     "id": "elfaai",
-    "title": "ElfaAI",
-    "author": "ElfaAI",
+    "title": "Elfa AI",
+    "author": "Elfa AI",
     "shortDescription": "Supercharge Agent Awareness. Our goal is to power the next 1 million agents with our real-time intelligence stack built for the finance markets. Plug in. Think deeper. Trade smarter.",
     "description": "Supercharge Agent Awareness. Our goal is to power the next 1 million agents with our real-time intelligence stack built for the finance markets. Plug in. Think deeper. Trade smarter.",
     "categories": [
@@ -1280,8 +1266,8 @@
   },
   {
     "id": "altlayer",
-    "title": "Altlayer",
-    "author": "Altlayer",
+    "title": "AltLayer",
+    "author": "AltLayer",
     "shortDescription": "AI Infrastructure for On-Chain Systems. AltLayer builds infrastructure and autonomous agents for interacting with on-chain systems. Explore blockchain data, automate workflows, and build intelligent applications on decentralized networks.",
     "description": "AI Infrastructure for On-Chain Systems. AltLayer builds infrastructure and autonomous agents for interacting with on-chain systems. Explore blockchain data, automate workflows, and build intelligent applications on decentralized networks.",
     "categories": [
@@ -1310,8 +1296,8 @@
   },
   {
     "id": "open-gradient",
-    "title": "Open Gradient",
-    "author": "Open Gradient",
+    "title": "OpenGradient",
+    "author": "OpenGradient",
     "shortDescription": "Advancing open, verifiable AI infrastructure. We support the growth of the OpenGradient ecosystem through research, governance, and community development.",
     "description": "Advancing open, verifiable AI infrastructure. We support the growth of the OpenGradient ecosystem through research, governance, and community development.",
     "categories": [
@@ -1325,10 +1311,10 @@
   },
   {
     "id": "quackai",
-    "title": "QuackAI",
-    "author": "QuackAI",
-    "shortDescription": "The Universal Gasless Authorization Layer Secure, frictionless, and auditable payment authorization.",
-    "description": "The Universal Gasless Authorization Layer Secure, frictionless, and auditable payment authorization.",
+    "title": "Quack AI",
+    "author": "Quack AI",
+    "shortDescription": "The Universal Gasless Authorization Layer. Secure, frictionless, and auditable payment authorization.",
+    "description": "The Universal Gasless Authorization Layer. Secure, frictionless, and auditable payment authorization.",
     "categories": [
       "AI"
     ],
@@ -1355,8 +1341,8 @@
   },
   {
     "id": "piverse",
-    "title": "Piverse",
-    "author": "Piverse",
+    "title": "Pieverse",
+    "author": "Pieverse",
     "shortDescription": "Provision a Web3-native AI agent for Line, Kakao, WhatsApp, and other chat apps. Pieverse handles wallet creation, seed phrase custody, and setup.",
     "description": "Provision a Web3-native AI agent for Line, Kakao, WhatsApp, and other chat apps. Pieverse handles wallet creation, seed phrase custody, and setup.",
     "categories": [
@@ -1400,8 +1386,8 @@
   },
   {
     "id": "minds-by-animoca",
-    "title": "Minds by animoca",
-    "author": "Minds by animoca",
+    "title": "Minds by Animoca",
+    "author": "Minds by Animoca",
     "shortDescription": "An agentic, persistent AI that starts with a message on Telegram or email. No app or coding required. Personal. Persistent. Portable.",
     "description": "An agentic, persistent AI that starts with a message on Telegram or email. No app or coding required. Personal. Persistent. Portable.",
     "categories": [
@@ -1415,8 +1401,8 @@
   },
   {
     "id": "arkham-intellegence",
-    "title": "Arkham Intellegence",
-    "author": "Arkham Intellegence",
+    "title": "Arkham Intelligence",
+    "author": "Arkham Intelligence",
     "shortDescription": "Trade with Intelligence.",
     "description": "Trade with Intelligence.",
     "categories": [
@@ -1476,8 +1462,8 @@
   },
   {
     "id": "succint",
-    "title": "Succint",
-    "author": "Succint",
+    "title": "Succinct",
+    "author": "Succinct",
     "shortDescription": "Succinct is an applied cryptography company turning frontier research into products for the internet.",
     "description": "Succinct is an applied cryptography company turning frontier research into products for the internet.",
     "categories": [
@@ -1537,10 +1523,10 @@
   },
   {
     "id": "hackquest",
-    "title": "Hackquest",
-    "author": "Hackquest",
-    "shortDescription": "#1 Web3&AI dev education platform by traffic. Learn coding, join hackathon, build startup.",
-    "description": "#1 Web3&AI dev education platform by traffic. Learn coding, join hackathon, build startup.",
+    "title": "HackQuest",
+    "author": "HackQuest",
+    "shortDescription": "#1 Web3 & AI dev education platform by traffic. Learn coding, join hackathon, build startup.",
+    "description": "#1 Web3 & AI dev education platform by traffic. Learn coding, join hackathon, build startup.",
     "categories": [
       "Infra"
     ],
@@ -1675,8 +1661,8 @@
     "id": "alchemy",
     "title": "Alchemy",
     "author": "Alchemy",
-    "shortDescription": "Infrastructure that moves billions at scale The complete blockchain developer platform trusted by leading fintechs and developers worldwide.",
-    "description": "Infrastructure that moves billions at scale The complete blockchain developer platform trusted by leading fintechs and developers worldwide.",
+    "shortDescription": "Infrastructure that moves billions at scale. The complete blockchain developer platform trusted by leading fintechs and developers worldwide.",
+    "description": "Infrastructure that moves billions at scale. The complete blockchain developer platform trusted by leading fintechs and developers worldwide.",
     "categories": [
       "Infra"
     ],
@@ -1703,10 +1689,10 @@
   },
   {
     "id": "galxe",
-    "title": "galxe",
-    "author": "galxe",
-    "shortDescription": "Your Web3 Growth Engine Build Smarter. Scale Faster. Engage Better.",
-    "description": "Your Web3 Growth Engine Build Smarter. Scale Faster. Engage Better.",
+    "title": "Galxe",
+    "author": "Galxe",
+    "shortDescription": "Your Web3 Growth Engine. Build Smarter. Scale Faster. Engage Better.",
+    "description": "Your Web3 Growth Engine. Build Smarter. Scale Faster. Engage Better.",
     "categories": [
       "Infra"
     ],
@@ -1748,24 +1734,9 @@
     "internalWallet": false
   },
   {
-    "id": "questn",
-    "title": "QuestN",
-    "author": "QuestN",
-    "shortDescription": "QuestN, AI for Airdrops. Start Earning",
-    "description": "QuestN, AI for Airdrops. Start Earning",
-    "categories": [
-      "Infra"
-    ],
-    "logo": "https://raw.githubusercontent.com/mantlenetworkio/blockscout/mantle-elysium/frontend-configs/assets/ecosystem/questn.png",
-    "url": "http://www.questn.com/",
-    "site": "http://www.questn.com/",
-    "external": true,
-    "internalWallet": false
-  },
-  {
     "id": "zk-link",
-    "title": "zk.Link",
-    "author": "zk.Link",
+    "title": "zkLink",
+    "author": "zkLink",
     "shortDescription": "A Thousand Blockchains & Rollups, Aggregated. Build on the world’s first ZK Aggregated Layer 3 and access limitless liquidity with zkLink's Rollup solutions.",
     "description": "A Thousand Blockchains & Rollups, Aggregated. Build on the world’s first ZK Aggregated Layer 3 and access limitless liquidity with zkLink's Rollup solutions.",
     "categories": [
@@ -1797,8 +1768,8 @@
     "id": "mini-bridge",
     "title": "Mini Bridge",
     "author": "Mini Bridge",
-    "shortDescription": "Free&open source omni-chain analytical tools",
-    "description": "Free&open source omni-chain analytical tools",
+    "shortDescription": "Free & open-source omni-chain analytical tools",
+    "description": "Free & open-source omni-chain analytical tools",
     "categories": [
       "Infra"
     ],
@@ -1932,8 +1903,8 @@
   },
   {
     "id": "cede-store",
-    "title": "Cede.store",
-    "author": "Cede.store",
+    "title": "Cede Hub",
+    "author": "Cede Hub",
     "shortDescription": "The first Trade-to-Earn platform. Generate volume and earn $USDT",
     "description": "The first Trade-to-Earn platform. Generate volume and earn $USDT",
     "categories": [
@@ -2147,8 +2118,8 @@
     "id": "owlto-finance",
     "title": "Owlto Finance",
     "author": "Owlto Finance",
-    "shortDescription": "An intent-centric interoperability protocol, \"Bridge the World with Al Agent\".",
-    "description": "An intent-centric interoperability protocol, \"Bridge the World with Al Agent\".",
+    "shortDescription": "An intent-centric interoperability protocol, \"Bridge the World with AI Agent\".",
+    "description": "An intent-centric interoperability protocol, \"Bridge the World with AI Agent\".",
     "categories": [
       "Infra"
     ],
@@ -2160,8 +2131,8 @@
   },
   {
     "id": "drpc",
-    "title": "DRPC",
-    "author": "DRPC",
+    "title": "dRPC",
+    "author": "dRPC",
     "shortDescription": "AI-Powered Infrastructure for dApps and Chains. Modular RPC solutions to launch, scale, and monitor your Web3 infra.",
     "description": "AI-Powered Infrastructure for dApps and Chains. Modular RPC solutions to launch, scale, and monitor your Web3 infra.",
     "categories": [
