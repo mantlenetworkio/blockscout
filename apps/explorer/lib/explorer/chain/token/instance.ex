@@ -1119,11 +1119,10 @@ defmodule Explorer.Chain.Token.Instance do
   The function filters token instances based on the following criteria:
     - The instance is not banned (`is_nil(instance.is_banned) or not instance.is_banned`).
     - The instance has an error (`not is_nil(instance.error)`).
-    - The error type is not `:marked_to_refetch`.
     - The `refetch_after` field is either `nil` or in the past.
 
   The instances are ordered by:
-    - `refetch_after` in ascending order.
+    - `refetch_after` in ascending order, `nil` first.
     - Errors in `high_priority` in descending order.
     - Errors in `negative_priority` in ascending order.
 
@@ -1140,6 +1139,27 @@ defmodule Explorer.Chain.Token.Instance do
         ) :: {:ok, accumulator}
         when accumulator: term()
   def stream_token_instances_with_error(initial, reducer, limited? \\ false) when is_function(reducer, 2) do
+    token_instances_with_error_query()
+    |> Chain.add_fetcher_limit(limited?)
+    |> Repo.stream_reduce(initial, reducer)
+  end
+
+  @doc """
+  Returns up to `limit` token instances with errors that are due for a retry, in the order of
+  `stream_token_instances_with_error/3`.
+
+  The rows are read with a single query rather than streamed inside a transaction, so no transaction
+  stays open while the caller hands them out. Like the stream, the query has no timeout: it scans
+  every errored instance to sort the due ones.
+  """
+  @spec token_instances_to_retry(pos_integer()) :: [map()]
+  def token_instances_to_retry(limit) do
+    token_instances_with_error_query()
+    |> limit(^limit)
+    |> Repo.all(timeout: :infinity)
+  end
+
+  defp token_instances_with_error_query do
     # likely to get valid metadata
     high_priority = ["request error: 429", ":checkout_timeout"]
     # almost impossible to get valid metadata
@@ -1153,13 +1173,13 @@ defmodule Explorer.Chain.Token.Instance do
       contract_address_hash: instance.token_contract_address_hash,
       token_id: instance.token_id
     })
+    # Collections marked for refetch on demand have no `refetch_after`. Sorted last, they would wait
+    # behind every dated retry, and a batch that never gets past the dated rows would never reach them.
     |> order_by([instance],
-      asc: instance.refetch_after,
+      asc_nulls_first: instance.refetch_after,
       desc: instance.error in ^high_priority,
       asc: instance.error in ^negative_priority
     )
-    |> Chain.add_fetcher_limit(limited?)
-    |> Repo.stream_reduce(initial, reducer)
   end
 
   @doc """

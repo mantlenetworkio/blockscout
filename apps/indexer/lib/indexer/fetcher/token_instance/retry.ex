@@ -11,7 +11,6 @@ defmodule Indexer.Fetcher.TokenInstance.Retry do
 
   alias Explorer.Chain.Token.Instance
   alias Indexer.BufferedTask
-  alias Indexer.Helper, as: IndexerHelper
 
   @behaviour BufferedTask
 
@@ -30,15 +29,16 @@ defmodule Indexer.Fetcher.TokenInstance.Retry do
 
   @impl BufferedTask
   def init(initial_acc, reducer, _) do
-    {:ok, acc} =
-      Instance.stream_token_instances_with_error(
-        initial_acc,
-        fn data, acc ->
-          IndexerHelper.reduce_if_queue_is_not_full(data, acc, reducer, __MODULE__)
-        end
-      )
-
-    acc
+    # Read one bounded batch with a plain query. Streaming every failed instance waited for queue
+    # space inside the stream's transaction, which stayed idle for hours on a large backlog and held
+    # back vacuum for the whole database. The BufferedTask polls again only once the queue has
+    # drained, so the queue holds at most one batch and needs no back-pressure here.
+    # The limit (INDEXER_TOKEN_INSTANCE_RETRY_INIT_QUERY_LIMIT) should exceed batch size × concurrency:
+    # if the workers take the whole batch at once, init ends with an empty queue and the next poll
+    # waits INDEXER_FETCHER_INIT_DELAY.
+    Application.get_env(:indexer, __MODULE__)[:init_limit]
+    |> Instance.token_instances_to_retry()
+    |> Enum.reduce(initial_acc, reducer)
   end
 
   @impl BufferedTask
