@@ -1270,23 +1270,30 @@ defmodule Indexer.BufferedTask do
 
   # Schedules the next buffer flush based on the flush_interval.
   #
-  # If the flush_interval is set to `:infinity`, no flush is scheduled and the
-  # state is returned unchanged. Otherwise, a timer is set to send a `:flush`
-  # message after the specified interval.
+  # If the flush_interval is set to `:infinity`, or a flush is already pending,
+  # no flush is scheduled and the state is returned unchanged. Otherwise, a timer
+  # is set to send a `:flush` message after the specified interval.
   #
   # ## Parameters
   # - `state`: The current state of the BufferedTask. Must include `:flush_interval`.
   #
   # ## Returns
   # - The updated state with the new flush_timer if a flush was scheduled,
-  #   or the unchanged state if flush_interval is :infinity.
+  #   or the unchanged state otherwise.
   @spec schedule_next_buffer_flush(%__MODULE__{flush_interval: timeout() | :infinity}) :: t()
   defp schedule_next_buffer_flush(%__MODULE__{} = state) do
-    if state.flush_interval == :infinity do
-      state
-    else
-      timer = Process.send_after(self(), :flush, state.flush_interval)
-      %__MODULE__{state | flush_timer: timer}
+    cond do
+      state.flush_interval == :infinity ->
+        state
+
+      # Every flush schedules the next one, and polling tasks also get here on every poll. A second
+      # timer would start another periodic chain, and replacing the pending one would postpone it.
+      state.flush_timer && Process.read_timer(state.flush_timer) ->
+        state
+
+      true ->
+        timer = Process.send_after(self(), :flush, state.flush_interval)
+        %__MODULE__{state | flush_timer: timer}
     end
   end
 

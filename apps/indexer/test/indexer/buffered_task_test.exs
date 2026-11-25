@@ -289,4 +289,67 @@ defmodule Indexer.BufferedTaskTest do
       assert_receive :flush, @assert_receive_timeout
     end
   end
+
+  describe "flush timer" do
+    defmodule EmptyPollingTask do
+      @behaviour BufferedTask
+
+      def init(acc, _reducer, _state), do: acc
+
+      def run(_entries, _state), do: :ok
+    end
+
+    setup do
+      previous_delay = Application.get_env(:indexer, :fetcher_init_delay)
+      Application.put_env(:indexer, :fetcher_init_delay, 1)
+      on_exit(fn -> Application.put_env(:indexer, :fetcher_init_delay, previous_delay) end)
+    end
+
+    # Every flush schedules the next one. Scheduling a flush while one was pending
+    # started one more periodic chain on every poll, so a polling task handled more
+    # and more `:flush` messages the longer it ran.
+    test "a polling task keeps a single periodic flush" do
+      start_supervised!({Task.Supervisor, name: BufferedTaskSup})
+
+      pid =
+        start_supervised!(
+          {BufferedTask,
+           [
+             {EmptyPollingTask,
+              state: nil,
+              task_supervisor: BufferedTaskSup,
+              flush_interval: @flush_interval,
+              max_batch_size: @max_batch_size,
+              max_concurrency: 2,
+              poll: true}
+           ]}
+        )
+
+      # let it poll for a while
+      Process.sleep(10 * @flush_interval)
+
+      started_at = System.monotonic_time(:millisecond)
+      :erlang.trace(pid, true, [:receive])
+      Process.sleep(6 * @flush_interval)
+      :erlang.trace(pid, false, [:receive])
+      window = System.monotonic_time(:millisecond) - started_at
+
+      # wait until every trace message of the window has arrived
+      ref = :erlang.trace_delivered(pid)
+      assert_receive {:trace_delivered, ^pid, ^ref}
+
+      # a single chain flushes about once per interval in the window, and keeps
+      # flushing; the old code flushed dozens of times
+      assert count_flushes(0) in 1..(div(window, @flush_interval) + 2)
+    end
+  end
+
+  defp count_flushes(count) do
+    receive do
+      {:trace, _pid, :receive, :flush} -> count_flushes(count + 1)
+      {:trace, _pid, :receive, _message} -> count_flushes(count)
+    after
+      0 -> count
+    end
+  end
 end
