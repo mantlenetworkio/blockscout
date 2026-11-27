@@ -302,6 +302,7 @@ defmodule BlockScoutWeb.Chain do
     market_cap_decimal = decimal_parse(market_cap_string)
 
     fiat_value_decimal = decimal_parse(params["fiat_value"])
+    onchain_market_cap_decimal = decimal_parse(params["onchain_market_cap"])
 
     holders_count = parse_integer(holders_count_string)
     token_name = if is_name_null, do: nil, else: name_string
@@ -313,6 +314,7 @@ defmodule BlockScoutWeb.Chain do
             @default_paging_options
             | key: %{
                 fiat_value: fiat_value_decimal,
+                onchain_market_cap: onchain_market_cap_decimal,
                 circulating_market_cap: market_cap_decimal,
                 holder_count: holders_count,
                 name: token_name,
@@ -340,6 +342,7 @@ defmodule BlockScoutWeb.Chain do
     market_cap_decimal = decimal_parse(market_cap_string)
 
     fiat_value_decimal = decimal_parse(params[:fiat_value])
+    onchain_market_cap_decimal = decimal_parse(params[:onchain_market_cap])
 
     holders_count = parse_integer(holders_count_string)
     token_name = if is_name_null, do: nil, else: name_string
@@ -351,6 +354,7 @@ defmodule BlockScoutWeb.Chain do
             @default_paging_options
             | key: %{
                 fiat_value: fiat_value_decimal,
+                onchain_market_cap: onchain_market_cap_decimal,
                 circulating_market_cap: market_cap_decimal,
                 holder_count: holders_count,
                 name: token_name,
@@ -896,6 +900,9 @@ defmodule BlockScoutWeb.Chain do
 
   def split_list_by_page(list_plus_one), do: Enum.split(list_plus_one, @page_size)
 
+  # next_page_params issued before a key existed (e.g. onchain_market_cap) come back without it
+  defp decimal_parse(nil), do: nil
+
   defp decimal_parse(input_string) do
     case Decimal.parse(input_string) do
       {decimal, ""} -> decimal
@@ -945,12 +952,15 @@ defmodule BlockScoutWeb.Chain do
   defp paging_params(%Token{
          contract_address_hash: contract_address_hash,
          circulating_market_cap: circulating_market_cap,
+         onchain_market_cap: onchain_market_cap,
          holder_count: holders_count,
          name: token_name,
          fiat_value: fiat_value
        }) do
     %{
       market_cap: circulating_market_cap,
+      # exact, not Decimal.normalize/1: it rounds to 28 significant digits and would shift the keyset
+      onchain_market_cap: onchain_market_cap,
       holders_count: holders_count,
       contract_address_hash: contract_address_hash,
       name: token_name,

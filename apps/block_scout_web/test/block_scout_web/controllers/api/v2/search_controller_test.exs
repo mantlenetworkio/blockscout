@@ -237,6 +237,54 @@ defmodule BlockScoutWeb.API.V2.SearchControllerTest do
       assert item not in response["items"]
     end
 
+    test "finds a word inside token symbols and ranks tokens by on-chain market cap", %{conn: conn} do
+      # legacy MNT: no supply here, the all-chain market cap of MNT
+      legacy_mnt =
+        insert(:token, name: "Mantle Token", symbol: "MNT", total_supply: 0, circulating_market_cap: 1_270_000_000)
+
+      wmnt =
+        insert(:token,
+          name: "Wrapped Mantle",
+          symbol: "WMNT",
+          fiat_value: Decimal.new("0.38"),
+          total_supply: 16_000_000 * 1_000_000_000_000_000_000,
+          circulating_market_cap: 6_000_000
+        )
+
+      unpriced = insert(:token, name: "Lendle MNT", symbol: "lendleMNT", fiat_value: nil)
+      insert(:token, name: "Ether", symbol: "WETH")
+
+      response = conn |> get("/api/v2/search?q=mnt") |> json_response(200)
+
+      assert Enum.map(response["items"], &{&1["type"], &1["address_hash"]}) ==
+               Enum.map([wmnt, legacy_mnt, unpriced], &{"token", Address.checksum(&1.contract_address_hash)})
+    end
+
+    test "pages tokens by on-chain market cap", %{conn: conn} do
+      tokens =
+        for i <- 0..50 do
+          insert(:token,
+            name: "onchain #{i}",
+            symbol: "OC",
+            fiat_value: 1,
+            total_supply: i * 1_000_000_000_000_000_000,
+            circulating_market_cap: 50 - i,
+            holder_count: 0
+          )
+        end
+
+      response = conn |> get("/api/v2/search?q=onchain") |> json_response(200)
+      assert Enum.count(response["items"]) == 50
+      assert Map.has_key?(response["next_page_params"], "token[onchain_market_cap]")
+
+      request_2 = get(conn, "/api/v2/search", response["next_page_params"] |> Query.encode() |> Query.decode())
+      response_2 = json_response(request_2, 200)
+      assert response_2["next_page_params"] == nil
+
+      assert Enum.map(response["items"] ++ response_2["items"], & &1["name"]) ==
+               tokens |> Enum.reverse() |> Enum.map(& &1.name)
+    end
+
     test "check pagination #1", %{conn: conn} do
       name = "contract"
       contracts = for(i <- 0..50, do: insert(:smart_contract, name: "#{name} #{i}")) |> Enum.sort_by(fn x -> x.name end)
@@ -1981,6 +2029,15 @@ defmodule BlockScoutWeb.API.V2.SearchControllerTest do
   end
 
   describe "/search/quick" do
+    test "finds a word inside token symbols", %{conn: conn} do
+      wmnt = insert(:token, name: "Wrapped Mantle", symbol: "WMNT")
+      insert(:token, name: "Ether", symbol: "WETH")
+
+      response = conn |> get("/api/v2/search/quick?q=mnt") |> json_response(200)
+
+      assert Enum.map(response, & &1["address_hash"]) == [Address.checksum(wmnt.contract_address_hash)]
+    end
+
     test "get token with ok reputation", %{conn: conn} do
       init_value = Application.get_env(:block_scout_web, :hide_scam_addresses)
       Application.put_env(:block_scout_web, :hide_scam_addresses, true)

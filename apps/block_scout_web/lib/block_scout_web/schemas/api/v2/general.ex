@@ -530,6 +530,7 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
     "balance" => "Sort by account balance",
     "block_number" => "Sort by block number",
     "circulating_market_cap" => "Sort by circulating market cap of the token",
+    "onchain_market_cap" => "Sort by on-chain market cap of the token (price times total supply on this chain)",
     "fee" => "Sort by transaction fee",
     "fiat_value" => "Sort by fiat value",
     "holders_count" => "Sort by number of token holders",
@@ -1329,6 +1330,13 @@ defmodule BlockScoutWeb.Schemas.API.V2.General do
       schema: %Schema{anyOf: [FloatString, EmptyString, NullString]},
       required: false,
       description: "Market cap for paging"
+    },
+    "onchain_market_cap" => %Parameter{
+      name: :onchain_market_cap,
+      in: :query,
+      schema: %Schema{anyOf: [FloatString, EmptyString, NullString]},
+      required: false,
+      description: "On-chain market cap for paging"
     },
     "name" => %Parameter{
       name: :name,

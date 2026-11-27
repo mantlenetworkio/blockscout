@@ -234,6 +234,95 @@ defmodule Explorer.Chain.TokenTest do
     end
   end
 
+  describe "onchain_market_cap" do
+    setup do
+      initial_value = :persistent_term.get(:market_token_fetcher_enabled, false)
+      :persistent_term.put(:market_token_fetcher_enabled, true)
+      on_exit(fn -> :persistent_term.put(:market_token_fetcher_enabled, initial_value) end)
+    end
+
+    test "is the price times the total supply in whole tokens" do
+      token = insert(:token, fiat_value: Decimal.new("2.5"), total_supply: 4_000_000, decimals: 6)
+
+      assert Decimal.equal?(token.onchain_market_cap, 10)
+      assert Decimal.equal?(reload(token).onchain_market_cap, 10)
+    end
+
+    test "follows supply and price updates" do
+      token = insert(:token, fiat_value: 1, total_supply: 1_000_000, decimals: 6)
+
+      assert {:ok, updated} = Token.update(token, %{total_supply: 3_000_000})
+      assert Decimal.equal?(updated.onchain_market_cap, 3)
+
+      assert {:ok, %{tokens: [_]}} =
+               Explorer.Chain.import(%{
+                 tokens: %{
+                   params: [
+                     %{
+                       contract_address_hash: token.contract_address_hash,
+                       type: token.type,
+                       fiat_value: Decimal.new(2),
+                       circulating_market_cap: Decimal.new(1_000_000)
+                     }
+                   ],
+                   on_conflict: Explorer.Chain.Import.Runner.Tokens.market_data_on_conflict(),
+                   fields_to_update: Explorer.Chain.Import.Runner.Tokens.market_data_fields_to_update()
+                 }
+               })
+
+      assert Decimal.equal?(reload(token).onchain_market_cap, 6)
+    end
+
+    test "is nil without a price, a total supply or decimals" do
+      assert is_nil(insert(:token, fiat_value: nil).onchain_market_cap)
+      assert is_nil(insert(:token, total_supply: nil).onchain_market_cap)
+      assert is_nil(insert(:token, decimals: nil).onchain_market_cap)
+    end
+
+    test "is nil for decimals above 78 instead of failing the write" do
+      token = insert(:token, fiat_value: 1, total_supply: 10, decimals: 18)
+
+      assert {:ok, updated} = Token.update(token, %{decimals: 1_000_000_000_000_000_000})
+      assert is_nil(updated.onchain_market_cap)
+    end
+
+    test "orders the token list by default, ahead of the all-chain market cap" do
+      # tiny supply here, big market cap on other chains
+      small = insert(:token, fiat_value: 9, total_supply: 10_000_000_000_000, circulating_market_cap: 7_000_000_000)
+      big = insert(:token, fiat_value: 1, total_supply: 400 * 1_000_000_000_000_000_000, circulating_market_cap: 1)
+      no_supply = insert(:token, fiat_value: 1, total_supply: 0, circulating_market_cap: 1_000_000_000)
+      no_price = insert(:token, fiat_value: nil)
+
+      assert Token.list_top(nil) |> Enum.map(& &1.contract_address_hash) ==
+               Enum.map([big, small, no_supply, no_price], & &1.contract_address_hash)
+    end
+
+    defp reload(token), do: Repo.get_by!(Token, contract_address_hash: token.contract_address_hash)
+  end
+
+  describe "list_top/2 symbol substring match" do
+    test "a single word of at least 3 characters matches inside symbols" do
+      wmnt = insert(:token, name: "Wrapped Mantle", symbol: "WMNT")
+      mnt = insert(:token, name: "Mantle Token", symbol: "MNT")
+      insert(:token, name: "Ether", symbol: "WETH")
+      # the full-text match skips symbol-only tokens too
+      insert(:token, name: nil, symbol: "XMNT")
+
+      assert "mnt" |> Token.list_top() |> hashes() == hashes([wmnt, mnt])
+      assert "MNT" |> Token.list_top() |> hashes() == hashes([wmnt, mnt])
+    end
+
+    test "shorter words and multi-word terms keep the prefix-only match" do
+      insert(:token, name: "Wrapped Mantle", symbol: "WMNT")
+      mnt = insert(:token, name: "Mantle Token", symbol: "MNT")
+
+      assert "mn" |> Token.list_top() |> hashes() == hashes([mnt])
+      assert "mantle mnt" |> Token.list_top() |> hashes() == hashes([mnt])
+    end
+
+    defp hashes(tokens), do: tokens |> Enum.map(& &1.contract_address_hash) |> Enum.sort()
+  end
+
   describe "changeset/2 ERC-8056 extensions and scaled_ui_state association" do
     test "casts and persists extensions" do
       address = insert(:address)

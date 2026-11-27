@@ -37,6 +37,7 @@ defmodule Explorer.Chain.Search do
   @min_query_length 3
 
   @token_sorting [
+    {:desc_nulls_last, :onchain_market_cap, :token},
     {:desc_nulls_last, :circulating_market_cap, :token},
     {:desc_nulls_last, :fiat_value, :token},
     {:desc_nulls_last, :is_verified_via_admin_panel, :token},
@@ -229,6 +230,7 @@ defmodule Explorer.Chain.Search do
     |> order_by([item],
       desc: item.priority,
       desc_nulls_last: item.certified,
+      desc_nulls_last: item.onchain_market_cap,
       desc_nulls_last: item.circulating_market_cap,
       desc_nulls_last: item.exchange_rate,
       desc_nulls_last: item.is_verified_via_admin_panel,
@@ -865,14 +867,15 @@ defmodule Explorer.Chain.Search do
          query,
          %PagingOptions{
            key: %{
-             token: %{
-               "circulating_market_cap" => circulating_market_cap,
-               "fiat_value" => fiat_value,
-               "is_verified_via_admin_panel" => is_verified_via_admin_panel,
-               "holder_count" => holders_count,
-               "name" => name,
-               "inserted_at" => inserted_at
-             }
+             token:
+               %{
+                 "circulating_market_cap" => circulating_market_cap,
+                 "fiat_value" => fiat_value,
+                 "is_verified_via_admin_panel" => is_verified_via_admin_panel,
+                 "holder_count" => holders_count,
+                 "name" => name,
+                 "inserted_at" => inserted_at
+               } = token_key
            },
            page_size: page_size
          },
@@ -882,6 +885,8 @@ defmodule Explorer.Chain.Search do
     |> page_with_sorting(
       %PagingOptions{
         key: %{
+          # absent from next_page_params issued before this key existed
+          onchain_market_cap: parse_possible_nil(token_key["onchain_market_cap"]),
           circulating_market_cap: parse_possible_nil(circulating_market_cap),
           fiat_value: parse_possible_nil(fiat_value),
           is_verified_via_admin_panel: parse_possible_nil(is_verified_via_admin_panel),
@@ -892,14 +897,7 @@ defmodule Explorer.Chain.Search do
         page_size: page_size
       },
       [],
-      [
-        {:desc_nulls_last, :circulating_market_cap, :token},
-        {:desc_nulls_last, :fiat_value, :token},
-        {:desc_nulls_last, :is_verified_via_admin_panel, :token},
-        {:desc_nulls_last, :holder_count, :token},
-        {:asc, :name, :token},
-        {:desc, :inserted_at, :token}
-      ]
+      @token_sorting
     )
   end
 
@@ -1092,6 +1090,7 @@ defmodule Explorer.Chain.Search do
       exchange_rate: nil,
       total_supply: nil,
       circulating_market_cap: nil,
+      onchain_market_cap: nil,
       priority: 0,
       is_verified_via_admin_panel: nil,
       order: 0,
@@ -1115,6 +1114,7 @@ defmodule Explorer.Chain.Search do
     |> Map.put(:exchange_rate, dynamic([token: token], token.fiat_value))
     |> Map.put(:total_supply, dynamic([token: token], token.total_supply))
     |> Map.put(:circulating_market_cap, dynamic([token: token], token.circulating_market_cap))
+    |> Map.put(:onchain_market_cap, dynamic([token: token], token.onchain_market_cap))
     |> Map.put(:is_verified_via_admin_panel, dynamic([token: token], token.is_verified_via_admin_panel))
     |> Map.put(:verified, dynamic([smart_contract: smart_contract], not is_nil(smart_contract)))
     |> Map.put(:certified, dynamic([smart_contract: smart_contract], smart_contract.certified))
@@ -1236,6 +1236,7 @@ defmodule Explorer.Chain.Search do
   defp paging_params(
          %{
            circulating_market_cap: circulating_market_cap,
+           onchain_market_cap: onchain_market_cap,
            exchange_rate: exchange_rate,
            is_verified_via_admin_panel: is_verified_via_admin_panel,
            holder_count: holders_count,
@@ -1249,6 +1250,7 @@ defmodule Explorer.Chain.Search do
 
     %{
       circulating_market_cap: circulating_market_cap,
+      onchain_market_cap: onchain_market_cap,
       fiat_value: exchange_rate,
       is_verified_via_admin_panel: is_verified_via_admin_panel,
       holder_count: holders_count,

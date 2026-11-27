@@ -23,6 +23,7 @@ defmodule BlockScoutWeb.API.V2.TokenView do
       "total_supply" => nil,
       "icon_url" => nil,
       "circulating_market_cap" => nil,
+      "onchain_market_cap" => nil,
       "circulating_supply" => nil,
       "reputation" => nil
     }
@@ -46,6 +47,8 @@ defmodule BlockScoutWeb.API.V2.TokenView do
       "total_supply" => token.total_supply,
       "icon_url" => token.icon_url,
       "circulating_market_cap" => token.circulating_market_cap,
+      # the generated column carries a long numeric scale ("6080000.0000000000000000")
+      "onchain_market_cap" => token.onchain_market_cap && Decimal.normalize(token.onchain_market_cap),
       "circulating_supply" => token.circulating_supply,
       "reputation" => token.reputation
     }

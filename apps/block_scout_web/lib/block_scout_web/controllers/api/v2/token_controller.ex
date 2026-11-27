@@ -680,7 +680,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
           token_extension_param(),
           q_param(),
           limit_param(),
-          sort_param(["fiat_value", "holders_count", "circulating_market_cap"]),
+          sort_param(["fiat_value", "holders_count", "circulating_market_cap", "onchain_market_cap"]),
           order_param()
         ] ++
         define_paging_params([
@@ -689,6 +689,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
           "holders_count",
           "is_name_null",
           "market_cap",
+          "onchain_market_cap",
           "name",
           "items_count"
         ]),
@@ -703,6 +704,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
              "holders_count" => 59_731,
              "is_name_null" => false,
              "market_cap" => "570958125.135513",
+             "onchain_market_cap" => "23411806.8724416500000000",
              "name" => "Wrapped Staked ETH",
              "items_count" => 50
            }
@@ -749,7 +751,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
         [
           chain_ids_param(),
           q_param(),
-          sort_param(["fiat_value", "holders_count", "circulating_market_cap"]),
+          sort_param(["fiat_value", "holders_count", "circulating_market_cap", "onchain_market_cap"]),
           order_param()
         ] ++
         define_paging_params([
@@ -758,6 +760,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
           "holders_count",
           "is_name_null",
           "market_cap",
+          "onchain_market_cap",
           "name",
           "items_count"
         ]),
@@ -772,6 +775,7 @@ defmodule BlockScoutWeb.API.V2.TokenController do
              "holders_count" => 59_731,
              "is_name_null" => false,
              "market_cap" => "570958125.135513",
+             "onchain_market_cap" => "23411806.8724416500000000",
              "name" => "Wrapped Staked ETH",
              "items_count" => 50
            }

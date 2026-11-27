@@ -377,6 +377,8 @@ defmodule BlockScoutWeb.PagingHelper do
   defp do_tokens_sorting("holders_count", "desc"), do: [desc_nulls_last: :holder_count]
   defp do_tokens_sorting("circulating_market_cap", "asc"), do: [asc_nulls_first: :circulating_market_cap]
   defp do_tokens_sorting("circulating_market_cap", "desc"), do: [desc_nulls_last: :circulating_market_cap]
+  defp do_tokens_sorting("onchain_market_cap", "asc"), do: [asc_nulls_first: :onchain_market_cap]
+  defp do_tokens_sorting("onchain_market_cap", "desc"), do: [desc_nulls_last: :onchain_market_cap]
   defp do_tokens_sorting(_, _), do: []
 
   @spec address_transactions_sorting(%{required(atom()) => String.t()}) :: [

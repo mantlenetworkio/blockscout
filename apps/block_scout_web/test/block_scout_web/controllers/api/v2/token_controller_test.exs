@@ -20,6 +20,20 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
   alias Indexer.Fetcher.OnDemand.NFTCollectionMetadataRefetch, as: NFTCollectionMetadataRefetchOnDemand
 
   describe "/tokens/{address_hash}" do
+    test "returns the on-chain market cap", %{conn: conn} do
+      market_fetcher_enabled = :persistent_term.get(:market_token_fetcher_enabled, false)
+      :persistent_term.put(:market_token_fetcher_enabled, true)
+      on_exit(fn -> :persistent_term.put(:market_token_fetcher_enabled, market_fetcher_enabled) end)
+
+      token =
+        insert(:token, fiat_value: 2, total_supply: 3 * 1_000_000_000_000_000_000, circulating_market_cap: 1_000_000)
+
+      response = conn |> get("/api/v2/tokens/#{token.contract_address.hash}") |> json_response(200)
+
+      assert response["onchain_market_cap"] == "6"
+      assert response["circulating_market_cap"] == "1000000"
+    end
+
     test "get 404 on non existing address", %{conn: conn} do
       token = build(:token)
 
@@ -1061,6 +1075,65 @@ defmodule BlockScoutWeb.API.V2.TokenControllerTest do
         response_ordered_by_circulating_market_cap_asc_2nd_page,
         tokens_ordered_by_circulating_market_cap_asc
       )
+    end
+
+    test "sorts and pages by onchain_market_cap", %{conn: conn} do
+      # on-chain market cap rises with i while the all-chain market cap falls
+      tokens =
+        for i <- 0..50 do
+          insert(:token,
+            fiat_value: 1,
+            total_supply: i * 1_000_000_000_000_000_000,
+            circulating_market_cap: 50 - i,
+            name: nil
+          )
+        end
+
+      for {params, expected} <- [
+            {%{}, tokens},
+            {%{"sort" => "onchain_market_cap", "order" => "desc"}, tokens},
+            {%{"sort" => "onchain_market_cap", "order" => "asc"}, Enum.reverse(tokens)}
+          ] do
+        response = conn |> get("/api/v2/tokens", params) |> json_response(200)
+        assert Map.has_key?(response["next_page_params"], "onchain_market_cap")
+
+        response_2nd_page =
+          conn |> get("/api/v2/tokens", Map.merge(params, response["next_page_params"])) |> json_response(200)
+
+        check_paginated_response(response, response_2nd_page, expected)
+      end
+
+      top = conn |> get("/api/v2/tokens") |> json_response(200) |> Map.get("items") |> hd()
+      assert Decimal.equal?(Decimal.new(top["onchain_market_cap"]), 50)
+    end
+
+    test "pages exactly through on-chain market caps of more than 28 significant digits", %{conn: conn} do
+      # 30 significant digits: a rounded cursor would let the page's last row through again
+      tokens =
+        for i <- 0..50 do
+          insert(:token,
+            # built from a string: Decimal arithmetic would round it to 28 digits already
+            fiat_value: Decimal.new("#{i}.1234567890123456789012345678"),
+            total_supply: 1_000_000_000_000_000_000,
+            decimals: 18,
+            name: nil
+          )
+        end
+
+      response = conn |> get("/api/v2/tokens") |> json_response(200)
+      response_2nd_page = conn |> get("/api/v2/tokens", response["next_page_params"]) |> json_response(200)
+
+      check_paginated_response(response, response_2nd_page, tokens)
+    end
+
+    # a page loaded before the upgrade has no onchain_market_cap in its next_page_params
+    test "does not fail on next_page_params without onchain_market_cap", %{conn: conn} do
+      for i <- 0..50, do: insert(:token, fiat_value: 1, total_supply: i * 1_000_000_000_000_000_000)
+
+      response = conn |> get("/api/v2/tokens") |> json_response(200)
+      old_params = Map.delete(response["next_page_params"], "onchain_market_cap")
+
+      assert %{"items" => _} = conn |> get("/api/v2/tokens", old_params) |> json_response(200)
     end
 
     test "get empty list", %{conn: conn} do
